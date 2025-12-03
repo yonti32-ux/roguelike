@@ -1,0 +1,69 @@
+[
+  {
+    "id": "rusty_sword",
+    "name": "Rusty Sword",
+    "slot": "weapon",
+    "rarity": "common",
+    "value": 1,
+    "description": "A dull blade, but better than bare hands.",
+    "stats": {
+      "attack": 2
+    }
+  },
+  {
+    "id": "iron_sword",
+    "name": "Iron Sword",
+    "slot": "weapon",
+    "rarity": "uncommon",
+    "value": 5,
+    "description": "A solid iron blade. Reliable and deadly.",
+    "stats": {
+      "attack": 4
+    }
+  },
+  {
+    "id": "tattered_cloak",
+    "name": "Tattered Cloak",
+    "slot": "armor",
+    "rarity": "common",
+    "value": 1,
+    "description": "Offers a whisper of protection.",
+    "stats": {
+      "max_hp": 5
+    }
+  },
+  {
+    "id": "leather_armor",
+    "name": "Leather Armor",
+    "slot": "armor",
+    "rarity": "uncommon",
+    "value": 8,
+    "description": "Sturdy leather that softens incoming blows.",
+    "stats": {
+      "max_hp": 10,
+      "defense": 1
+    }
+  },
+  {
+    "id": "vitality_charm",
+    "name": "Charm of Vitality",
+    "slot": "trinket",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "A small charm that pulses with life.",
+    "stats": {
+      "max_hp": 10
+    }
+  },
+  {
+    "id": "focus_charm",
+    "name": "Charm of Focus",
+    "slot": "trinket",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "Sharpens your combat instincts.",
+    "stats": {
+      "skill_power": 0.2
+    }
+  }
+]

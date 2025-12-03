@@ -1,0 +1,17 @@
+# Virtual env
+venv/
+.venv/
+
+# PyCharm
+.idea/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+
+# Other junk
+*.log
+.DS_Store
