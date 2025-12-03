@@ -7,6 +7,7 @@ import pygame
 from settings import TILE_SIZE
 from world.tiles import Tile
 from world.entities import Entity
+from world.mapgen import RectRoom  # NEW: to type rooms list
 
 
 class GameMap:
@@ -21,6 +22,7 @@ class GameMap:
         up_stairs: Tuple[int, int] | None = None,
         down_stairs: Tuple[int, int] | None = None,
         entities: list[Entity] | None = None,
+        rooms: list[RectRoom] | None = None,
     ) -> None:
         self.tiles: List[List[Tile]] = tiles
         self.height: int = len(tiles)
@@ -32,6 +34,9 @@ class GameMap:
 
         # Non-player entities on this map (enemies, props, etc.)
         self.entities: list[Entity] = entities if entities is not None else []
+
+        # High-level room structures (with tags like "start", "lair", "treasure", "event")
+        self.rooms: list[RectRoom] = rooms if rooms is not None else []
 
         # FOV / exploration state
         self.visible: Set[Tuple[int, int]] = set()
@@ -91,6 +96,17 @@ class GameMap:
         x = tile_x * TILE_SIZE + (TILE_SIZE - entity_width) / 2
         y = tile_y * TILE_SIZE + (TILE_SIZE - entity_height) / 2
         return x, y
+
+    def get_room_at(self, tile_x: int, tile_y: int) -> RectRoom | None:
+        """
+        Return the RectRoom whose interior contains this tile, or None if
+        this tile is not inside any room (corridor, junction, etc.).
+        """
+        for room in self.rooms:
+            # Interior only: walls are at x1/y1 and x2/y2 boundaries
+            if room.x1 < tile_x < room.x2 and room.y1 < tile_y < room.y2:
+                return room
+        return None
 
     # ------------------------------------------------------------------
     # FOV helpers

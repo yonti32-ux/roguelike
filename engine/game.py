@@ -296,14 +296,16 @@ class Game:
         newly_created = False
 
         if game_map is None:
-            # Generate raw tiles + stair positions
-            tiles, up_tx, up_ty, down_tx, down_ty = generate_floor(floor_index)
+            # Generate raw tiles + stair positions + high-level rooms
+            tiles, up_tx, up_ty, down_tx, down_ty, rooms = generate_floor(floor_index)
 
             # Wrap them in a GameMap object
             game_map = GameMap(
                 tiles,
                 up_stairs=(up_tx, up_ty),
                 down_stairs=(down_tx, down_ty),
+                entities=None,
+                rooms=rooms,
             )
             self.floors[floor_index] = game_map
             newly_created = True
@@ -425,15 +427,17 @@ class Game:
 
     def spawn_enemies_for_floor(self, game_map: GameMap, floor_index: int) -> None:
         """
-        Spawn simple enemies on walkable tiles that are not stairs.
-        Attach basic combat stats + XP reward + enemy_type onto each enemy.
-        Also keeps a small safe radius around the spawn stairs so you don't
-        spawn into a dogpile immediately.
+        Spawn enemies on this floor.
+
+        Room-aware logic:
+        - Never spawn in the 'start' room.
+        - Prefer lair rooms for extra density.
+        - Fill remaining quota from other rooms and corridors.
+        - Keep a safe radius around the main spawn.
         """
         enemy_width = 24
         enemy_height = 24
 
-        candidates: List[tuple[int, int]] = []
         up = game_map.up_stairs
         down = game_map.down_stairs
 
@@ -444,6 +448,10 @@ class Game:
         else:
             safe_cx = game_map.width // 2
             safe_cy = game_map.height // 2
+
+        lair_tiles: List[tuple[int, int]] = []
+        room_tiles: List[tuple[int, int]] = []
+        corridor_tiles: List[tuple[int, int]] = []
 
         for ty in range(game_map.height):
             for tx in range(game_map.width):
@@ -460,19 +468,54 @@ class Game:
                 if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
                     continue
 
-                candidates.append((tx, ty))
+                room = game_map.get_room_at(tx, ty) if hasattr(game_map, "get_room_at") else None
+                if room is None:
+                    # Corridors / junctions
+                    corridor_tiles.append((tx, ty))
+                else:
+                    tag = getattr(room, "tag", "generic")
+                    if tag == "start":
+                        # Extra safety: don't spawn in the start room at all
+                        continue
+                    elif tag == "lair":
+                        lair_tiles.append((tx, ty))
+                    else:
+                        room_tiles.append((tx, ty))
 
-        if not candidates:
+        if not (lair_tiles or room_tiles or corridor_tiles):
             return
 
-        random.shuffle(candidates)
+        random.shuffle(lair_tiles)
+        random.shuffle(room_tiles)
+        random.shuffle(corridor_tiles)
 
         # Simple scaling: more enemies as floors go deeper, capped
-        desired = min(6, 2 + floor_index)
-        count = min(desired, len(candidates))
+        base_desired = 2 + floor_index
+        desired = min(6, max(2, base_desired))
 
-        for i in range(count):
-            tx, ty = candidates[i]
+        chosen_tiles: List[tuple[int, int]] = []
+        remaining = desired
+
+        # Fill roughly half from lair rooms (if any)
+        if lair_tiles and remaining > 0:
+            lair_target = min(len(lair_tiles), max(1, remaining // 2))
+            chosen_tiles.extend(lair_tiles[:lair_target])
+            remaining -= lair_target
+
+        # Fill most of the remainder from normal rooms
+        if room_tiles and remaining > 0:
+            room_target = min(len(room_tiles), remaining)
+            chosen_tiles.extend(room_tiles[:room_target])
+            remaining -= room_target
+
+        # Whatever is left comes from corridors
+        if corridor_tiles and remaining > 0:
+            corr_target = min(len(corridor_tiles), remaining)
+            chosen_tiles.extend(corridor_tiles[:corr_target])
+            remaining -= corr_target
+
+        # Actually spawn enemies at the chosen tiles
+        for tx, ty in chosen_tiles:
             ex, ey = game_map.center_entity_on_tile(tx, ty, enemy_width, enemy_height)
             enemy = Enemy(
                 x=ex,
@@ -508,10 +551,10 @@ class Game:
         """
         Spawn a few treasure chests on walkable tiles.
 
-        - Avoid stairs.
-        - Avoid the spawn-safe radius around the up stairs.
-        - Avoid tiles already used by other entities (e.g. enemies).
-        - 0–2 chests per floor for now.
+        Room-aware logic:
+        - Avoid stairs and the spawn-safe radius.
+        - Prefer placing at least one chest in a 'treasure' room if available.
+        - Other chests go into generic rooms / corridors.
         """
         from world.entities import Chest  # local import to avoid circular
 
@@ -538,7 +581,9 @@ class Game:
             tx, ty = game_map.world_to_tile(cx, cy)
             occupied_tiles.add((tx, ty))
 
-        candidates: List[tuple[int, int]] = []
+        treasure_tiles: List[tuple[int, int]] = []
+        other_tiles: List[tuple[int, int]] = []
+
         for ty in range(game_map.height):
             for tx in range(game_map.width):
                 if not game_map.is_walkable_tile(tx, ty):
@@ -555,21 +600,58 @@ class Game:
                 if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
                     continue
 
-                candidates.append((tx, ty))
+                room = game_map.get_room_at(tx, ty) if hasattr(game_map, "get_room_at") else None
+                if room is not None:
+                    tag = getattr(room, "tag", "generic")
+                    if tag == "start":
+                        # No loot cluttering the start room
+                        continue
+                    if tag == "treasure":
+                        treasure_tiles.append((tx, ty))
+                        continue
 
-        if not candidates:
+                # Default bucket for generic rooms / corridors
+                other_tiles.append((tx, ty))
+
+        if not treasure_tiles and not other_tiles:
             return
 
-        random.shuffle(candidates)
+        random.shuffle(treasure_tiles)
+        random.shuffle(other_tiles)
 
-        # 0–2 chests per floor, bounded by available tiles
-        max_chests = min(2, len(candidates))
+        # We still want 0–2 chests total, but if a treasure room exists,
+        # there's a good chance at least one chest goes there.
+        max_chests = min(2, len(treasure_tiles) + len(other_tiles))
         if max_chests <= 0:
             return
 
-        chest_count = random.randint(0, max_chests)
-        for i in range(chest_count):
-            tx, ty = candidates[i]
+        # If we have treasure tiles, try for at least 1 chest (1..max_chests).
+        # If not, 0..max_chests like before.
+        min_chests = 1 if treasure_tiles else 0
+        chest_count = random.randint(min_chests, max_chests)
+
+        if chest_count <= 0:
+            return
+
+        chosen_spots: List[tuple[int, int]] = []
+        remaining = chest_count
+
+        # First chest in treasure room if possible
+        if treasure_tiles and remaining > 0:
+            chosen_spots.append(treasure_tiles[0])
+            remaining -= 1
+
+        # Remaining chests go into other tiles first, then spare treasure tiles
+        pool: List[tuple[int, int]] = other_tiles + treasure_tiles[1:]
+        random.shuffle(pool)
+
+        for tx, ty in pool:
+            if remaining <= 0:
+                break
+            chosen_spots.append((tx, ty))
+            remaining -= 1
+
+        for tx, ty in chosen_spots:
             x, y = game_map.center_entity_on_tile(tx, ty, chest_width, chest_height)
             chest = Chest(x=x, y=y, width=chest_width, height=chest_height)
             # Chests do not block movement

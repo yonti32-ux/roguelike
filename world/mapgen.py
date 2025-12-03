@@ -15,13 +15,16 @@ from world.tiles import (
 
 class RectRoom:
     """Axis-aligned rectangular room on the tile grid."""
-    __slots__ = ("x1", "y1", "x2", "y2")
+    __slots__ = ("x1", "y1", "x2", "y2", "tag")
 
-    def __init__(self, x: int, y: int, w: int, h: int) -> None:
+    def __init__(self, x: int, y: int, w: int, h: int, tag: str = "generic") -> None:
         self.x1 = x
         self.y1 = y
         self.x2 = x + w
         self.y2 = y + h
+        # High-level type for content placement:
+        # "start", "lair", "treasure", "event", "generic"
+        self.tag = tag
 
     def center(self) -> tuple[int, int]:
         center_x = (self.x1 + self.x2) // 2
@@ -58,16 +61,19 @@ def _carve_v_tunnel(tiles: List[List[Tile]], y1: int, y2: int, x: int) -> None:
         tiles[y][x] = FLOOR_TILE
 
 
-def generate_floor(floor_index: int) -> Tuple[List[List[Tile]], int, int, int, int]:
+def generate_floor(
+    floor_index: int,
+) -> Tuple[List[List[Tile]], int, int, int, int, List[RectRoom]]:
     """
     Generate a basic dungeon-style floor:
     - Random rectangular rooms
     - Connected by corridors
 
     Returns:
-        tiles, up_stairs_tx, up_stairs_ty, down_stairs_tx, down_stairs_ty
-    floor_index is currently unused, but later we can use it
-    to change difficulty / layout style per depth.
+        tiles, up_stairs_tx, up_stairs_ty, down_stairs_tx, down_stairs_ty, rooms
+
+    floor_index is currently unused for layout shape, but later we can use it
+    to change difficulty / style per depth.
     """
 
     tiles_x = WINDOW_WIDTH // TILE_SIZE
@@ -111,7 +117,40 @@ def generate_floor(floor_index: int) -> Tuple[List[List[Tile]], int, int, int, i
 
         rooms.append(new_room)
 
-    # Decide stair tiles:
+    # Tag rooms with high-level roles so content can key off them.
+    if rooms:
+        # 1) Start room = first carved room
+        start_room = rooms[0]
+        start_room.tag = "start"
+
+        # 2) Treasure room = farthest from start center
+        if len(rooms) > 1:
+            sx, sy = start_room.center()
+
+            def dist2(r: RectRoom) -> int:
+                cx, cy = r.center()
+                dx = cx - sx
+                dy = cy - sy
+                return dx * dx + dy * dy
+
+            # Only consider non-start rooms
+            non_start = rooms[1:]
+            treasure_room = max(non_start, key=dist2)
+            treasure_room.tag = "treasure"
+
+            # 3) Lair room = another non-start, non-treasure room
+            lair_candidates = [r for r in non_start if r is not treasure_room]
+            if lair_candidates:
+                lair_room = random.choice(lair_candidates)
+                lair_room.tag = "lair"
+
+            # 4) Event room = some remaining generic room if any
+            event_candidates = [r for r in rooms if r.tag == "generic"]
+            if event_candidates:
+                event_room = random.choice(event_candidates)
+                event_room.tag = "event"
+
+    # Decide stair tiles (still using first/last room centers)
     if rooms:
         up_tx, up_ty = rooms[0].center()
         down_tx, down_ty = rooms[-1].center()
@@ -124,4 +163,4 @@ def generate_floor(floor_index: int) -> Tuple[List[List[Tile]], int, int, int, i
     tiles[up_ty][up_tx] = UP_STAIRS_TILE
     tiles[down_ty][down_tx] = DOWN_STAIRS_TILE
 
-    return tiles, up_tx, up_ty, down_tx, down_ty
+    return tiles, up_tx, up_ty, down_tx, down_ty, rooms
