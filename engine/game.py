@@ -15,12 +15,14 @@ from .cheats import handle_cheat_key
 from systems.progression import HeroStats
 from systems import perks as perk_system
 from systems.inventory import Inventory, get_item_def
-from systems.loot import roll_battle_loot, roll_chest_loot
+from systems.loot import roll_battle_loot
 from ui.hud import (
     draw_exploration_ui,
     draw_perk_choice_overlay,
     draw_inventory_overlay,
 )
+from systems.events import EVENTS  # registry of map events
+
 
 # How far the player can see in tiles. Feel free to tweak.
 FOV_RADIUS_TILES = 12
@@ -90,6 +92,12 @@ class Game:
 
         # Floor intro pause: enemies wait until the player makes the first move
         self.awaiting_floor_start: bool = True
+
+        # Camera & zoom (exploration view)
+        self.camera_x: float = 0.0
+        self.camera_y: float = 0.0
+        self.zoom_levels = [0.75, 1.0, 1.25]
+        self.zoom_index: int = 1  # start at 1.0x
 
         # Debug flags
         self.debug_reveal_map: bool = False
@@ -198,9 +206,6 @@ class Game:
         - crit / dodge chance
         - status resistance
         - move speed
-
-        It’s defensive about attribute names so future HeroStats tweaks
-        don’t instantly crash the game.
         """
         if self.player is None or self.hero_stats is None:
             return
@@ -252,6 +257,42 @@ class Game:
                                      getattr(self.player, "speed", 200.0)))
         self.player.speed = move_speed
 
+    def gain_xp_from_event(self, xp: int) -> list[str]:
+        """
+        Grant XP from a non-battle source (shrines, lore stones, etc).
+
+        - Uses HeroStats.grant_xp to actually add XP.
+        - If this causes a level-up, prepares perk choices, fully heals the hero,
+          and switches to PERK_CHOICE mode.
+        - Returns the XP-related messages so callers (events) can append them
+          into their own text.
+        """
+        old_level = self.hero_stats.level
+        messages = self.hero_stats.grant_xp(xp)
+        new_level = self.hero_stats.level
+
+        if new_level > old_level:
+            # Level up: generate perk choices
+            self.pending_perk_choices = perk_system.pick_perk_choices(
+                self.hero_stats,
+                max_choices=3,
+            )
+
+            # Sync stats and fully heal, like after a battle level-up
+            if self.player is not None:
+                # Update stats first (max_hp may have changed)
+                self.apply_hero_stats_to_player(full_heal=False)
+                self.player.hp = self.hero_stats.max_hp
+                self.apply_hero_stats_to_player(full_heal=False)
+                messages.append("You feel completely renewed.")
+
+            # If we actually have perks to choose from, open the overlay
+            if self.pending_perk_choices:
+                self.enter_perk_choice_mode()
+
+        return messages
+
+
     def update_fov(self) -> None:
         """Recompute the map's FOV around the player."""
         if self.current_map is None:
@@ -274,6 +315,59 @@ class Game:
         px, py = self.player.rect.center
         tx, ty = self.current_map.world_to_tile(px, py)
         self.current_map.compute_fov(tx, ty, radius=FOV_RADIUS_TILES)
+
+    # ------------------------------------------------------------------
+    # Camera / zoom helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def zoom(self) -> float:
+        """Current zoom scale for the exploration camera."""
+        levels = getattr(self, "zoom_levels", None)
+        if not levels:
+            return 1.0
+        idx = max(0, min(self.zoom_index, len(levels) - 1))
+        return float(levels[idx])
+
+    def _center_camera_on_player(self) -> None:
+        """Center the camera around the player in world space before clamping."""
+        if self.player is None or self.current_map is None:
+            return
+
+        zoom = self.zoom
+        if zoom <= 0:
+            zoom = 1.0
+
+        screen_w, screen_h = self.screen.get_size()
+        view_w = screen_w / zoom
+        view_h = screen_h / zoom
+
+        px, py = self.player.rect.center
+        self.camera_x = px - view_w / 2
+        self.camera_y = py - view_h / 2
+
+    def _clamp_camera_to_map(self) -> None:
+        """Clamp the camera so it never shows outside the current map."""
+        if self.current_map is None:
+            return
+
+        zoom = self.zoom
+        if zoom <= 0:
+            zoom = 1.0
+
+        screen_w, screen_h = self.screen.get_size()
+        view_w = screen_w / zoom
+        view_h = screen_h / zoom
+
+        world_w = self.current_map.width * TILE_SIZE
+        world_h = self.current_map.height * TILE_SIZE
+
+        max_x = max(0.0, world_w - view_w)
+        max_y = max(0.0, world_h - view_h)
+
+        self.camera_x = max(0.0, min(self.camera_x, max_x))
+        self.camera_y = max(0.0, min(self.camera_y, max_y))
+
 
     # ------------------------------------------------------------------
     # Floor / map management
@@ -313,9 +407,10 @@ class Game:
         # From now on self.current_map is a GameMap, not a tuple
         self.current_map = game_map
 
-        # Spawn enemies / chests only once per floor
+        # Spawn enemies / events / chests only once per floor
         if newly_created:
             self.spawn_enemies_for_floor(game_map, floor_index)
+            self.spawn_events_for_floor(game_map, floor_index)
             self.spawn_chests_for_floor(game_map, floor_index)
 
         # Decide spawn position based on stair direction
@@ -362,7 +457,9 @@ class Game:
 
         # Apply hero stats (full heal on floor entry)
         self.apply_hero_stats_to_player(full_heal=True)
-
+        # 🔹 NEW: reset the camera around the player for this floor
+        self._center_camera_on_player()
+        self._clamp_camera_to_map()
         # Floor starts paused until the player actually moves
         self.awaiting_floor_start = True
 
@@ -547,6 +644,119 @@ class Game:
 
             game_map.entities.append(enemy)
 
+    def spawn_events_for_floor(self, game_map: GameMap, floor_index: int) -> None:
+        """
+        Spawn a few interactive event nodes (shrines, lore stones, caches).
+
+        Room-aware logic:
+        - Prefer tiles inside rooms tagged 'event'.
+        - Otherwise, use generic rooms.
+        - Avoid stairs, existing entities, and the spawn-safe radius.
+        """
+        from world.entities import EventNode  # local to avoid circulars
+
+        if not getattr(game_map, "rooms", None):
+            return
+
+        up = game_map.up_stairs
+        down = game_map.down_stairs
+
+        # Safe radius around main spawn (usually up stairs)
+        safe_radius_tiles = 3
+        if up is not None:
+            safe_cx, safe_cy = up
+        else:
+            safe_cx = game_map.width // 2
+            safe_cy = game_map.height // 2
+
+        # Tiles already occupied by entities
+        occupied_tiles: set[tuple[int, int]] = set()
+        for entity in getattr(game_map, "entities", []):
+            if not hasattr(entity, "rect"):
+                continue
+            cx, cy = entity.rect.center
+            tx, ty = game_map.world_to_tile(cx, cy)
+            occupied_tiles.add((tx, ty))
+
+        event_room_tiles: list[tuple[int, int]] = []
+        other_room_tiles: list[tuple[int, int]] = []
+
+        for ty in range(game_map.height):
+            for tx in range(game_map.width):
+                if not game_map.is_walkable_tile(tx, ty):
+                    continue
+                if up is not None and (tx, ty) == up:
+                    continue
+                if down is not None and (tx, ty) == down:
+                    continue
+                if (tx, ty) in occupied_tiles:
+                    continue
+
+                dx = tx - safe_cx
+                dy = ty - safe_cy
+                if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
+                    continue
+
+                room = game_map.get_room_at(tx, ty)
+                if room is None:
+                    continue  # no corridor events for now
+
+                tag = getattr(room, "tag", "generic")
+                if tag == "start":
+                    continue
+                if tag == "event":
+                    event_room_tiles.append((tx, ty))
+                else:
+                    other_room_tiles.append((tx, ty))
+
+        if not event_room_tiles and not other_room_tiles:
+            return
+
+        # 0–2 events per floor, but if we have event rooms we try for at least 1
+        max_events = min(2, len(event_room_tiles) + len(other_room_tiles))
+        if max_events <= 0:
+            return
+
+        min_events = 1 if event_room_tiles else 0
+        event_count = random.randint(min_events, max_events)
+        if event_count <= 0:
+            return
+
+        chosen_tiles: list[tuple[int, int]] = []
+        remaining = event_count
+
+        random.shuffle(event_room_tiles)
+        random.shuffle(other_room_tiles)
+
+        # First event in an 'event' room if possible
+        if event_room_tiles and remaining > 0:
+            chosen_tiles.append(event_room_tiles.pop(0))
+            remaining -= 1
+
+        # Remaining events in any room tiles
+        pool = event_room_tiles + other_room_tiles
+        random.shuffle(pool)
+        chosen_tiles.extend(pool[:remaining])
+
+        # Choose which event types are available
+        available_event_ids = list(EVENTS.keys())
+        if not available_event_ids:
+            return
+
+        half_tile = TILE_SIZE // 2
+
+        for tx, ty in chosen_tiles:
+            event_id = random.choice(available_event_ids)
+            ex, ey = game_map.center_entity_on_tile(tx, ty, half_tile, half_tile)
+            node = EventNode(
+                x=ex,
+                y=ey,
+                width=half_tile,
+                height=half_tile,
+                event_id=event_id,
+            )
+            game_map.entities.append(node)
+
     def spawn_chests_for_floor(self, game_map: GameMap, floor_index: int) -> None:
         """
         Spawn a few treasure chests on walkable tiles.
@@ -657,83 +867,6 @@ class Game:
             # Chests do not block movement
             setattr(chest, "blocks_movement", False)
             game_map.entities.append(chest)
-
-    # ------------------------------------------------------------------
-    # Chest helpers (currently unused – kept for future reuse)
-    # ------------------------------------------------------------------
-
-    def _find_chest_near_player(self, max_distance_px: int = TILE_SIZE // 2):
-        """
-        Return a chest entity near/under the player, or None.
-        """
-        from world.entities import Chest  # avoid circular import
-
-        if self.current_map is None or self.player is None:
-            return None
-
-        px, py = self.player.rect.center
-        max_dist_sq = max_distance_px * max_distance_px
-
-        for entity in getattr(self.current_map, "entities", []):
-            if not isinstance(entity, Chest):
-                continue
-            cx, cy = entity.rect.center
-            dx = cx - px
-            dy = cy - py
-            if dx * dx + dy * dy <= max_dist_sq:
-                return entity
-
-        return None
-
-    def try_open_chest(self) -> None:
-        """
-        Legacy chest opener – kept for now.
-        ExplorationController.try_open_chest is the one actually used.
-        """
-        if self.current_map is None or self.player is None or self.inventory is None:
-            return
-
-        chest = self._find_chest_near_player(max_distance_px=TILE_SIZE // 2)
-        if chest is None:
-            self.last_message = "There is nothing here to open."
-            return
-
-        if getattr(chest, "opened", False):
-            self.last_message = "The chest is empty."
-            return
-
-        chest.opened = True
-
-        item_id = roll_chest_loot(self.floor)
-
-        min_gold = 5 + self.floor
-        max_gold = 10 + self.floor * 2
-        gold_amount = random.randint(min_gold, max_gold)
-        gained_gold = 0
-        if hasattr(self.hero_stats, "add_gold"):
-            gained_gold = self.hero_stats.add_gold(gold_amount)
-
-        if item_id is None:
-            if gained_gold > 0:
-                self.last_message = f"You open the chest and find {gained_gold} gold."
-            else:
-                self.last_message = "The chest is empty."
-            return
-
-        self.inventory.add_item(item_id)
-
-        item_def = get_item_def(item_id)
-        item_name = item_def.name if item_def is not None else item_id
-
-        if gained_gold > 0:
-            self.last_message = (
-                f"You open the chest and find: {item_name} and {gained_gold} gold."
-            )
-        else:
-            self.last_message = f"You open the chest and find: {item_name}."
-
-        if self.player is not None:
-            self.apply_hero_stats_to_player(full_heal=False)
 
     # ------------------------------------------------------------------
     # Battle handling
@@ -861,7 +994,7 @@ class Game:
         See if the active battle scene is finished and act accordingly.
         Award XP / healing / small rewards on victory; restart on defeat.
 
-        NEW: on level-up, generate perk choices and enter 'perk_choice' mode.
+        On level-up, generate perk choices and enter 'perk_choice' mode.
         """
         if self.battle_scene is None:
             return
@@ -952,77 +1085,6 @@ class Game:
             self.restart_run()
 
     # ------------------------------------------------------------------
-    # Enemy AI (legacy in-Game version – ExplorationController has the
-    # current logic; this is kept for potential reuse)
-    # ------------------------------------------------------------------
-
-    def update_enemy_exploration(self, enemy: Enemy, dt: float) -> None:
-        """
-        Very simple chase AI in exploration mode.
-        Enemies won't chase or start new battles during post-battle grace.
-        """
-        if self.player is None or self.current_map is None:
-            return
-
-        if self.post_battle_grace > 0.0:
-            return
-
-        dx = self.player.rect.centerx - enemy.rect.centerx
-        dy = self.player.rect.centery - enemy.rect.centery
-        dist_sq = dx * dx + dy * dy
-
-        chase_range = (TILE_SIZE * 6) ** 2  # chase if within ~6 tiles
-
-        if dist_sq > chase_range:
-            return  # idle
-
-        direction = pygame.Vector2(dx, dy)
-        if direction.length_squared() == 0:
-            return
-        direction = direction.normalize()
-
-        move_vector = direction * enemy.speed * dt
-        new_x = enemy.x + move_vector.x
-        new_y = enemy.y + move_vector.y
-
-        new_rect = pygame.Rect(
-            int(new_x),
-            int(new_y),
-            enemy.width,
-            enemy.height,
-        )
-
-        if not self.current_map.rect_can_move_to(new_rect):
-            return
-
-        for other in self.current_map.entities:
-            if other is enemy:
-                continue
-            if getattr(other, "blocks_movement", False) and other.rect.colliderect(
-                new_rect
-            ):
-                return
-
-        if self.player.rect.colliderect(new_rect):
-            if self.post_battle_grace <= 0.0:
-                self.start_battle(enemy)
-            return
-
-        enemy.move_to(new_x, new_y)
-
-    # ------------------------------------------------------------------
-    # Legacy exploration input / update (replaced by ExplorationController)
-    # ------------------------------------------------------------------
-
-    def handle_event_exploration(self, event: pygame.event.Event) -> None:
-        """Old exploration handler (not used anymore)."""
-        pass
-
-    def update_exploration(self, dt: float) -> None:
-        """Old exploration updater (not used anymore)."""
-        pass
-
-    # ------------------------------------------------------------------
     # Perk choice overlay
     # ------------------------------------------------------------------
 
@@ -1089,6 +1151,9 @@ class Game:
             self.exploration.update(dt)
             # ...and after movement, we always refresh FOV around the player.
             self.update_fov()
+            # Update exploration camera to follow the player and stay in-bounds.
+            self._center_camera_on_player()
+            self._clamp_camera_to_map()
 
         elif self.mode == GameMode.BATTLE:
             if self.battle_scene is not None:
@@ -1140,8 +1205,17 @@ class Game:
 
         self.screen.fill(COLOR_BG)
 
+        zoom = self.zoom
+        camera_x = getattr(self, "camera_x", 0.0)
+        camera_y = getattr(self, "camera_y", 0.0)
+
         # Map tiles
-        self.current_map.draw(self.screen)
+        self.current_map.draw(
+            self.screen,
+            camera_x=camera_x,
+            camera_y=camera_y,
+            zoom=zoom,
+        )
 
         # Non-player entities (enemies, chests, props…) – only if visible
         for entity in getattr(self.current_map, "entities", []):
@@ -1149,10 +1223,20 @@ class Game:
             tx, ty = self.current_map.world_to_tile(cx, cy)
             if (tx, ty) not in self.current_map.visible:
                 continue
-            entity.draw(self.screen)
+            entity.draw(
+                self.screen,
+                camera_x=camera_x,
+                camera_y=camera_y,
+                zoom=zoom,
+            )
 
         # Draw the player on top of everything else
-        self.player.draw(self.screen)
+        self.player.draw(
+            self.screen,
+            camera_x=camera_x,
+            camera_y=camera_y,
+            zoom=zoom,
+        )
 
         # HUD + overlays
         draw_exploration_ui(self)

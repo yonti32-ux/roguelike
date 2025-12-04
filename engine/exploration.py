@@ -9,9 +9,12 @@ import pygame
 
 from settings import TILE_SIZE
 from world.entities import Enemy, Chest
+from world.entities import EventNode  # NEW
 from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot
+from systems.events import get_event_def, EventResult  # NEW
+
 
 if TYPE_CHECKING:
     # Only imported for type hints, to avoid circular imports at runtime
@@ -64,6 +67,18 @@ class ExplorationController:
             if game.show_character_sheet:
                 game.show_battle_log = False
             return
+        # Zoom controls (exploration view)
+        if event.key == pygame.K_z:
+            # Zoom out
+            if hasattr(game, "zoom_levels"):
+                game.zoom_index = max(0, game.zoom_index - 1)
+            return
+
+        if event.key == pygame.K_x:
+            # Zoom in
+            if hasattr(game, "zoom_levels"):
+                game.zoom_index = min(len(game.zoom_levels) - 1, game.zoom_index + 1)
+            return
 
         # Toggle last battle log overlay
         if event.key == pygame.K_l:
@@ -73,9 +88,9 @@ class ExplorationController:
                 game.show_battle_log = False
             return
 
-        # Interact (open chest etc.)
+        # Interact (chest / event / etc.)
         if event.key == pygame.K_e:
-            self.try_open_chest()
+            self.try_interact()
             return
 
         # Stairs: go down / up
@@ -309,3 +324,97 @@ class ExplorationController:
         # Re-sync stats in case gear bonuses matter later (no full heal)
         if game.player is not None:
             game.apply_hero_stats_to_player(full_heal=False)
+
+    # --- Event helpers ---------------------------------------------------
+
+    def _find_event_near_player(
+        self,
+        max_distance_px: int = TILE_SIZE // 2,
+    ) -> Optional["EventNode"]:
+        """
+        Return an event node near/under the player, or None.
+        """
+        game = self.game
+
+        if game.current_map is None or game.player is None:
+            return None
+
+        px, py = game.player.rect.center
+        max_dist_sq = max_distance_px * max_distance_px
+
+        for entity in getattr(game.current_map, "entities", []):
+            from world.entities import EventNode  # type: ignore
+            if not isinstance(entity, EventNode):
+                continue
+            ex, ey = entity.rect.center
+            dx = ex - px
+            dy = ey - py
+            if dx * dx + dy * dy <= max_dist_sq:
+                return entity
+
+        return None
+
+    def find_event_near_player(self, max_distance_px: int) -> Optional["EventNode"]:
+        """
+        Public wrapper so UI / HUD code can query nearby events.
+        """
+        return self._find_event_near_player(max_distance_px=max_distance_px)
+
+    def _trigger_event_node(self, node) -> None:
+        """
+        Resolve an event node: look up its EventDef, run handler, and
+        update messages / stats. The node is consumed afterwards.
+        """
+        game = self.game
+
+        from systems.events import get_event_def  # already imported at top, but safe
+        event_def = get_event_def(node.event_id)
+        if event_def is None:
+            game.last_message = "Nothing happens."
+            return
+
+        # Run the event; handler applies XP/gold/changes directly to game.
+        result = event_def.handler(game)
+
+        # Compose a message – primary text from the event result.
+        text = getattr(result, "text", None) or "Nothing happens."
+        game.last_message = text
+
+        # Re-sync player stats in case perks/stats changed (no full heal)
+        if game.player is not None:
+            game.apply_hero_stats_to_player(full_heal=False)
+
+        # Consume the node: remove from the map
+        if game.current_map is not None:
+            try:
+                game.current_map.entities.remove(node)
+            except ValueError:
+                pass
+
+    def try_interact(self) -> None:
+        """
+        Contextual interaction when pressing E:
+        - If a chest is nearby, open it.
+        - Else if an event node is nearby, trigger it.
+        - Otherwise, show a soft 'nothing here' message.
+        """
+        game = self.game
+
+        # Ignore interaction while overlays are open
+        if game.show_inventory or game.show_character_sheet:
+            return
+
+        # 1) Chest takes priority (so loot remains intuitive)
+        chest = self._find_chest_near_player(max_distance_px=TILE_SIZE // 2)
+        if chest is not None:
+            self.try_open_chest()
+            return
+
+        # 2) Try event nodes
+        node = self._find_event_near_player(max_distance_px=TILE_SIZE // 2)
+        if node is not None:
+            self._trigger_event_node(node)
+            return
+
+        # 3) Nothing
+        game.last_message = "There is nothing here to interact with."

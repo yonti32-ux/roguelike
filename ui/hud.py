@@ -9,6 +9,7 @@ from settings import TILE_SIZE
 from systems.inventory import get_item_def
 from systems import perks as perk_system
 from world.entities import Enemy
+from systems.events import get_event_def
 
 if TYPE_CHECKING:
     from engine.game import Game
@@ -86,25 +87,42 @@ def draw_exploration_ui(game: "Game") -> None:
 
     # Controls hint (bottom)
     hint_text = ui_font.render(
-        "Move WASD/arrows | '.' down ',' up | E: interact | L: log | C: sheet | I: inventory",
+        "Move WASD/arrows | '.' down ',' up | E: interact | C: sheet | I: inventory | L: log | Z/X: zoom",
         True,
         (160, 160, 160),
     )
     screen.blit(hint_text, (8, game.screen.get_height() - 30))
 
-    # --- Contextual exploration hints (stairs + threat + chests) ---
+    # --- Contextual exploration hints (stairs + room vibe + threat + chests/events) ---
     stairs_hint = None
     threat_hint = None
     chest_hint = None
+    event_hint = None
+    room_hint = None
 
     if game_map is not None:
         cx, cy = player.rect.center
         tx, ty = game_map.world_to_tile(cx, cy)
 
+        # Stairs underfoot
         if game_map.up_stairs is not None and (tx, ty) == game_map.up_stairs:
             stairs_hint = "On stairs up – press ',' to ascend."
         elif game_map.down_stairs is not None and (tx, ty) == game_map.down_stairs:
             stairs_hint = "On stairs down – press '.' to descend."
+
+        # Room 'vibes' based on room tag
+        room = game_map.get_room_at(tx, ty)
+        if room is not None:
+            tag = getattr(room, "tag", "generic")
+            if tag == "lair":
+                room_hint = "This room feels dangerous."
+            elif tag == "treasure":
+                room_hint = "You sense hidden wealth nearby."
+            elif tag == "event":
+                room_hint = "Something unusual is anchored in this room."
+            elif tag == "start":
+                room_hint = "A moment of calm before the descent."
+            # other tags can be added later (boss, shrine, etc.)
 
         # Count nearby enemies for a bit of ambient info
         nearby = 0
@@ -125,18 +143,44 @@ def draw_exploration_ui(game: "Game") -> None:
             else:
                 threat_hint = "The air hums with many hostile presences."
 
-        # Chest nearby?
+        # Chest / event nearby?
         chest = None
+        event_node = None
         if hasattr(game, "exploration") and game.exploration is not None:
             chest = game.exploration.find_chest_near_player(max_distance_px=TILE_SIZE)
+            # Only bother looking for events if there's no unopened chest
+            if chest is None or getattr(chest, "opened", False):
+                event_node = game.exploration.find_event_near_player(
+                    max_distance_px=TILE_SIZE
+                )
 
         if chest is not None and not getattr(chest, "opened", False):
             chest_hint = "There is a chest here – press E to open."
+        elif event_node is not None:
+            # Look up event definition to tailor the hint
+            event_id = getattr(event_node, "event_id", "")
+            event_def = get_event_def(event_id)
+            if event_def is not None:
+                if event_def.event_id == "shrine_of_power":
+                    event_hint = "A strange shrine hums here – press E to pray."
+                elif event_def.event_id == "lore_stone":
+                    event_hint = "Ancient runes glow here – press E to read."
+                elif event_def.event_id == "risky_cache":
+                    event_hint = "A sealed cache lies here – press E to inspect."
+                else:
+                    event_hint = "There is something unusual here – press E to interact."
+            else:
+                event_hint = "There is something unusual here – press E to interact."
 
+    # --- Draw contextual hints ---
     y_ui = 144
     if stairs_hint:
         stairs_surf = ui_font.render(stairs_hint, True, (180, 200, 220))
         screen.blit(stairs_surf, (8, y_ui))
+        y_ui += 20
+    if room_hint:
+        room_surf = ui_font.render(room_hint, True, (190, 190, 220))
+        screen.blit(room_surf, (8, y_ui))
         y_ui += 20
     if threat_hint:
         threat_surf = ui_font.render(threat_hint, True, (220, 150, 150))
@@ -145,6 +189,10 @@ def draw_exploration_ui(game: "Game") -> None:
     if chest_hint:
         chest_surf = ui_font.render(chest_hint, True, (200, 200, 160))
         screen.blit(chest_surf, (8, y_ui))
+        y_ui += 20
+    elif event_hint:
+        event_surf = ui_font.render(event_hint, True, (200, 200, 180))
+        screen.blit(event_surf, (8, y_ui))
 
     # --- Last battle log overlay (if enabled) ---
     if getattr(game, "show_battle_log", False) and getattr(game, "last_battle_log", None):

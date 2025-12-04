@@ -193,23 +193,47 @@ class GameMap:
     # Rendering
     # ------------------------------------------------------------------
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
         """
-        Draw all tiles with fog-of-war:
+        Draw all tiles with fog-of-war, taking camera & zoom into account.
 
         - Never seen              -> black
         - Explored, not visible   -> darkened
         - Visible now             -> full color
         """
+        screen_w, screen_h = surface.get_size()
+
+        if zoom <= 0:
+            zoom = 1.0
+
+        tile_screen_size = int(TILE_SIZE * zoom)
+        if tile_screen_size <= 0:
+            return
+
         for y, row in enumerate(self.tiles):
+            world_y = y * TILE_SIZE
+            sy = int((world_y - camera_y) * zoom)
+
+            # Skip row if it's completely off-screen vertically
+            if sy >= screen_h or sy + tile_screen_size <= 0:
+                continue
+
             for x, tile in enumerate(row):
-                rect = pygame.Rect(
-                    x * TILE_SIZE,
-                    y * TILE_SIZE,
-                    TILE_SIZE,
-                    TILE_SIZE,
-                )
+                world_x = x * TILE_SIZE
+                sx = int((world_x - camera_x) * zoom)
+
+                # Skip tile if it's completely off-screen horizontally
+                if sx >= screen_w or sx + tile_screen_size <= 0:
+                    continue
+
                 coord = (x, y)
+                rect = pygame.Rect(sx, sy, tile_screen_size, tile_screen_size)
 
                 if coord not in self.explored:
                     # Completely unseen
@@ -229,3 +253,4 @@ class GameMap:
                     )
 
                 pygame.draw.rect(surface, color, rect)
+

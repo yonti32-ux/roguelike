@@ -61,6 +61,8 @@ def _carve_v_tunnel(tiles: List[List[Tile]], y1: int, y2: int, x: int) -> None:
         tiles[y][x] = FLOOR_TILE
 
 
+# world/mapgen.py
+
 def generate_floor(
     floor_index: int,
 ) -> Tuple[List[List[Tile]], int, int, int, int, List[RectRoom]]:
@@ -72,16 +74,43 @@ def generate_floor(
     Returns:
         tiles, up_stairs_tx, up_stairs_ty, down_stairs_tx, down_stairs_ty, rooms
 
-    floor_index is currently unused for layout shape, but later we can use it
-    to change difficulty / style per depth.
+    floor_index now affects the *overall* map size:
+    - Early floors: mostly 1× screen size, sometimes a bit larger
+    - Mid floors: mix of 1×, 1.5×, and 2×
+    - Deeper floors: mostly big maps (1.5×–2×)
     """
 
-    tiles_x = WINDOW_WIDTH // TILE_SIZE
-    tiles_y = WINDOW_HEIGHT // TILE_SIZE
+    # --- Decide overall map dimensions in tiles, based on depth ---
+    base_tiles_x = WINDOW_WIDTH // TILE_SIZE
+    base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
+
+    if floor_index <= 2:
+        # Mostly "normal" size, sometimes slightly bigger
+        scales = [1.0, 1.5]
+        weights = [0.7, 0.3]
+    elif floor_index <= 5:
+        # Mixed: normal, mid, and big floors
+        scales = [1.0, 1.5, 2.0]
+        weights = [0.4, 0.4, 0.2]
+    else:
+        # Deep floors: almost always larger than one screen
+        scales = [1.5, 2.0]
+        weights = [0.5, 0.5]
+
+    scale = random.choices(scales, weights=weights, k=1)[0]
+
+    tiles_x = int(base_tiles_x * scale)
+    tiles_y = int(base_tiles_y * scale)
+
+    # Safety clamp so we don't go insane in either direction
+    tiles_x = max(base_tiles_x, min(tiles_x, base_tiles_x * 2))
+    tiles_y = max(base_tiles_y, min(tiles_y, base_tiles_y * 2))
 
     tiles = _create_empty_map(tiles_x, tiles_y)
 
     rooms: List[RectRoom] = []
+
+    # Room tuning: same sizes as before, but they now live in a bigger canvas.
     max_rooms = 12
     room_min_size = 4
     room_max_size = 9
@@ -90,6 +119,7 @@ def generate_floor(
         w = random.randint(room_min_size, room_max_size)
         h = random.randint(room_min_size, room_max_size)
 
+        # Keep at least a 1-tile wall border around the outside
         x = random.randint(1, tiles_x - w - 2)
         y = random.randint(1, tiles_y - h - 2)
 

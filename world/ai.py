@@ -9,6 +9,7 @@ import math
 import pygame
 
 from settings import TILE_SIZE
+from world.entities import Enemy
 
 if TYPE_CHECKING:
     from engine.game import Game
@@ -16,9 +17,10 @@ if TYPE_CHECKING:
 
 
 # Tunables for enemy awareness/behaviour
-DETECTION_RANGE_TILES = 7          # how far they can *see* you
+DETECTION_RANGE_TILES = 9          # how far they can *see* you
 SEARCH_DURATION = 2.0              # seconds they keep searching after losing LoS
 STOP_SEARCH_DISTANCE_TILES = 0.5   # distance to last_seen to give up
+ALERT_RADIUS_TILES = 6           # how far an alerted shout travels to other enemies
 
 # Patrol behaviour
 PATROL_RADIUS_TILES = 4.0          # how far they wander from their home
@@ -61,7 +63,7 @@ def _move_enemy_towards(
 ) -> None:
     """
     Move enemy towards target while respecting walls, other entities,
-    and optionally starting battles on contact with the player.
+    and optional battle triggering.
     """
     if game.current_map is None or game.player is None:
         return
@@ -89,15 +91,20 @@ def _move_enemy_towards(
     if not game.current_map.rect_can_move_to(new_rect):
         return
 
-    # Can't walk through other blocking entities
-    for other in game.current_map.entities:
-        if other is enemy:
+    # Don't walk through other blocking entities
+    for entity in game.current_map.entities:
+        if entity is enemy:
             continue
-        if getattr(other, "blocks_movement", False) and other.rect.colliderect(new_rect):
+        if not getattr(entity, "blocks_movement", False):
+            continue
+        if new_rect.colliderect(entity.rect):
             return
 
-    # If stepping into player -> trigger battle (unless grace or disabled)
-    if allow_battle and game.player.rect.colliderect(new_rect):
+    # If we're allowed to, colliding with the player can trigger battle
+    if allow_battle and new_rect.colliderect(game.player.rect):
+        enemy.x = new_rect.x
+        enemy.y = new_rect.y
+        enemy.rect.topleft = (int(enemy.x), int(enemy.y))
         if game.post_battle_grace <= 0.0:
             game.start_battle(enemy)
         return
@@ -137,7 +144,7 @@ def _update_patrol(enemy: "Enemy", game: "Game", dt: float) -> None:
             enemy.ai_patrol_pause = random.uniform(PATROL_PAUSE_MIN, PATROL_PAUSE_MAX)
             return
 
-    # Move towards the patrol target (no battle triggers while patrolling)
+    # Move towards patrol target
     tx, ty = enemy.ai_patrol_target
     _move_enemy_towards(
         enemy,
@@ -179,6 +186,52 @@ def _choose_new_patrol_target(enemy: "Enemy", game: "Game") -> None:
 
     # Fallback: no good tile found
     enemy.ai_patrol_target = None
+
+
+def _alert_nearby_enemies(source_enemy: "Enemy", game: "Game", last_seen_pos: Tuple[float, float]) -> None:
+    """
+    When one enemy spots the player and begins chasing, nearby idle/searching
+    enemies should become aware and start moving towards the last seen location.
+
+    We *do not* require line-of-sight for alerted enemies – the idea is that the
+    first enemy "shouts", and others move to investigate.
+    """
+    current_map = getattr(game, "current_map", None)
+    if current_map is None:
+        return
+
+    # Use a radius in *world* space (pixels) derived from tile units.
+    alert_radius_px = ALERT_RADIUS_TILES * TILE_SIZE
+    alert_radius_sq = alert_radius_px * alert_radius_px
+
+    sx, sy = source_enemy.rect.center
+
+    for entity in getattr(current_map, "entities", []):
+        if entity is source_enemy:
+            continue
+        # Only care about other living enemies
+        if not isinstance(entity, Enemy):
+            continue
+        if getattr(entity, "hp", 1) <= 0:
+            continue
+
+        _ensure_ai_fields(entity)
+
+        # Don't override enemies already actively chasing
+        if entity.ai_state not in ("idle", "search"):
+            continue
+
+        ox, oy = entity.rect.center
+        dx = ox - sx
+        dy = oy - sy
+        if dx * dx + dy * dy > alert_radius_sq:
+            continue
+
+        # Alert this enemy: they know *where* the player was seen,
+        # and will move there in "search" mode.
+        entity.ai_state = "search"
+        entity.ai_last_seen_player_pos = last_seen_pos
+        entity.ai_search_time = SEARCH_DURATION
 
 
 def update_enemy_ai(enemy: "Enemy", game: "Game", dt: float) -> None:
@@ -240,6 +293,7 @@ def update_enemy_ai(enemy: "Enemy", game: "Game", dt: float) -> None:
         if state in ("idle", "search"):
             enemy.ai_state = "chase"
             state = "chase"
+            _alert_nearby_enemies(enemy, game, (px, py))
     else:
         # No LoS this frame
         if state == "chase":

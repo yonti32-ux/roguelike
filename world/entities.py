@@ -29,6 +29,30 @@ class Entity:
         self.x += dx
         self.y += dy
 
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
+        """
+        Generic entity draw using camera & zoom.
+        Subclasses can override for custom colors/shapes.
+        """
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        color = getattr(self, "color", (255, 0, 255))
+        pygame.draw.rect(surface, color, screen_rect)
+
 
 @dataclass
 class Player(Entity):
@@ -43,8 +67,24 @@ class Player(Entity):
     hp: int = 30
     attack_power: int = 6
 
-    def draw(self, surface: pygame.Surface) -> None:
-        pygame.draw.rect(surface, self.color, self.rect)
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        pygame.draw.rect(surface, self.color, screen_rect)
 
     def take_damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
@@ -64,8 +104,24 @@ class Enemy(Entity):
     hp: int = 12
     attack_power: int = 4
 
-    def draw(self, surface: pygame.Surface) -> None:
-        pygame.draw.rect(surface, self.color, self.rect)
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        pygame.draw.rect(surface, self.color, screen_rect)
 
     def take_damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
@@ -90,6 +146,57 @@ class Chest(Entity):
         # Chests should not block movement in exploration.
         self.blocks_movement = False
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
         color = self.color_opened if self.opened else self.color_closed
-        pygame.draw.rect(surface, color, self.rect)
+        pygame.draw.rect(surface, color, screen_rect)
+
+
+@dataclass
+class EventNode(Entity):
+    """
+    Interactive map event (shrine, lore stone, cache, etc.).
+
+    - Does NOT block movement.
+    - Interacting with it triggers a systems.events handler.
+    """
+    event_id: str = "shrine_of_power"
+    color: Tuple[int, int, int] = (150, 120, 255)
+
+    def __post_init__(self) -> None:
+        self.blocks_movement = False
+
+    def draw(
+            self,
+            surface: pygame.Surface,
+            camera_x: float = 0.0,
+            camera_y: float = 0.0,
+            zoom: float = 1.0,
+    ) -> None:
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        pygame.draw.rect(surface, self.color, screen_rect)
+
