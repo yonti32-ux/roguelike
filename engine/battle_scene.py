@@ -17,7 +17,7 @@ from systems.statuses import (
 )
 from systems.skills import Skill, get as get_skill
 from systems import perks as perk_system
-
+from systems.party import CompanionDef  # NEW
 
 BattleStatus = Literal["ongoing", "victory", "defeat"]
 Side = Literal["player", "enemy"]
@@ -69,7 +69,13 @@ class BattleScene:
         - Skills (Guard, Power Strike, Crippling Blow) from systems.skills
     """
 
-    def __init__(self, player: Player, enemies: List[Enemy], font: pygame.font.Font) -> None:
+    def __init__(
+        self,
+        player: Player,
+        enemies: List[Enemy],
+        font: pygame.font.Font,
+        companions: Optional[List[CompanionDef]] = None,
+    ) -> None:
         self.player = player
         self.font = font
 
@@ -122,31 +128,94 @@ class BattleScene:
                     continue
 
 
-        companion_max_hp = getattr(self.player, "max_hp", 24)
-        companion_display_name = getattr(self.player, "companion_name", "Companion")
-        companion = Player(
-            x=0,
-            y=0,
-            width=self.player.width,
-            height=self.player.height,
-            speed=0.0,
-            color=self.player.color,
-            max_hp=int(companion_max_hp * 0.8),
-            hp=int(companion_max_hp * 0.8),
-            attack_power=max(2, int(getattr(self.player, "attack_power", 5) * 0.7)),
-        )
-        companion_unit = BattleUnit(
-            entity=companion,
-            side="player",
-            gx=1,
-            gy=max(0, self.grid_height // 2 - 1),
-            name=companion_display_name,
-        )
-        companion_unit.skills = {
-            "guard": get_skill("guard"),
-        }
+        # --- Player side: hero + companions from Game.party -----------------
 
-        self.player_units: List[BattleUnit] = [hero_unit, companion_unit]
+        self.player_units: List[BattleUnit] = [hero_unit]
+
+        # Base stats used to derive simple companion stats in P1
+        base_max_hp = getattr(self.player, "max_hp", 24)
+        base_atk = getattr(self.player, "attack_power", 5)
+        base_def = int(getattr(self.player, "defense", 0))
+        base_sp = float(getattr(self.player, "skill_power", 1.0))
+
+        hero_row = self.grid_height // 2
+        companion_row = max(0, hero_row - 1)
+
+        created_any_companion = False
+
+        if companions:
+            # For P1 we only use the FIRST companion in the list.
+            comp_def = companions[0]
+
+            comp_max_hp = max(1, int(base_max_hp * comp_def.hp_factor))
+            comp_hp = comp_max_hp
+            comp_atk = max(1, int(base_atk * comp_def.attack_factor))
+            comp_defense = int(base_def * comp_def.defense_factor)
+            comp_sp = max(0.1, base_sp * comp_def.skill_power_factor)
+
+            companion_entity = Player(
+                x=0,
+                y=0,
+                width=self.player.width,
+                height=self.player.height,
+                speed=0.0,
+                color=self.player.color,
+                max_hp=comp_max_hp,
+                hp=comp_hp,
+                attack_power=comp_atk,
+            )
+            setattr(companion_entity, "defense", comp_defense)
+            setattr(companion_entity, "skill_power", comp_sp)
+
+            companion_name = comp_def.name or getattr(self.player, "companion_name", "Companion")
+            companion_unit = BattleUnit(
+                entity=companion_entity,
+                side="player",
+                gx=1,
+                gy=companion_row,
+                name=companion_name,
+            )
+
+            # Skills for the companion: from template, fallback to Guard
+            skills = {}
+            for skill_id in comp_def.skill_ids:
+                try:
+                    skills[skill_id] = get_skill(skill_id)
+                except KeyError:
+                    continue
+            if "guard" not in skills:
+                skills["guard"] = get_skill("guard")
+
+            companion_unit.skills = skills
+            self.player_units.append(companion_unit)
+            created_any_companion = True
+
+        if not created_any_companion:
+            # Fallback to old behaviour: one generic companion
+            companion_max_hp = getattr(self.player, "max_hp", 24)
+            companion_display_name = getattr(self.player, "companion_name", "Companion")
+            companion = Player(
+                x=0,
+                y=0,
+                width=self.player.width,
+                height=self.player.height,
+                speed=0.0,
+                color=self.player.color,
+                max_hp=int(companion_max_hp * 0.8),
+                hp=int(companion_max_hp * 0.8),
+                attack_power=max(2, int(getattr(self.player, "attack_power", 5) * 0.7)),
+            )
+            companion_unit = BattleUnit(
+                entity=companion,
+                side="player",
+                gx=1,
+                gy=max(0, self.grid_height // 2 - 1),
+                name=companion_display_name,
+            )
+            companion_unit.skills = {
+                "guard": get_skill("guard"),
+            }
+            self.player_units.append(companion_unit)
 
         # --- Enemy side: create a unit per enemy in the encounter group ---
 

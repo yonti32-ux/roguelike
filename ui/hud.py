@@ -10,6 +10,7 @@ from systems.inventory import get_item_def
 from systems import perks as perk_system
 from world.entities import Enemy
 from systems.events import get_event_def
+from systems.party import CompanionDef
 
 if TYPE_CHECKING:
     from engine.game import Game
@@ -269,14 +270,7 @@ def _draw_character_sheet(game: "Game") -> None:
     else:
         perk_lines = ["(no perks yet)"]
 
-    # Proto-party block – still just hero + generic ally preview
-    companion_name = "Companion"
-    comp_max_hp = int(max_hp * 0.8)
-    comp_hp = comp_max_hp
-    comp_atk = max(2, int(atk * 0.7))
-    comp_def = defense
-    comp_sp = skill_power
-
+    # Party block – hero + real companions (from game.party)
     party_rows = [
         {
             "role": "Hero",
@@ -286,17 +280,56 @@ def _draw_character_sheet(game: "Game") -> None:
             "atk": atk,
             "def": defense,
             "sp": skill_power,
-        },
-        {
-            "role": "Ally",
-            "name": companion_name,
-            "hp": comp_hp,
-            "max_hp": comp_max_hp,
-            "atk": comp_atk,
-            "def": comp_def,
-            "sp": comp_sp,
-        },
+        }
     ]
+
+    # For P1, companions are derived from hero stats using CompanionDef factors.
+    companions = getattr(game, "party", []) or []
+
+    if companions:
+        for comp_def in companions:
+            hp_factor = getattr(comp_def, "hp_factor", 0.8)
+            atk_factor = getattr(comp_def, "attack_factor", 0.7)
+            def_factor = getattr(comp_def, "defense_factor", 1.0)
+            sp_factor = getattr(comp_def, "skill_power_factor", 1.0)
+
+            comp_max_hp = max(1, int(max_hp * hp_factor))
+            comp_hp = comp_max_hp  # For now, sheet shows full HP
+            comp_atk = max(1, int(atk * atk_factor))
+            comp_def_stat = int(defense * def_factor)
+            comp_sp = max(0.1, float(skill_power) * sp_factor)
+
+            party_rows.append(
+                {
+                    "role": comp_def.role or "Ally",
+                    "name": comp_def.name,
+                    "hp": comp_hp,
+                    "max_hp": comp_max_hp,
+                    "atk": comp_atk,
+                    "def": comp_def_stat,
+                    "sp": comp_sp,
+                }
+            )
+    else:
+        # Fallback: if no party defined yet, keep the old generic ally preview.
+        companion_name = "Companion"
+        comp_max_hp = int(max_hp * 0.8)
+        comp_hp = comp_max_hp
+        comp_atk = max(2, int(atk * 0.7))
+        comp_def_stat = defense
+        comp_sp = skill_power
+
+        party_rows.append(
+            {
+                "role": "Ally",
+                "name": companion_name,
+                "hp": comp_hp,
+                "max_hp": comp_max_hp,
+                "atk": comp_atk,
+                "def": comp_def_stat,
+                "sp": comp_sp,
+            }
+        )
 
     width = 520
     height = 320

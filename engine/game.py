@@ -1,6 +1,7 @@
 # engine/game.py
 
 import random
+import math
 from typing import Optional, List
 
 import pygame
@@ -54,7 +55,10 @@ class Game:
         self.inventory: Inventory = Inventory()
         self.show_inventory: bool = False
 
-        # Floor index
+        # Party / companions (battle-side for now)
+        self.party: List[object] = []
+
+        # Floor index (current dungeon depth)
         self.floor: int = 1
 
         # Active map and player
@@ -170,6 +174,7 @@ class Game:
 
     def _init_hero_for_class(self, hero_class_id: str) -> None:
         from systems.classes import all_classes  # local import to avoid cycles
+        from systems.party import default_party_for_class  # NEW
 
         class_def = None
         for cls in all_classes():
@@ -182,6 +187,8 @@ class Game:
         # Fresh hero stats
         self.hero_stats = HeroStats()
         self.hero_stats.apply_class(class_def)
+        # Remember which class this hero is using for restarts / UI
+        self.hero_stats.hero_class_id = class_def.id
 
         # Fresh inventory and starting items
         self.inventory = Inventory()
@@ -195,6 +202,9 @@ class Game:
                 if item_def is not None and item_def.slot == slot:
                     self.inventory.equip(item_id)
                     break
+
+        # Initialize party for this class (battle-only for now)
+        self.party = default_party_for_class(class_def.id)
 
     def apply_hero_stats_to_player(self, full_heal: bool = False) -> None:
         """
@@ -256,6 +266,12 @@ class Game:
                              getattr(hs, "speed",
                                      getattr(self.player, "speed", 200.0)))
         self.player.speed = move_speed
+
+        # Mirror learned perks onto the Player entity so BattleScene can
+        # grant skills based on perks.
+        perks_list = getattr(hs, "perks", None)
+        if perks_list is not None:
+            setattr(self.player, "perks", list(perks_list))
 
     def gain_xp_from_event(self, xp: int) -> list[str]:
         """
@@ -586,9 +602,22 @@ class Game:
         random.shuffle(room_tiles)
         random.shuffle(corridor_tiles)
 
-        # Simple scaling: more enemies as floors go deeper, capped
+        # Scale enemy count by floor depth *and* floor area
         base_desired = 2 + floor_index
-        desired = min(6, max(2, base_desired))
+
+        screen_w, screen_h = self.screen.get_size()
+        base_tiles_x = screen_w // TILE_SIZE
+        base_tiles_y = screen_h // TILE_SIZE
+        base_area = max(1, base_tiles_x * base_tiles_y)
+
+        floor_area = game_map.width * game_map.height
+        area_ratio = floor_area / base_area
+        area_factor = math.sqrt(area_ratio) if area_ratio > 0 else 1.0
+        # Keep in a reasonable band so things don't get absurd
+        area_factor = max(0.75, min(area_factor, 1.8))
+
+        scaled = int(round(base_desired * area_factor))
+        desired = min(8, max(2, scaled))
 
         chosen_tiles: List[tuple[int, int]] = []
         remaining = desired
@@ -829,9 +858,20 @@ class Game:
         random.shuffle(treasure_tiles)
         random.shuffle(other_tiles)
 
-        # We still want 0–2 chests total, but if a treasure room exists,
-        # there's a good chance at least one chest goes there.
-        max_chests = min(2, len(treasure_tiles) + len(other_tiles))
+        # Scale chest count with floor size:
+        # 0–2 on normal floors, up to 3 on big ones.
+        screen_w, screen_h = self.screen.get_size()
+        base_tiles_x = screen_w // TILE_SIZE
+        base_tiles_y = screen_h // TILE_SIZE
+        base_area = max(1, base_tiles_x * base_tiles_y)
+
+        floor_area = game_map.width * game_map.height
+        area_ratio = floor_area / base_area
+        area_factor = math.sqrt(area_ratio) if area_ratio > 0 else 1.0
+        area_factor = max(0.75, min(area_factor, 1.8))
+
+        raw_max = 2 + (1 if area_factor > 1.3 else 0)
+        max_chests = min(raw_max, len(treasure_tiles) + len(other_tiles))
         if max_chests <= 0:
             return
 
@@ -930,8 +970,13 @@ class Game:
             xp_total += int(getattr(e, "xp_reward", 5))
         self.pending_battle_xp = xp_total
 
-        # 4) Create battle scene with the entire group
-        self.battle_scene = BattleScene(self.player, encounter_enemies, self.ui_font)
+        # 4) Create battle scene with the entire group + current party
+        self.battle_scene = BattleScene(
+            self.player,
+            encounter_enemies,
+            self.ui_font,
+            companions=getattr(self, "party", None),
+        )
         self.enter_battle_mode()
 
     def restart_run(self) -> None:

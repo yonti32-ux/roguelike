@@ -1,6 +1,7 @@
 # world/mapgen.py
 
 import random
+import math
 from typing import List, Tuple
 
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TILE_SIZE
@@ -74,15 +75,16 @@ def generate_floor(
     Returns:
         tiles, up_stairs_tx, up_stairs_ty, down_stairs_tx, down_stairs_ty, rooms
 
-    floor_index now affects the *overall* map size:
-    - Early floors: mostly 1× screen size, sometimes a bit larger
-    - Mid floors: mix of 1×, 1.5×, and 2×
-    - Deeper floors: mostly big maps (1.5×–2×)
+    Floor size and room count now depend on depth:
+    - Early floors: mostly around 1× screen size.
+    - Mid floors: mix of 1×, 1.5×, and 2×.
+    - Deep floors: mostly 1.5×–2×.
     """
 
     # --- Decide overall map dimensions in tiles, based on depth ---
     base_tiles_x = WINDOW_WIDTH // TILE_SIZE
     base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
+    base_area = base_tiles_x * base_tiles_y
 
     if floor_index <= 2:
         # Mostly "normal" size, sometimes slightly bigger
@@ -108,18 +110,30 @@ def generate_floor(
 
     tiles = _create_empty_map(tiles_x, tiles_y)
 
-    rooms: List[RectRoom] = []
+    # --- Decide how many rooms to try for, based on map area ---
+    floor_area = tiles_x * tiles_y
+    area_ratio = floor_area / base_area if base_area > 0 else 1.0
+    # Use sqrt so 2× area ≈ 1.41× rooms (not double)
+    density_factor = math.sqrt(area_ratio)
 
-    # Room tuning: same sizes as before, but they now live in a bigger canvas.
-    max_rooms = 12
+    base_rooms = 10
+    max_rooms = int(round(base_rooms * density_factor))
+    # Clamp so tiny floors still have a few rooms and huge floors don't explode
+    max_rooms = max(6, min(max_rooms, 22))
+
     room_min_size = 4
     room_max_size = 9
+
+    rooms: List[RectRoom] = []
 
     for _ in range(max_rooms):
         w = random.randint(room_min_size, room_max_size)
         h = random.randint(room_min_size, room_max_size)
 
         # Keep at least a 1-tile wall border around the outside
+        if w + 2 >= tiles_x or h + 2 >= tiles_y:
+            continue
+
         x = random.randint(1, tiles_x - w - 2)
         y = random.randint(1, tiles_y - h - 2)
 
