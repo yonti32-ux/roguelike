@@ -1,5 +1,3 @@
-# world/mapgen.py
-
 import random
 import math
 from typing import List, Tuple
@@ -24,7 +22,7 @@ class RectRoom:
         self.x2 = x + w
         self.y2 = y + h
         # High-level type for content placement:
-        # "start", "lair", "treasure", "event", "generic"
+        # "start", "lair", "treasure", "event", "generic", "shop"
         self.tag = tag
 
     def center(self) -> tuple[int, int]:
@@ -193,6 +191,12 @@ def generate_floor(
             if event_candidates:
                 event_room = random.choice(event_candidates)
                 event_room.tag = "event"
+
+            # 5) Shop room = another remaining generic room, not guaranteed every floor
+            shop_candidates = [r for r in rooms if r.tag == "generic"]
+            if shop_candidates and random.random() < 0.7:
+                shop_room = random.choice(shop_candidates)
+                shop_room.tag = "shop"
 
     # Decide stair tiles (still using first/last room centers)
     if rooms:

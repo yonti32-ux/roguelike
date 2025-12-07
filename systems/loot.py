@@ -1,5 +1,3 @@
-# systems/loot.py
-
 from __future__ import annotations
 
 import random
@@ -37,8 +35,8 @@ def _rarity_weight(rarity: str, floor_index: int, source: str) -> float:
     if rarity.lower() in {"rare", "epic", "legendary"}:
         base *= depth_factor
 
-    # Chests are more likely to give the good stuff
-    if source == "chest" and rarity.lower() in {"uncommon", "rare", "epic", "legendary"}:
+    # Chests (and shop selection) are more likely to show the good stuff
+    if source in {"chest", "shop"} and rarity.lower() in {"uncommon", "rare", "epic", "legendary"}:
         base *= 1.5
 
     return base
@@ -139,3 +137,44 @@ def roll_chest_loot(floor_index: int) -> Optional[str]:
 
     chosen = _weighted_choice(items, weights)
     return chosen.id if chosen is not None else None
+
+
+def get_shop_stock_for_floor(floor_index: int, max_items: int = 6) -> List[str]:
+    """
+    Build a list of item_ids that a merchant on this floor offers.
+
+    For now:
+    - Use all equippable items.
+    - Slightly bias towards higher-rarity items on deeper floors.
+    - Limit to ``max_items`` unique choices.
+
+    This is intentionally generous: the limiting factor should be the
+    player's gold, not the merchant's list being empty.
+    """
+    items = _candidate_items()
+    if not items or max_items <= 0:
+        return []
+
+    # Cap max_items so we don't try to pick more than exist.
+    max_items = min(max_items, len(items))
+
+    # Build weights biased similarly to chest loot, but using a "shop" source
+    weighted_pool = list(items)
+    weights = [
+        _rarity_weight(it.rarity, floor_index, source="shop") for it in weighted_pool
+    ]
+
+    chosen_ids: List[str] = []
+
+    # We want unique items, so we sample without replacement using the weights.
+    while weighted_pool and len(chosen_ids) < max_items:
+        chosen = _weighted_choice(weighted_pool, weights)
+        if chosen is None:
+            break
+        chosen_ids.append(chosen.id)
+        # Remove that item from the pool so we don't offer duplicates.
+        idx = weighted_pool.index(chosen)
+        weighted_pool.pop(idx)
+        weights.pop(idx)
+
+    return chosen_ids

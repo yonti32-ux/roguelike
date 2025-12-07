@@ -1,5 +1,3 @@
-# world/entities.py
-
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -30,11 +28,11 @@ class Entity:
         self.y += dy
 
     def draw(
-            self,
-            surface: pygame.Surface,
-            camera_x: float = 0.0,
-            camera_y: float = 0.0,
-            zoom: float = 1.0,
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
     ) -> None:
         """
         Generic entity draw using camera & zoom.
@@ -68,11 +66,11 @@ class Player(Entity):
     attack_power: int = 6
 
     def draw(
-            self,
-            surface: pygame.Surface,
-            camera_x: float = 0.0,
-            camera_y: float = 0.0,
-            zoom: float = 1.0,
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
     ) -> None:
         world_rect = self.rect
         if zoom <= 0:
@@ -105,11 +103,11 @@ class Enemy(Entity):
     attack_power: int = 4
 
     def draw(
-            self,
-            surface: pygame.Surface,
-            camera_x: float = 0.0,
-            camera_y: float = 0.0,
-            zoom: float = 1.0,
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
     ) -> None:
         world_rect = self.rect
         if zoom <= 0:
@@ -147,11 +145,11 @@ class Chest(Entity):
         self.blocks_movement = False
 
     def draw(
-            self,
-            surface: pygame.Surface,
-            camera_x: float = 0.0,
-            camera_y: float = 0.0,
-            zoom: float = 1.0,
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
     ) -> None:
         world_rect = self.rect
         if zoom <= 0:
@@ -182,11 +180,11 @@ class EventNode(Entity):
         self.blocks_movement = False
 
     def draw(
-            self,
-            surface: pygame.Surface,
-            camera_x: float = 0.0,
-            camera_y: float = 0.0,
-            zoom: float = 1.0,
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
     ) -> None:
         world_rect = self.rect
         if zoom <= 0:
@@ -200,3 +198,17 @@ class EventNode(Entity):
         screen_rect = pygame.Rect(sx, sy, sw, sh)
         pygame.draw.rect(surface, self.color, screen_rect)
 
+
+@dataclass
+class Merchant(Entity):
+    """
+    Stationary merchant NPC used in shop rooms.
+
+    - Blocks movement so the player walks around them.
+    - Interaction (press E near them) is handled by ExplorationController.
+    """
+    color: Tuple[int, int, int] = (200, 180, 255)
+
+    def __post_init__(self) -> None:
+        # Merchants should feel like solid NPCs.
+        self.blocks_movement = True

@@ -115,6 +115,93 @@ def _build_core_skills() -> None:
         )
     )
 
+    # --- Enemy archetype skills -------------------------------------------
+
+    heavy_slam = register(
+        Skill(
+            id="heavy_slam",
+            name="Heavy Slam",
+            description="Crushing overhead blow (1.5x damage).",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=1.5,
+            uses_skill_power=False,
+            cooldown=2,
+        )
+    )
+
+    poison_strike = register(
+        Skill(
+            id="poison_strike",
+            name="Poison Strike",
+            description="Slash that poisons the target for several turns.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=1.0,
+            uses_skill_power=False,
+            cooldown=3,
+            make_target_status=lambda: StatusEffect(
+                name="poisoned",
+                duration=3,
+                flat_damage_each_turn=2,
+            ),
+        )
+    )
+
+    dark_hex = register(
+        Skill(
+            id="dark_hex",
+            name="Dark Hex",
+            description="Curse the target, making them take more damage.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=0.9,
+            uses_skill_power=True,
+            cooldown=3,
+            make_target_status=lambda: StatusEffect(
+                name="cursed",
+                duration=2,
+                incoming_mult=1.25,
+            ),
+        )
+    )
+
+    feral_claws = register(
+        Skill(
+            id="feral_claws",
+            name="Feral Claws",
+            description="Rending claws that cause bleeding over time.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=1.1,
+            uses_skill_power=False,
+            cooldown=2,
+            make_target_status=lambda: StatusEffect(
+                name="bleeding",
+                duration=2,
+                flat_damage_each_turn=2,
+            ),
+        )
+    )
+
+    war_cry = register(
+        Skill(
+            id="war_cry",
+            name="War Cry",
+            description="Roared challenge that boosts outgoing damage for a short time.",
+            key=None,  # AI-only
+            target_mode="self",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=4,
+            make_self_status=lambda: StatusEffect(
+                name="war_cry",
+                duration=2,
+                outgoing_mult=1.25,
+            ),
+        )
+    )
+
     # --- New skills unlocked by perks --------------------------------------
 
     # Blade perk: aggressive strike
@@ -163,6 +250,7 @@ def _build_core_skills() -> None:
             cooldown=3,
         )
     )
+
     nimble_step = register(
         Skill(
             id="nimble_step",
@@ -181,9 +269,7 @@ def _build_core_skills() -> None:
         )
     )
 
-    # guard / power_strike / crippling_blow / lunge / shield_bash / focus_blast
-    # variables are not used further, but keeping them named makes it obvious
-    # what we're defining.
-
-
+    # guard / power_strike / crippling_blow / heavy_slam / poison_strike / dark_hex / feral_claws / war_cry
+    # plus lunge / shield_bash / focus_blast / nimble_step variables are not used further,
+    # but keeping them named makes it obvious what we're defining.
 _build_core_skills()

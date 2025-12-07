@@ -1,5 +1,4 @@
 # systems/perks.py
-
 """
 Perk system: small, modular bonuses that layer on top of HeroStats.
 
@@ -8,7 +7,7 @@ Design:
     id, name, description, unlock_level, branch, requires, grant_skills, apply_fn
 - HeroStats stores only a list of perk ids.
 - This module knows how to:
-    * apply a perk to a HeroStats instance
+    * apply a perk to a HeroStats-like object
     * pick a few perk options on level up
     * (optionally) auto-assign perks (legacy helper)
     * describe a hero's perk list for UI
@@ -47,7 +46,7 @@ class Perk:
             self.apply_fn(hero_stats)
 
 
-# --- Perk registry ---
+# --- Perk registry ----------------------------------------------------------
 
 _PERKS: Dict[str, Perk] = {}
 
@@ -67,7 +66,8 @@ def all_perks() -> Iterable[Perk]:
     return _PERKS.values()
 
 
-# --- Concrete perk effects (stat changes) ---
+# --- Concrete perk effects (stat changes) -----------------------------------
+
 
 def _apply_toughness_1(hero_stats: object) -> None:
     hero_stats.base.max_hp += 10
@@ -120,7 +120,7 @@ def _apply_fleet_footwork_2(hero_stats: object) -> None:
     hero_stats.base.max_hp += 5
 
 
-# --- Perk trees ---
+# --- Perk trees -------------------------------------------------------------
 
 # ----------------- Vitality tree -----------------
 
@@ -302,7 +302,7 @@ register(Perk(
 ))
 
 
-# --- Helper functions used by the game ---
+# --- Helper functions used by the game --------------------------------------
 
 
 def auto_assign_perks(hero_stats: object) -> List[str]:
@@ -407,3 +407,58 @@ def describe_perk_list(perk_ids: Iterable[str], short: bool = True) -> List[str]
         else:
             lines.append(f"{perk.name}: {perk.description}")
     return lines
+
+
+# --- New helper for companions ----------------------------------------------
+
+
+class _DummyBaseStats:
+    """
+    Minimal stand-in for HeroStats.base so we can reuse perk apply functions
+    to compute pure stat modifiers for companions.
+    """
+    def __init__(self) -> None:
+        self.max_hp: int = 0
+        self.attack: int = 0
+        self.defense: int = 0
+        self.skill_power: float = 0.0
+
+
+class _DummyHeroLike:
+    def __init__(self) -> None:
+        self.base = _DummyBaseStats()
+
+
+def total_stat_modifiers_for_perks(perk_ids: Iterable[str]) -> Dict[str, float]:
+    """
+    Compute aggregate stat bonuses granted by the given perk ids.
+
+    The result is a dict with keys:
+        - "max_hp" (int)
+        - "attack" (int)
+        - "defense" (int)
+        - "skill_power" (float)
+
+    Implementation detail:
+    We reuse the existing Perk.apply functions by applying them to a
+    dummy hero_stats object whose base stats start at zero. Because our
+    current perk effects are all additive (+=), the final values on the
+    dummy object represent the total modifiers.
+    """
+    dummy = _DummyHeroLike()
+
+    for pid in perk_ids:
+        perk = _PERKS.get(pid)
+        if perk is None:
+            continue
+        if perk.apply_fn is None:
+            continue
+        perk.apply(dummy)
+
+    base = dummy.base
+    return {
+        "max_hp": int(base.max_hp),
+        "attack": int(base.attack),
+        "defense": int(base.defense),
+        "skill_power": float(base.skill_power),
+    }

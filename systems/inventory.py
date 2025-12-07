@@ -114,6 +114,33 @@ class Inventory:
             if equipped_id == item_id:
                 self.equipped[slot] = None
 
+    def remove_one(self, item_id: str) -> bool:
+        """
+        Remove a single instance of ``item_id`` from the inventory list.
+        Returns True if something was removed, False otherwise.
+
+        This does *not* touch equipped slots. Selling equipped items
+        should be prevented by the caller (via get_sellable_item_ids()).
+        """
+        try:
+            self.items.remove(item_id)
+        except ValueError:
+            return False
+        return True
+
+    def get_sellable_item_ids(self) -> List[str]:
+        """
+        Return a list of item ids that are valid to sell:
+        all items, minus one copy for each equipped item.
+        """
+        sellable = list(self.items)
+        for slot, equipped_id in self.equipped.items():
+            if not equipped_id:
+                continue
+            if equipped_id in sellable:
+                sellable.remove(equipped_id)
+        return sellable
+
     def equip(self, item_id: str) -> str:
         """
         Equip an item by id. Returns a human-readable message.

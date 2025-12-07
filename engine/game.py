@@ -1,27 +1,41 @@
-# engine/game.py
-
 import random
 import math
 from typing import Optional, List
 
 import pygame
 
-from settings import COLOR_BG, TILE_SIZE
+from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
 from world.game_map import GameMap
-from world.entities import Player, Enemy
+from world.entities import Player, Enemy, Merchant
 from .battle_scene import BattleScene
 from .exploration import ExplorationController
 from .cheats import handle_cheat_key
 from systems.progression import HeroStats
+from systems.party import (
+    CompanionState,
+    default_party_states_for_class,
+    get_companion,
+    init_companion_stats,
+    recalc_companion_stats_for_level,
+)
+
 from systems import perks as perk_system
 from systems.inventory import Inventory, get_item_def
 from systems.loot import roll_battle_loot
+from systems.enemies import (
+    choose_archetype_for_floor,
+    compute_scaled_stats,
+    choose_pack_for_floor,
+    get_archetype,
+)
 from ui.hud import (
     draw_exploration_ui,
     draw_perk_choice_overlay,
     draw_inventory_overlay,
 )
+from ui.screens import BaseScreen, PerkChoiceScreen
+
 from systems.events import EVENTS  # registry of map events
 
 
@@ -55,8 +69,8 @@ class Game:
         self.inventory: Inventory = Inventory()
         self.show_inventory: bool = False
 
-        # Party / companions (battle-side for now)
-        self.party: List[object] = []
+        # Party / companions: runtime CompanionState objects
+        self.party: List[CompanionState] = []
 
         # Floor index (current dungeon depth)
         self.floor: int = 1
@@ -78,8 +92,38 @@ class Game:
         # --- Character sheet overlay ---
         self.show_character_sheet: bool = False
 
+        # Which character the sheet is currently focusing:
+        # 0 = hero, 1..N = companions in self.party order.
+        self.character_sheet_focus_index: int = 0
+
+        # Which character the inventory overlay is currently focusing:
+        # 0 = hero, 1..N = companions in self.party order.
+        self.inventory_focus_index: int = 0
+
+
+
+        # --- Exploration log overlay (multi-line message history) ---
+        self.show_exploration_log: bool = False
+
         # --- Pending perk choices (level-up) ---
+        # Perk objects currently shown in the overlay.
         self.pending_perk_choices: List[perk_system.Perk] = []
+
+        # Queue of "who needs to pick a perk" after XP/level-up.
+        # Entries are ("hero", None) or ("companion", companion_index).
+        self.perk_choice_queue: List[tuple[str, Optional[int]]] = []
+        # Owner of the currently open perk-choice overlay.
+        self.perk_choice_owner: Optional[str] = None
+        self.perk_choice_companion_index: Optional[int] = None
+
+        # Helper object to handle perk-choice overlay UI logic.
+        self.perk_choice_screen = PerkChoiceScreen()
+
+        # Currently active full-screen UI overlay (if any).
+        # For now we only use this for perk choices, but we can later plug
+        # in inventory / character sheet / logs as real screens too.
+        self.active_screen: Optional[BaseScreen] = None
+
 
         # Mode handling
         self.mode: str = GameMode.EXPLORATION
@@ -88,8 +132,10 @@ class Game:
         # XP from the current battle (set when we start it)
         self.pending_battle_xp: int = 0
 
-        # Simple log string for XP / level up / heal / reward messages
-        self.last_message: str = ""
+        # Exploration message history + backing store for last_message
+        self.exploration_log: List[str] = []
+        self.exploration_log_max: int = 60
+        self._last_message: str = ""
 
         # Short grace window after battles where enemies don't auto-engage
         self.post_battle_grace: float = 0.0
@@ -104,7 +150,12 @@ class Game:
         self.zoom_index: int = 1  # start at 1.0x
 
         # Debug flags
+               # Debug flags
         self.debug_reveal_map: bool = False
+
+        # Display mode
+        self.fullscreen: bool = False
+
 
         # Initialize hero stats, perks, items and gold for the chosen class
         self._init_hero_for_class(hero_class_id)
@@ -120,16 +171,27 @@ class Game:
     # ------------------------------------------------------------------
 
     def enter_exploration_mode(self) -> None:
-        """Switch back to exploration mode."""
+        """Switch back to exploration mode and clear any active screen."""
         self.mode = GameMode.EXPLORATION
+        # When returning to exploration, close any transient overlay screen.
+        self.active_screen = None
 
     def enter_battle_mode(self) -> None:
         """Switch into battle mode (BattleScene must already be created)."""
         self.mode = GameMode.BATTLE
+        # We don't keep generic overlay screens alive across mode changes.
+        self.active_screen = None
 
     def enter_perk_choice_mode(self) -> None:
-        """Switch into level-up perk choice overlay mode."""
+        """
+        Switch into level-up perk choice overlay mode.
+
+        We pause world updates (mode = PERK_CHOICE), keep the exploration
+        view on screen, and attach the perk-choice screen as the active UI
+        overlay.
+        """
         self.mode = GameMode.PERK_CHOICE
+        self.active_screen = self.perk_choice_screen
 
     def toggle_inventory_overlay(self) -> None:
         """
@@ -138,18 +200,130 @@ class Game:
         """
         self.show_inventory = not self.show_inventory
         if self.show_inventory:
-            # Inventory takes focus; hide character sheet & battle log
+            # Inventory takes focus; hide character sheet & logs
             self.show_character_sheet = False
             self.show_battle_log = False
+            if hasattr(self, "show_exploration_log"):
+                self.show_exploration_log = False
+            # When opening the inventory, default focus is the hero.
+            self.inventory_focus_index = 0
+
+    def equip_item_for_inventory_focus(self, item_id: str) -> None:
+        """
+        Equip the given item on whichever character the inventory overlay
+        is currently focusing on.
+
+        - Focus index 0: hero (uses self.inventory.equip).
+        - Focus index 1..N: companions in self.party order (uses their
+          per-companion equipment + stat recomputation).
+        """
+        # Ensure we actually have an inventory and the item is known in it.
+        if self.inventory is None:
+            self.last_message = "You are not carrying anything."
+            return
+
+        if item_id not in self.inventory.items:
+            # Being strict here makes it easier to debug item flow.
+            self.last_message = "You do not own that item."
+            return
+
+        focus_index = int(getattr(self, "inventory_focus_index", 0))
+        party_list = getattr(self, "party", None) or []
+
+        # If focus is 0 or there are no companions, fall back to hero equip.
+        if focus_index <= 0 or not party_list:
+            msg = self.inventory.equip(item_id)
+            self.last_message = msg
+            # Re-apply hero stats so the new gear takes effect.
+            if self.player is not None:
+                self.apply_hero_stats_to_player(full_heal=False)
+            return
+
+        comp_idx = focus_index - 1
+        if comp_idx < 0 or comp_idx >= len(party_list):
+            # Defensive fallback: just treat as hero equip.
+            msg = self.inventory.equip(item_id)
+            self.last_message = msg
+            if self.player is not None:
+                self.apply_hero_stats_to_player(full_heal=False)
+            return
+
+        comp_state = party_list[comp_idx]
+        if not isinstance(comp_state, CompanionState):
+            # Shouldn't happen, but don't crash the game if it does.
+            msg = self.inventory.equip(item_id)
+            self.last_message = msg
+            if self.player is not None:
+                self.apply_hero_stats_to_player(full_heal=False)
+            return
+
+        # Lazy-init equipped map if needed.
+        if not hasattr(comp_state, "equipped") or comp_state.equipped is None:
+            comp_state.equipped = {
+                "weapon": None,
+                "armor": None,
+                "trinket": None,
+            }
+
+        item_def = get_item_def(item_id)
+        if item_def is None:
+            self.last_message = "That item cannot be equipped."
+            return
+
+        slot = getattr(item_def, "slot", None)
+        if not slot:
+            self.last_message = f"{item_def.name} cannot be equipped."
+            return
+
+        # For now we only support the same core slots as the hero.
+        if slot not in ("weapon", "armor", "trinket"):
+            self.last_message = f"{item_def.name} cannot be equipped by companions."
+            return
+
+        old_item_id = comp_state.equipped.get(slot)
+        comp_state.equipped[slot] = item_id
+
+        # Recalculate this companion's stats with the new gear.
+        template_id = getattr(comp_state, "template_id", None)
+        comp_template = None
+        if template_id:
+            try:
+                comp_template = get_companion(template_id)
+            except KeyError:
+                comp_template = None
+
+        if comp_template is not None:
+            recalc_companion_stats_for_level(comp_state, comp_template)
+
+        # Build a nice message.
+        # Name priority: explicit override -> template name -> generic label.
+        display_name = getattr(comp_state, "name_override", None)
+        if not display_name and comp_template is not None:
+            display_name = comp_template.name
+        if not display_name:
+            display_name = "Companion"
+
+        if old_item_id and old_item_id != item_id:
+            old_def = get_item_def(old_item_id)
+            if old_def is not None:
+                self.last_message = f"{display_name} swaps {old_def.name} for {item_def.name}."
+                return
+
+        self.last_message = f"{display_name} equips {item_def.name}."
+
 
     def toggle_character_sheet_overlay(self) -> None:
         """
-        Toggle character sheet overlay. When opened, hide the battle log
+        Toggle character sheet overlay. When opened, hide the logs
         to avoid stacking overlays.
         """
         self.show_character_sheet = not self.show_character_sheet
         if self.show_character_sheet:
+            # Whenever we open the sheet, default focus back to the hero.
+            self.character_sheet_focus_index = 0
             self.show_battle_log = False
+            if hasattr(self, "show_exploration_log"):
+                self.show_exploration_log = False
 
     def toggle_battle_log_overlay(self) -> None:
         """
@@ -160,6 +334,22 @@ class Game:
             self.show_battle_log = False
             return
         self.show_battle_log = not self.show_battle_log
+        if self.show_battle_log and hasattr(self, "show_exploration_log"):
+            # Don't stack both log overlays at once
+            self.show_exploration_log = False
+
+    def toggle_exploration_log_overlay(self) -> None:
+        """
+        Toggle the exploration log overlay showing recent messages
+        in exploration mode.
+        """
+        if not hasattr(self, "show_exploration_log"):
+            self.show_exploration_log = False
+
+        self.show_exploration_log = not self.show_exploration_log
+        if self.show_exploration_log:
+            # Hide battle log when opening exploration log
+            self.show_battle_log = False
 
     def is_overlay_open(self) -> bool:
         """
@@ -168,13 +358,124 @@ class Game:
         """
         return self.show_inventory or self.show_character_sheet
 
+    def cycle_character_sheet_focus(self, direction: int) -> None:
+        """
+        Cycle which character the character sheet is focusing on.
+
+        0 = hero, 1..N = companions in self.party order.
+        direction: +1 (next) or -1 (previous).
+        """
+        if not hasattr(self, "character_sheet_focus_index"):
+            self.character_sheet_focus_index = 0
+
+        party_list = getattr(self, "party", None) or []
+        total_slots = 1 + len(party_list)  # hero + companions
+        if total_slots <= 1:
+            # Only the hero exists
+            self.character_sheet_focus_index = 0
+            return
+
+        cur = int(getattr(self, "character_sheet_focus_index", 0))
+        cur = cur % total_slots
+
+        direction = 1 if direction > 0 else -1
+        new_index = (cur + direction) % total_slots
+        self.character_sheet_focus_index = new_index
+
+    def cycle_inventory_focus(self, direction: int) -> None:
+        """
+        Cycle which character the inventory overlay is focusing on.
+
+        0 = hero, 1..N = companions in self.party order.
+        """
+        # Make sure the index exists.
+        if not hasattr(self, "inventory_focus_index"):
+            self.inventory_focus_index = 0
+
+        party_list = getattr(self, "party", None) or []
+        total_slots = 1 + len(party_list)
+        if total_slots <= 1:
+            self.inventory_focus_index = 0
+            return
+
+        current = int(getattr(self, "inventory_focus_index", 0)) % total_slots
+        # Normalise direction to -1 / +1 so weird values still work.
+        step = -1 if direction < 0 else 1
+        self.inventory_focus_index = (current + step) % total_slots
+
+
+    # ------------------------------------------------------------------
+    # Message log helpers (exploration history)
+    # ------------------------------------------------------------------
+
+    @property
+    def last_message(self) -> str:
+        """
+        Latest message shown in the bottom exploration band.
+        Also mirrors the final line added to the exploration log.
+        """
+        return getattr(self, "_last_message", "")
+
+    @last_message.setter
+    def last_message(self, value: str) -> None:
+        """
+        Set the latest message and append it to the exploration log.
+
+        - Accepts any value, coerced to string.
+        - Supports multi-line strings; each non-empty line becomes
+          a distinct log entry.
+        - The final line becomes the visible bottom-band message.
+        """
+        # Normalise to string
+        if value is None:
+            raw = ""
+        else:
+            raw = str(value)
+
+        # Normalise newlines and split into lines
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+
+        # Always update the backing field; empty means "no message"
+        if not lines:
+            self._last_message = ""
+            return
+
+        # Ensure log structures exist
+        if not hasattr(self, "exploration_log"):
+            self.exploration_log = []
+        if not hasattr(self, "exploration_log_max"):
+            self.exploration_log_max = 60
+
+        # Append lines to history
+        self.exploration_log.extend(lines)
+
+        # Clamp log size
+        max_len = max(1, int(self.exploration_log_max))
+        if len(self.exploration_log) > max_len:
+            self.exploration_log = self.exploration_log[-max_len:]
+
+        # Visible "last message" is the final line
+        self._last_message = lines[-1]
+
+    def add_message(self, value: str) -> None:
+        """
+        Backwards-compatible helper for adding exploration messages.
+
+        - Wraps setting `last_message` so older code that used `add_message`
+          continues to work.
+        - Supports multi-line strings just like assigning to `last_message`
+          directly (each non-empty line becomes its own log entry).
+        """
+        self.last_message = value
+
+
     # ------------------------------------------------------------------
     # Hero stats helpers
     # ------------------------------------------------------------------
 
     def _init_hero_for_class(self, hero_class_id: str) -> None:
         from systems.classes import all_classes  # local import to avoid cycles
-        from systems.party import default_party_for_class  # NEW
 
         class_def = None
         for cls in all_classes():
@@ -203,8 +504,21 @@ class Game:
                     self.inventory.equip(item_id)
                     break
 
-        # Initialize party for this class (battle-only for now)
-        self.party = default_party_for_class(class_def.id)
+        # Initialize party as runtime CompanionState objects.
+        self.party = default_party_states_for_class(
+            class_def.id,
+            hero_level=self.hero_stats.level,
+        )
+
+        # Initialise each companion's stats based on its template and level.
+        for comp_state in self.party:
+            if not isinstance(comp_state, CompanionState):
+                continue
+            try:
+                template = get_companion(comp_state.template_id)
+            except Exception:
+                continue
+            init_companion_stats(comp_state, template)
 
     def apply_hero_stats_to_player(self, full_heal: bool = False) -> None:
         """
@@ -273,41 +587,159 @@ class Game:
         if perks_list is not None:
             setattr(self.player, "perks", list(perks_list))
 
-    def gain_xp_from_event(self, xp: int) -> list[str]:
+    def _sync_companions_to_hero_progression(self) -> None:
         """
-        Grant XP from a non-battle source (shrines, lore stones, etc).
+        Keep companions in lockstep with the hero's level/xp for now.
 
-        - Uses HeroStats.grant_xp to actually add XP.
-        - If this causes a level-up, prepares perk choices, fully heals the hero,
-          and switches to PERK_CHOICE mode.
-        - Returns the XP-related messages so callers (events) can append them
-          into their own text.
+        Later we can give companions their own independent progression.
         """
-        old_level = self.hero_stats.level
-        messages = self.hero_stats.grant_xp(xp)
-        new_level = self.hero_stats.level
+        if not getattr(self, "party", None):
+            return
 
-        if new_level > old_level:
-            # Level up: generate perk choices
-            self.pending_perk_choices = perk_system.pick_perk_choices(
-                self.hero_stats,
-                max_choices=3,
-            )
+        hero_level = getattr(self.hero_stats, "level", 1)
+        hero_xp = getattr(self.hero_stats, "xp", 0)
 
-            # Sync stats and fully heal, like after a battle level-up
-            if self.player is not None:
-                # Update stats first (max_hp may have changed)
-                self.apply_hero_stats_to_player(full_heal=False)
-                self.player.hp = self.hero_stats.max_hp
-                self.apply_hero_stats_to_player(full_heal=False)
-                messages.append("You feel completely renewed.")
+        for comp_state in self.party:
+            # Be defensive in case of legacy data
+            if not hasattr(comp_state, "level"):
+                continue
+            comp_state.level = hero_level
+            comp_state.xp = hero_xp
 
-            # If we actually have perks to choose from, open the overlay
-            if self.pending_perk_choices:
-                self.enter_perk_choice_mode()
+    def _grant_xp_to_companions(self, amount: int) -> List[str]:
+        """
+        Grant XP to all recruited companions and recalc their stats.
+
+        This keeps companion progression independent from the hero: they share
+        XP gains, but track their own levels.
+
+        Returns a list of log strings about companion level-ups.
+        """
+        party_list = getattr(self, "party", None) or []
+        amount = int(amount)
+
+        if amount <= 0 or not party_list:
+            return []
+
+        messages: List[str] = []
+
+        for idx, comp_state in enumerate(party_list):
+            # Only handle real CompanionState objects
+            if not isinstance(comp_state, CompanionState):
+                continue
+
+            # Skip companions that aren't recruited or shouldn't scale with hero XP.
+            # If the attributes don't exist yet, we treat them as True so old saves still work.
+            if not getattr(comp_state, "recruited", True):
+                continue
+            if not getattr(comp_state, "scales_with_hero", True):
+                continue
+
+            grant = getattr(comp_state, "grant_xp", None)
+            if not callable(grant):
+                continue
+
+            old_level = getattr(comp_state, "level", 1)
+            old_max_hp = getattr(comp_state, "max_hp", 0)
+            # CompanionState normally uses attack_power; fall back to attack if needed.
+            old_attack = getattr(comp_state, "attack_power", getattr(comp_state, "attack", 0))
+
+            try:
+                levels_gained = grant(amount)
+            except Exception:
+                # Don't let one weird companion break rewards.
+                continue
+
+            # No actual level up? Skip.
+            new_level = getattr(comp_state, "level", old_level)
+            if levels_gained <= 0 or new_level <= old_level:
+                continue
+
+            # Recompute stats from template + level + perks
+            template = None
+            try:
+                template = get_companion(comp_state.template_id)
+            except Exception:
+                pass
+            if template is None:
+                continue
+
+            recalc_companion_stats_for_level(comp_state, template)
+
+            # Queue one perk choice for this companion.
+            self.perk_choice_screen.enqueue_perk_choice(self, "companion", idx)
+
+            # Compose a quick summary line with stat gains
+            new_max_hp = getattr(comp_state, "max_hp", old_max_hp)
+            new_attack = getattr(comp_state, "attack_power", getattr(comp_state, "attack", old_attack))
+
+            delta_hp = new_max_hp - old_max_hp
+            delta_attack = new_attack - old_attack
+
+            # Figure out a nice display name for logging
+            display_name = getattr(comp_state, "name_override", None)
+            if not display_name:
+                display_name = getattr(comp_state, "name", None)
+            if not display_name:
+                # Fall back to the companion template name if available
+                try:
+                    template_for_name = get_companion(comp_state.template_id)
+                except Exception:
+                    template_for_name = None
+                if template_for_name is not None:
+                    display_name = getattr(template_for_name, "name", None)
+            if not display_name:
+                display_name = f"Companion {idx + 1}"
+
+            parts: List[str] = [f"{display_name} reaches level {comp_state.level}"]
+
+            bonuses: List[str] = []
+            if delta_hp > 0:
+                bonuses.append(f"+{delta_hp} HP")
+            if delta_attack > 0:
+                bonuses.append(f"+{delta_attack} ATK")
+
+            if bonuses:
+                parts.append("(" + ", ".join(bonuses) + ")")
+
+            messages.append(" ".join(parts))
 
         return messages
 
+
+
+    def gain_xp_from_event(self, amount: int) -> None:
+        """Grant XP from a map event, showing messages + perk choice overlay."""
+        if amount <= 0:
+            return
+
+        old_level = self.hero_stats.level
+        messages = self.hero_stats.grant_xp(amount)
+        for msg in messages:
+            self.add_message(msg)
+
+        new_level = self.hero_stats.level
+        leveled_up = new_level > old_level
+        if leveled_up:
+            # Hero gets a queued perk choice.
+            self.perk_choice_screen.enqueue_perk_choice(self, "hero")
+
+        # Companions share the same XP amount, but track their own levels
+        companion_msgs = self._grant_xp_to_companions(amount)
+        for msg in companion_msgs:
+            self.add_message(msg)
+
+        # On level-up from an event, full-heal the hero immediately.
+        if leveled_up and self.player is not None:
+            self.apply_hero_stats_to_player(full_heal=False)
+            self.player.hp = self.hero_stats.max_hp
+            self.add_message("You feel completely renewed!")
+
+        # If anyone leveled and has perk choices, start the perk-choice flow.
+        if self.perk_choice_queue:
+            self.perk_choice_screen.start_next_perk_choice(self)
+
+        return messages
 
     def update_fov(self) -> None:
         """Recompute the map's FOV around the player."""
@@ -385,6 +817,33 @@ class Game:
         self.camera_y = max(0.0, min(self.camera_y, max_y))
 
 
+    def toggle_fullscreen(self) -> None:
+        """
+        Toggle between windowed and fullscreen display.
+
+        - Windowed: uses WINDOW_WIDTH / WINDOW_HEIGHT from settings.
+        - Fullscreen: uses the current desktop resolution.
+        """
+        # Decide target mode
+        if not getattr(self, "fullscreen", False):
+            info = pygame.display.Info()
+            width, height = info.current_w, info.current_h
+            new_screen = pygame.display.set_mode((width, height), pygame.FULLSCREEN)
+            self.fullscreen = True
+        else:
+            new_screen = pygame.display.set_mode(
+                (WINDOW_WIDTH, WINDOW_HEIGHT)
+            )
+            self.fullscreen = False
+
+        # Update the game's screen reference
+        self.screen = new_screen
+
+        # Re-center / clamp camera to fit the new viewport
+        self._center_camera_on_player()
+        self._clamp_camera_to_map()
+
+
     # ------------------------------------------------------------------
     # Floor / map management
     # ------------------------------------------------------------------
@@ -423,11 +882,15 @@ class Game:
         # From now on self.current_map is a GameMap, not a tuple
         self.current_map = game_map
 
-        # Spawn enemies / events / chests only once per floor
+        # Spawn enemies / events / chests / merchants only once per floor
         if newly_created:
             self.spawn_enemies_for_floor(game_map, floor_index)
             self.spawn_events_for_floor(game_map, floor_index)
             self.spawn_chests_for_floor(game_map, floor_index)
+            self.spawn_merchants_for_floor(game_map, floor_index)
+
+            # Debug/testing: always ensure at least one merchant on floor 3
+            self._ensure_debug_merchant_on_floor_three(game_map, floor_index)
 
         # Decide spawn position based on stair direction
         if from_direction == "down" and game_map.up_stairs is not None:
@@ -473,7 +936,7 @@ class Game:
 
         # Apply hero stats (full heal on floor entry)
         self.apply_hero_stats_to_player(full_heal=True)
-        # 🔹 NEW: reset the camera around the player for this floor
+        # Reset the camera around the player for this floor
         self._center_camera_on_player()
         self._clamp_camera_to_map()
         # Floor starts paused until the player actually moves
@@ -540,11 +1003,12 @@ class Game:
 
     def spawn_enemies_for_floor(self, game_map: GameMap, floor_index: int) -> None:
         """
-        Spawn enemies on this floor.
+        Spawn enemies on this floor, using room-aware logic, enemy archetypes,
+        and *packs* (themed groups that spawn together).
 
         Room-aware logic:
         - Never spawn in the 'start' room.
-        - Prefer lair rooms for extra density.
+        - Prefer lair rooms for extra density / heavier packs.
         - Fill remaining quota from other rooms and corridors.
         - Keep a safe radius around the main spawn.
         """
@@ -602,7 +1066,7 @@ class Game:
         random.shuffle(room_tiles)
         random.shuffle(corridor_tiles)
 
-        # Scale enemy count by floor depth *and* floor area
+        # --- Decide roughly how many enemies we want on this floor ---------
         base_desired = 2 + floor_index
 
         screen_w, screen_h = self.screen.get_size()
@@ -616,62 +1080,143 @@ class Game:
         # Keep in a reasonable band so things don't get absurd
         area_factor = max(0.75, min(area_factor, 1.8))
 
-        scaled = int(round(base_desired * area_factor))
-        desired = min(8, max(2, scaled))
+        target_enemies = int(round(base_desired * area_factor))
+        # Soft clamp overall difficulty
+        target_enemies = min(10, max(2, target_enemies))
 
-        chosen_tiles: List[tuple[int, int]] = []
-        remaining = desired
+        # We'll spawn enemies in *packs*. Each pack is usually 2–3 enemies.
+        approx_pack_size = 2.2
+        desired_packs = max(1, int(round(target_enemies / approx_pack_size)))
 
-        # Fill roughly half from lair rooms (if any)
-        if lair_tiles and remaining > 0:
-            lair_target = min(len(lair_tiles), max(1, remaining // 2))
-            chosen_tiles.extend(lair_tiles[:lair_target])
-            remaining -= lair_target
+        all_candidate_tiles = lair_tiles + room_tiles + corridor_tiles
+        if not all_candidate_tiles:
+            return
 
-        # Fill most of the remainder from normal rooms
-        if room_tiles and remaining > 0:
-            room_target = min(len(room_tiles), remaining)
-            chosen_tiles.extend(room_tiles[:room_target])
-            remaining -= room_target
+        desired_packs = min(desired_packs, len(all_candidate_tiles))
 
-        # Whatever is left comes from corridors
-        if corridor_tiles and remaining > 0:
-            corr_target = min(len(corridor_tiles), remaining)
-            chosen_tiles.extend(corridor_tiles[:corr_target])
-            remaining -= corr_target
+        chosen_anchors: List[tuple[int, int]] = []
+        remaining_packs = desired_packs
 
-        # Actually spawn enemies at the chosen tiles
-        for tx, ty in chosen_tiles:
-            ex, ey = game_map.center_entity_on_tile(tx, ty, enemy_width, enemy_height)
-            enemy = Enemy(
-                x=ex,
-                y=ey,
-                width=enemy_width,
-                height=enemy_height,
-                # Slightly slower chase speed for nicer exploration feel
-                speed=70.0,
-            )
+        # Fill roughly half of the pack anchors from lair rooms (if any)
+        if lair_tiles and remaining_packs > 0:
+            lair_target = min(len(lair_tiles), max(1, remaining_packs // 2))
+            chosen_anchors.extend(lair_tiles[:lair_target])
+            remaining_packs -= lair_target
 
-            # Basic combat stats that BattleScene will use
-            max_hp = 10 + floor_index * 2
-            setattr(enemy, "max_hp", max_hp)
-            setattr(enemy, "hp", max_hp)
-            setattr(enemy, "attack_power", 3 + floor_index // 2)
+        # Then normal rooms
+        if room_tiles and remaining_packs > 0:
+            room_target = min(len(room_tiles), remaining_packs)
+            chosen_anchors.extend(room_tiles[:room_target])
+            remaining_packs -= room_target
 
-            # Small defense scaling per floor
-            setattr(enemy, "defense", floor_index // 2)
+        # Whatever anchors remain come from corridors
+        if corridor_tiles and remaining_packs > 0:
+            corr_target = min(len(corridor_tiles), remaining_packs)
+            chosen_anchors.extend(corridor_tiles[:corr_target])
+            remaining_packs -= corr_target
 
-            # XP reward for defeating this enemy
-            setattr(enemy, "xp_reward", 5 + floor_index * 2)
+        if not chosen_anchors:
+            return
 
-            # Enemy type (for UI & group names)
-            enemy_type = self._choose_enemy_type_for_floor(floor_index)
-            setattr(enemy, "enemy_type", enemy_type)
+        # Track which tiles already have an enemy so packs don't overlap
+        occupied_enemy_tiles: set[tuple[int, int]] = set()
+        spawned_total = 0
+        # Hard cap so big floors don't turn into bullet hell
+        max_total_enemies = min(target_enemies + 3, 12)
 
-            # Enemies block movement in exploration
-            setattr(enemy, "blocks_movement", True)
+        def can_use_tile(tx: int, ty: int) -> bool:
+            if (tx, ty) in occupied_enemy_tiles:
+                return False
+            if up is not None and (tx, ty) == up:
+                return False
+            if down is not None and (tx, ty) == down:
+                return False
+            if not game_map.is_walkable_tile(tx, ty):
+                return False
+            dx_ = tx - safe_cx
+            dy_ = ty - safe_cy
+            if dx_ * dx_ + dy_ * dy_ <= safe_radius_tiles * safe_radius_tiles:
+                return False
+            return True
 
-            game_map.entities.append(enemy)
+        for anchor_tx, anchor_ty in chosen_anchors:
+            if spawned_total >= max_total_enemies:
+                break
+
+            room = game_map.get_room_at(anchor_tx, anchor_ty) if hasattr(game_map, "get_room_at") else None
+            room_tag = getattr(room, "tag", "generic") if room is not None else None
+
+            # --- Pick a pack template for this anchor ----------------------
+            try:
+                pack = choose_pack_for_floor(floor_index, room_tag=room_tag)
+                member_arch_ids = list(pack.member_arch_ids)
+            except Exception:
+                # Very defensive fallback: just pick a single archetype
+                arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
+                member_arch_ids = [arch.id]
+
+            # Candidate spawn tiles: anchor + its 8 neighbors (3×3 cluster)
+            candidate_tiles: List[tuple[int, int]] = []
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    tx = anchor_tx + dx
+                    ty = anchor_ty + dy
+                    if 0 <= tx < game_map.width and 0 <= ty < game_map.height:
+                        candidate_tiles.append((tx, ty))
+            random.shuffle(candidate_tiles)
+
+            for arch_id in member_arch_ids:
+                if spawned_total >= max_total_enemies:
+                    break
+
+                # Find a nearby free tile for this pack member
+                spawn_tx: Optional[int] = None
+                spawn_ty: Optional[int] = None
+                for tx, ty in candidate_tiles:
+                    if can_use_tile(tx, ty):
+                        spawn_tx, spawn_ty = tx, ty
+                        break
+
+                if spawn_tx is None or spawn_ty is None:
+                    # No more room around this anchor
+                    continue
+
+                # Look up archetype; if missing, fall back to generic floor-based choice
+                try:
+                    arch = get_archetype(arch_id)
+                except KeyError:
+                    arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
+
+                max_hp, attack_power, defense, xp_reward = compute_scaled_stats(arch, floor_index)
+
+                ex, ey = game_map.center_entity_on_tile(spawn_tx, spawn_ty, enemy_width, enemy_height)
+                enemy = Enemy(
+                    x=ex,
+                    y=ey,
+                    width=enemy_width,
+                    height=enemy_height,
+                    # Slightly slower chase speed for nicer exploration feel
+                    speed=70.0,
+                )
+
+                # Basic combat stats that BattleScene will use
+                setattr(enemy, "max_hp", max_hp)
+                setattr(enemy, "hp", max_hp)
+                setattr(enemy, "attack_power", attack_power)
+                setattr(enemy, "defense", defense)
+
+                # XP reward and metadata
+                setattr(enemy, "xp_reward", xp_reward)
+                setattr(enemy, "enemy_type", arch.name)
+                setattr(enemy, "archetype_id", arch.id)
+                setattr(enemy, "ai_profile", arch.ai_profile)
+
+                # Enemies block movement in exploration
+                setattr(enemy, "blocks_movement", True)
+
+                game_map.entities.append(enemy)
+                occupied_enemy_tiles.add((spawn_tx, spawn_ty))
+                spawned_total += 1
 
     def spawn_events_for_floor(self, game_map: GameMap, floor_index: int) -> None:
         """
@@ -908,6 +1453,150 @@ class Game:
             setattr(chest, "blocks_movement", False)
             game_map.entities.append(chest)
 
+    def spawn_merchants_for_floor(self, game_map: GameMap, floor_index: int) -> None:
+        """
+        Spawn one stationary merchant in each 'shop' room, if any exist.
+
+        Merchants:
+        - Stand roughly at the room's tile centre.
+        - Block movement (you walk around them).
+        """
+        from world.entities import Merchant  # local import to avoid circulars
+
+        # If we don't have room metadata, we can't place shopkeepers
+        if not getattr(game_map, "rooms", None):
+            return
+
+        up = game_map.up_stairs
+        down = game_map.down_stairs
+
+        # Tiles already occupied by entities (enemies, chests, events...)
+        occupied_tiles: set[tuple[int, int]] = set()
+        for entity in getattr(game_map, "entities", []):
+            if not hasattr(entity, "rect"):
+                continue
+            cx, cy = entity.rect.center
+            tx, ty = game_map.world_to_tile(cx, cy)
+            occupied_tiles.add((tx, ty))
+
+        # Collect all walkable tiles for each distinct shop room
+        room_tiles: dict[object, list[tuple[int, int]]] = {}
+
+        for ty in range(game_map.height):
+            for tx in range(game_map.width):
+                if not game_map.is_walkable_tile(tx, ty):
+                    continue
+                if up is not None and (tx, ty) == up:
+                    continue
+                if down is not None and (tx, ty) == down:
+                    continue
+                if (tx, ty) in occupied_tiles:
+                    continue
+
+                if not hasattr(game_map, "get_room_at"):
+                    continue
+                room = game_map.get_room_at(tx, ty)
+                if room is None:
+                    continue
+                if getattr(room, "tag", "") != "shop":
+                    continue
+
+                room_tiles.setdefault(room, []).append((tx, ty))
+
+        if not room_tiles:
+            return
+
+        merchant_w = TILE_SIZE // 2
+        merchant_h = TILE_SIZE // 2
+
+        for room, tiles in room_tiles.items():
+            if not tiles:
+                continue
+
+            # Try to place merchant near the "centre" of the room's tiles
+            avg_tx = sum(t[0] for t in tiles) // len(tiles)
+            avg_ty = sum(t[1] for t in tiles) // len(tiles)
+
+            candidate_tiles = [(avg_tx, avg_ty)] + tiles
+            chosen_tx: Optional[int] = None
+            chosen_ty: Optional[int] = None
+
+            for tx, ty in candidate_tiles:
+                if (tx, ty) in occupied_tiles:
+                    continue
+                chosen_tx, chosen_ty = tx, ty
+                break
+
+            if chosen_tx is None or chosen_ty is None:
+                continue
+
+            mx, my = game_map.center_entity_on_tile(
+                chosen_tx,
+                chosen_ty,
+                merchant_w,
+                merchant_h,
+            )
+            merchant = Merchant(
+                x=mx,
+                y=my,
+                width=merchant_w,
+                height=merchant_h,
+            )
+            # Merchants block movement
+            merchant.blocks_movement = True
+
+            game_map.entities.append(merchant)
+            occupied_tiles.add((chosen_tx, chosen_ty))
+
+    def _ensure_debug_merchant_on_floor_three(
+        self,
+        game_map: GameMap,
+        floor_index: int,
+    ) -> None:
+        """
+        Debug / testing helper:
+
+        On floor 3, if no Merchant was spawned (e.g. no 'shop' room on that
+        seed), force-spawn a single Merchant on the DOWN stairs tile.
+
+        This guarantees a merchant for testing without affecting other floors.
+        """
+        if floor_index != 3:
+            return
+
+        # If there's already at least one merchant, do nothing
+        for entity in getattr(game_map, "entities", []):
+            if isinstance(entity, Merchant):
+                return
+
+        # Choose the down-stairs tile if possible; otherwise fall back
+        if game_map.down_stairs is not None:
+            tx, ty = game_map.down_stairs
+        else:
+            tx = game_map.width // 2
+            ty = game_map.height // 2
+
+        merchant_w = TILE_SIZE // 2
+        merchant_h = TILE_SIZE // 2
+
+        mx, my = game_map.center_entity_on_tile(
+            tx,
+            ty,
+            merchant_w,
+            merchant_h,
+        )
+
+        merchant = Merchant(
+            x=mx,
+            y=my,
+            width=merchant_w,
+            height=merchant_h,
+        )
+        merchant.blocks_movement = True
+
+        game_map.entities.append(merchant)
+
+
     # ------------------------------------------------------------------
     # Battle handling
     # ------------------------------------------------------------------
@@ -970,12 +1659,17 @@ class Game:
             xp_total += int(getattr(e, "xp_reward", 5))
         self.pending_battle_xp = xp_total
 
-        # 4) Create battle scene with the entire group + current party
+        # 4) Create battle scene with the entire group + current party.
+        # Pass runtime CompanionState objects directly; BattleScene knows how
+        # to use their own stats (HP / ATK / DEF / skill_power).
+        party_list = getattr(self, "party", None) or []
+        companions_for_battle = list(party_list) if party_list else None
+
         self.battle_scene = BattleScene(
             self.player,
             encounter_enemies,
             self.ui_font,
-            companions=getattr(self, "party", None),
+            companions=companions_for_battle,
         )
         self.enter_battle_mode()
 
@@ -995,13 +1689,22 @@ class Game:
         self.player = None
         self.battle_scene = None
         self.enter_exploration_mode()
-        self.last_message = ""
+
+        # Reset logs and overlays
+        self.exploration_log = []
+        self._last_message = ""
         self.pending_battle_xp = 0
         self.post_battle_grace = 0.0
         self.last_battle_log = []
         self.show_battle_log = False
+        self.show_exploration_log = False
         self.show_character_sheet = False
+
+        # Clear any pending perk choices / queue.
         self.pending_perk_choices = []
+        self.perk_choice_queue = []
+        self.perk_choice_owner = None
+        self.perk_choice_companion_index = None
 
         # Reset floor back to 1
         self.floor = 1
@@ -1064,14 +1767,17 @@ class Game:
             if xp_reward > 0:
                 old_level = self.hero_stats.level
                 messages.extend(self.hero_stats.grant_xp(xp_reward))
+
                 new_level = self.hero_stats.level
                 leveled_up = new_level > old_level
-
-                # On level-up, prepare perk choices (if any)
                 if leveled_up:
-                    self.pending_perk_choices = perk_system.pick_perk_choices(
-                        self.hero_stats, max_choices=3
-                    )
+                    # Queue a perk choice for the hero.
+                    self.perk_choice_screen.enqueue_perk_choice(self, "hero")
+
+                # Companions gain the same XP amount independently.
+                companion_msgs = self._grant_xp_to_companions(xp_reward)
+                if companion_msgs:
+                    messages.extend(companion_msgs)
 
             # 2) Sync stats onto player and apply baseline healing
             if self.player is not None:
@@ -1094,94 +1800,28 @@ class Game:
                 reward_msgs = self.roll_battle_reward()
                 messages.extend(reward_msgs)
 
-                # Ensure player stats are synced after any reward changes
-                self.apply_hero_stats_to_player(full_heal=False)
+            # 4) Go back to exploration
+            self.enter_exploration_mode()
+            self.battle_scene = None
 
-            # 4) Possible item loot
-            loot_item_id = roll_battle_loot(self.floor)
-            if loot_item_id is not None and self.inventory is not None:
-                # Add item to inventory
-                self.inventory.add_item(loot_item_id)
+            # 5) Log messages into exploration log
+            for msg in messages:
+                self.add_message(msg)
 
-                # Look up a nice display name if we can
-                item_def = get_item_def(loot_item_id)
-                item_name = item_def.name if item_def is not None else loot_item_id
+            # 6) If anyone has pending perk choices, start the flow.
+            if self.perk_choice_queue:
+                self.perk_choice_screen.start_next_perk_choice(self)
 
-                messages.append(f"You find: {item_name}.")
-
-                # Re-sync stats in case gear bonuses matter later
-                if self.player is not None:
-                    self.apply_hero_stats_to_player(full_heal=False)
-
-            if messages:
-                self.last_message = " ".join(messages)
-
-            # Grace window after the battle to avoid immediate re-engage
-            self.post_battle_grace = 1.5
-
-            # If we have perk choices, go into perk_choice mode; otherwise, back to exploration
-            if self.pending_perk_choices:
-                self.enter_perk_choice_mode()
-            else:
-                self.enter_exploration_mode()
 
         elif status == "defeat":
-            # Restart whole run
+            # Simple defeat handling: message + restart.
+            self.add_message("You were defeated. The dungeon claims another hero...")
             self.restart_run()
-
-    # ------------------------------------------------------------------
-    # Perk choice overlay
-    # ------------------------------------------------------------------
-
-    def handle_event_perk_choice(self, event: pygame.event.Event) -> None:
-        """
-        Handle input while the perk choice overlay is open.
-        1 / 2 / 3 choose a perk. ESC cancels (no perk).
-        """
-        if event.type != pygame.KEYDOWN:
-            return
-
-        # Escape: skip (no perk)
-        if event.key == pygame.K_ESCAPE:
-            self.pending_perk_choices = []
             self.enter_exploration_mode()
-            return
+            self.battle_scene = None
 
-        idx = None
-        if event.key in (pygame.K_1, pygame.K_KP1):
-            idx = 0
-        elif event.key in (pygame.K_2, pygame.K_KP2):
-            idx = 1
-        elif event.key in (pygame.K_3, pygame.K_KP3):
-            idx = 2
 
-        if idx is None:
-            return
 
-        if idx >= len(self.pending_perk_choices):
-            return
-
-        chosen = self.pending_perk_choices[idx]
-
-        # Apply perk
-        chosen.apply(self.hero_stats)
-
-        # Register as learned
-        if not hasattr(self.hero_stats, "perks"):
-            self.hero_stats.perks = []
-        if chosen.id not in self.hero_stats.perks:
-            self.hero_stats.perks.append(chosen.id)
-
-        # Re-sync stats
-        if self.player is not None:
-            self.apply_hero_stats_to_player(full_heal=False)
-
-        # Show a concise message about what we picked
-        self.last_message = f"You choose perk: {chosen.name}. {chosen.description}"
-
-        # Clear choices and go back to exploration
-        self.pending_perk_choices = []
-        self.enter_exploration_mode()
 
     # ------------------------------------------------------------------
     # Main loop: update
@@ -1221,6 +1861,36 @@ class Game:
         if handle_cheat_key(self, event):
             return
 
+        # Global fullscreen toggle
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+            self.toggle_fullscreen()
+            return
+
+        # Character sheet focus cycling: works in any mode while the sheet is open.
+        if (
+            event.type == pygame.KEYDOWN
+            and getattr(self, "show_character_sheet", False)
+        ):
+            if event.key == pygame.K_q:
+                self.cycle_character_sheet_focus(-1)
+                return
+            elif event.key == pygame.K_e:
+                self.cycle_character_sheet_focus(+1)
+                return
+
+        # If inventory is open, allow cycling focus with Q/E there too.
+        if (
+            event.type == pygame.KEYDOWN
+            and getattr(self, "show_inventory", False)
+        ):
+            if event.key == pygame.K_q:
+                self.cycle_inventory_focus(-1)
+                return
+            elif event.key == pygame.K_e:
+                self.cycle_inventory_focus(+1)
+                return
+
+
         if self.mode == GameMode.EXPLORATION:
             self.exploration.handle_event(event)
         elif self.mode == GameMode.BATTLE:
@@ -1228,21 +1898,39 @@ class Game:
                 self.battle_scene.handle_event(event)
                 self._check_battle_finished()
         elif self.mode == GameMode.PERK_CHOICE:
-            self.handle_event_perk_choice(event)
+            # During perk-choice mode, input goes to the active screen if any.
+            if self.active_screen is not None:
+                self.active_screen.handle_event(self, event)
+            elif self.perk_choice_screen is not None:
+                # Fallback for safety
+                self.perk_choice_screen.handle_event(self, event)
+
 
     # ------------------------------------------------------------------
     # Drawing
     # ------------------------------------------------------------------
 
     def draw(self) -> None:
+        """
+        Top-level draw: render the world based on mode, then any active
+        full-screen overlay (such as the perk-choice screen).
+        """
         if self.mode == GameMode.EXPLORATION:
             self.draw_exploration()
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
         elif self.mode == GameMode.PERK_CHOICE:
-            # Show the world + UI, then overlay the perk choice
+            # Even while choosing perks we still show the exploration view
+            # in the background, but world updates are paused in update().
             self.draw_exploration()
-            draw_perk_choice_overlay(self)
+
+        # Draw an active overlay screen (perk choice, etc.) on top.
+        if self.mode == GameMode.PERK_CHOICE:
+            if self.active_screen is not None:
+                self.active_screen.draw(self)
+            elif self.perk_choice_screen is not None:
+                # Fallback: draw the overlay directly.
+                self.perk_choice_screen.draw(self)
 
     def draw_exploration(self) -> None:
         assert self.current_map is not None
