@@ -31,7 +31,6 @@ from systems.enemies import (
 )
 from ui.hud import (
     draw_exploration_ui,
-    draw_perk_choice_overlay,
     draw_inventory_overlay,
 )
 from ui.screens import BaseScreen, PerkChoiceScreen
