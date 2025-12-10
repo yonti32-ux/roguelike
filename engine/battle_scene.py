@@ -19,6 +19,8 @@ from systems.skills import Skill, get as get_skill
 from systems import perks as perk_system
 from systems.party import CompanionDef, CompanionState, get_companion, ensure_companion_stats
 from systems.enemies import get_archetype  # NEW
+from systems.input import InputAction  # NEW
+
 
 BattleStatus = Literal["ongoing", "victory", "defeat"]
 Side = Literal["player", "enemy"]
@@ -40,6 +42,8 @@ class BattleUnit:
     statuses: List[StatusEffect] = field(default_factory=list)
     cooldowns: Dict[str, int] = field(default_factory=dict)
     skills: Dict[str, Skill] = field(default_factory=dict)
+    # Optional hotbar-style layout; indices 0–3 map to SKILL_1..SKILL_4.
+    skill_slots: List[str] = field(default_factory=list)
 
     @property
     def hp(self) -> int:
@@ -56,6 +60,7 @@ class BattleUnit:
     @property
     def is_alive(self) -> bool:
         return self.hp > 0
+
 
 
 class BattleScene:
@@ -136,7 +141,17 @@ class BattleScene:
                     # Skill not registered yet – ignore silently
                     continue
 
+        # Prefer a persisted slot layout if present on the hero entity
+        # (e.g. synced from HeroStats.skill_slots). Fallback to auto layout.
+        hero_slots = getattr(self.player, "skill_slots", None)
+        if isinstance(hero_slots, list) and any(hero_slots):
+            self._apply_persisted_slots(hero_unit, hero_slots)
+        else:
+            self._auto_assign_skill_slots(hero_unit)
+
         # --- Player side: hero + companions from Game.party -----------------
+
+
 
         self.player_units: List[BattleUnit] = [hero_unit]
 
@@ -243,6 +258,37 @@ class BattleScene:
                         pass
 
                 companion_unit.skills = skills
+
+                # --- Extra skills from this companion's own perks -------------
+                # CompanionState.perks is a list of perk ids; many of those
+                # perks may define grant_skills, just like the hero.
+                if comp_state is not None and getattr(comp_state, "perks", None):
+                    for pid in comp_state.perks:
+                        try:
+                            perk = perk_system.get(pid)
+                        except KeyError:
+                            continue
+
+                        for skill_id in getattr(perk, "grant_skills", []):
+                            try:
+                                companion_unit.skills[skill_id] = get_skill(skill_id)
+                                # Ensure cooldown entry exists; 0 = ready.
+                                companion_unit.cooldowns.setdefault(skill_id, 0)
+                            except KeyError:
+                                continue
+
+                # Use a persisted layout from CompanionState if possible,
+                # otherwise fall back to an automatic layout.
+                applied_from_state = False
+                if comp_state is not None:
+                    state_slots = getattr(comp_state, "skill_slots", None)
+                    if isinstance(state_slots, list) and any(state_slots):
+                        self._apply_persisted_slots(companion_unit, state_slots)
+                        applied_from_state = True
+
+                if not applied_from_state:
+                    self._auto_assign_skill_slots(companion_unit)
+
                 self.player_units.append(companion_unit)
                 created_any_companion = True
 
@@ -274,6 +320,9 @@ class BattleScene:
                 }
             except KeyError:
                 companion_unit.skills = {}
+
+            # Auto-populate fallback companion hotbar as well.
+            self._auto_assign_skill_slots(companion_unit)
             self.player_units.append(companion_unit)
 
         # --- Enemy side: create a unit per enemy in the encounter group ---
@@ -546,6 +595,135 @@ class BattleScene:
 
     # ----- Skill helpers -----
 
+    def _auto_assign_skill_slots(self, unit: BattleUnit) -> None:
+        """
+        Populate unit.skill_slots from its current skills dict.
+
+        Guard is deliberately left OUT of slots – it has its own
+        dedicated GUARD action (usually bound to G).
+
+        Simple default:
+        - prefer 'power_strike' (or other core attacks) first
+        - then fill with any remaining non-guard skills in dict order
+        - cap at 4 entries (SKILL_1..SKILL_4)
+        """
+        ordered: List[str] = []
+
+        # Priority skills first, if present on this unit.
+        for prio in ("power_strike",):
+            if prio in unit.skills and prio not in ordered:
+                ordered.append(prio)
+
+        # Then everything else EXCEPT 'guard', in insertion order.
+        for sid in unit.skills.keys():
+            if sid == "guard":
+                continue
+            if sid not in ordered:
+                ordered.append(sid)
+
+        # Take at most 4 skills for now.
+        unit.skill_slots = ordered[:4]
+
+    def _auto_assign_skill_slots(self, unit: BattleUnit) -> None:
+        """
+        Populate unit.skill_slots from its current skills dict.
+
+        Guard is deliberately left OUT of slots – it has its own
+        dedicated GUARD action (usually bound to G).
+
+        Simple default:
+        - prefer 'power_strike' (or other core attacks) first
+        - then fill with any remaining non-guard skills in dict order
+        - cap at 4 entries (SKILL_1..SKILL_4)
+        """
+        ordered: List[str] = []
+
+        # Priority skills first, if present on this unit.
+        for prio in ("power_strike",):
+            if prio in unit.skills and prio not in ordered:
+                ordered.append(prio)
+
+        # Then everything else EXCEPT 'guard', in insertion order.
+        for sid in unit.skills.keys():
+            if sid == "guard":
+                continue
+            if sid not in ordered:
+                ordered.append(sid)
+
+        # Take at most 4 skills for now.
+        unit.skill_slots = ordered[:4]
+
+    def _apply_persisted_slots(self, unit: BattleUnit, persisted_ids) -> None:
+        """
+        Apply a pre-defined skill layout from data (hero/companion state).
+
+        - Ignores ids the unit doesn't actually have.
+        - Skips 'guard' (dedicated GUARD action).
+        - Truncates/pads to 4 entries.
+        Falls back to _auto_assign_skill_slots if nothing usable remains.
+        """
+        if not persisted_ids:
+            self._auto_assign_skill_slots(unit)
+            return
+
+        ordered: List[Optional[str]] = []
+
+        for sid in persisted_ids:
+            if not sid:
+                ordered.append(None)
+                continue
+            if sid == "guard":
+                # Guard is not part of the hotbar; keep its own key.
+                ordered.append(None)
+                continue
+            if sid not in unit.skills:
+                ordered.append(None)
+                continue
+            ordered.append(sid)
+            if len(ordered) >= 4:
+                break
+
+        # Ensure we always have 4 entries to match SKILL_1..4
+        while len(ordered) < 4:
+            ordered.append(None)
+
+        # Strip trailing Nones so a fully-empty layout becomes [].
+        trimmed = list(ordered)
+        while trimmed and trimmed[-1] is None:
+            trimmed.pop()
+
+        if trimmed:
+            unit.skill_slots = trimmed  # type: ignore[attr-defined]
+        else:
+            self._auto_assign_skill_slots(unit)
+
+
+    def _skill_for_action(self, unit: BattleUnit, action: InputAction) -> Optional[Skill]:
+        """Resolve InputAction.SKILL_1..4 -> Skill via the unit's skill_slots.
+
+        If there is no slot mapping yet, returns None and the caller can
+        fall back to key-based logic.
+        """
+        slots = getattr(unit, "skill_slots", None)
+        if not slots:
+            return None
+
+        index_map = {
+            InputAction.SKILL_1: 0,
+            InputAction.SKILL_2: 1,
+            InputAction.SKILL_3: 2,
+            InputAction.SKILL_4: 3,
+        }
+        idx = index_map.get(action)
+        if idx is None or idx >= len(slots):
+            return None
+
+        skill_id = slots[idx]
+        if not skill_id:
+            return None
+
+        return unit.skills.get(skill_id)
+
     def _skill_for_key(self, unit: BattleUnit, key: int) -> Optional[Skill]:
         for skill in unit.skills.values():
             if skill.key == key:
@@ -718,45 +896,112 @@ class BattleScene:
 
     # ------------ Input ------------
 
-    def handle_event(self, event: pygame.event.Event) -> None:
+    def handle_event(self, game, event: pygame.event.Event) -> None:
         if event.type != pygame.KEYDOWN:
             return
 
+        input_manager = getattr(game, "input_manager", None)
+
+        # If battle is already resolved, only listen for simple confirmations.
         if self.status == "defeat":
+            # Keep the original behaviour: R to leave / restart.
             if event.key == pygame.K_r:
                 self.finished = True
             return
 
         if self.status == "victory":
-            if event.key == pygame.K_SPACE:
-                self.finished = True
+            # Any generic "confirm" key (Enter/Space by default) will exit.
+            if input_manager is not None:
+                if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                    self.finished = True
+            else:
+                if event.key == pygame.K_SPACE:
+                    self.finished = True
             return
 
         unit = self._active_unit()
         if unit.side != "player":
             return
 
-        move_keys = {
-            pygame.K_UP: (0, -1),
-            pygame.K_w: (0, -1),
-            pygame.K_DOWN: (0, 1),
-            pygame.K_s: (0, 1),
-            pygame.K_LEFT: (-1, 0),
-            pygame.K_a: (-1, 0),
-            pygame.K_RIGHT: (1, 0),
-            pygame.K_d: (1, 0),
-        }
+        # ------------------------------
+        # Movement (logical actions)
+        # ------------------------------
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.MOVE_UP, event):
+                self._perform_move(unit, 0, -1)
+                return
+            if input_manager.event_matches_action(InputAction.MOVE_DOWN, event):
+                self._perform_move(unit, 0, 1)
+                return
+            if input_manager.event_matches_action(InputAction.MOVE_LEFT, event):
+                self._perform_move(unit, -1, 0)
+                return
+            if input_manager.event_matches_action(InputAction.MOVE_RIGHT, event):
+                self._perform_move(unit, 1, 0)
+                return
+        else:
+            move_keys = {
+                pygame.K_UP: (0, -1),
+                pygame.K_w: (0, -1),
+                pygame.K_DOWN: (0, 1),
+                pygame.K_s: (0, 1),
+                pygame.K_LEFT: (-1, 0),
+                pygame.K_a: (-1, 0),
+                pygame.K_RIGHT: (1, 0),
+                pygame.K_d: (1, 0),
+            }
+            if event.key in move_keys:
+                dx, dy = move_keys[event.key]
+                self._perform_move(unit, dx, dy)
+                return
 
-        if event.key in move_keys:
-            dx, dy = move_keys[event.key]
-            self._perform_move(unit, dx, dy)
-            return
+        # ------------------------------
+        # Basic attack
+        # ------------------------------
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.BASIC_ATTACK, event):
+                self._perform_basic_attack(unit)
+                return
+        else:
+            if event.key == pygame.K_SPACE:
+                self._perform_basic_attack(unit)
+                return
 
-        if event.key == pygame.K_SPACE:
-            self._perform_basic_attack(unit)
-            return
 
-        skill = self._skill_for_key(unit, event.key)
+        # ------------------------------
+        # Guard (dedicated action)
+        # ------------------------------
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.GUARD, event):
+                guard_skill = unit.skills.get("guard")
+                if guard_skill is not None:
+                    self._use_skill(unit, guard_skill)
+                    return
+
+
+        # ------------------------------
+        # Skills (hotbar-style)
+        # ------------------------------
+        skill = None
+        if input_manager is not None:
+            # First try to resolve by logical slot → skill id.
+            if input_manager.event_matches_action(InputAction.SKILL_1, event):
+                skill = self._skill_for_action(unit, InputAction.SKILL_1)
+            elif input_manager.event_matches_action(InputAction.SKILL_2, event):
+                skill = self._skill_for_action(unit, InputAction.SKILL_2)
+            elif input_manager.event_matches_action(InputAction.SKILL_3, event):
+                skill = self._skill_for_action(unit, InputAction.SKILL_3)
+            elif input_manager.event_matches_action(InputAction.SKILL_4, event):
+                skill = self._skill_for_action(unit, InputAction.SKILL_4)
+
+            # If we have an input manager but no slot mapping yet (older saves /
+            # future weirdness), fall back to key-based lookup.
+            if skill is None:
+                skill = self._skill_for_key(unit, event.key)
+        else:
+            # No input manager: direct keybinding on skills.
+            skill = self._skill_for_key(unit, event.key)
+
         if skill is not None:
             self._use_skill(unit, skill)
             return
@@ -1060,7 +1305,7 @@ class BattleScene:
 
     # ------------ Drawing ------------
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, game=None) -> None:
         surface.fill((5, 5, 10))
         screen_w, screen_h = surface.get_size()
 
@@ -1178,24 +1423,104 @@ class BattleScene:
         # 5) Status prompts / key hints OR end-of-battle messages
         # ------------------------------------------------------------------
         if self.status == "ongoing":
-            hero = self._hero_unit()
-            if hero is not None:
+            active = self._active_unit() if self.turn_order else None
+
+            # We may or may not have a Game / InputManager (defensive)
+            input_manager = None
+            if game is not None:
+                input_manager = getattr(game, "input_manager", None)
+
+            name_prefix = "Party"
+            skills_str = "No skills"
+
+            if active is not None and active.side == "player":
+                name_prefix = active.name
                 parts: List[str] = []
-                for skill in hero.skills.values():
-                    if skill.key is None:
+
+                # --- 1) Dedicated Guard hint (G: Guard) --------------------
+                guard_skill = active.skills.get("guard")
+                if guard_skill is not None:
+                    guard_labels: List[str] = []
+
+                    if input_manager is not None:
+                        try:
+                            guard_keys = input_manager.get_bindings(InputAction.GUARD)
+                        except AttributeError:
+                            guard_keys = set()
+                        for key in sorted(guard_keys):
+                            guard_labels.append(pygame.key.name(key).upper())
+
+                    # Fallback: use the skill's own key if no binding info
+                    if not guard_labels:
+                        key_code = getattr(guard_skill, "key", None)
+                        if key_code is not None:
+                            guard_labels.append(pygame.key.name(key_code).upper())
+
+                    if guard_labels:
+                        parts.append(f"{'/'.join(guard_labels)}: {guard_skill.name}")
+
+                # --- 2) Slot-based skills (Q/E/F/R, perk skills, etc.) ------
+                slot_actions = [
+                    InputAction.SKILL_1,
+                    InputAction.SKILL_2,
+                    InputAction.SKILL_3,
+                    InputAction.SKILL_4,
+                ]
+                slots = getattr(active, "skill_slots", None) or []
+
+                for idx, skill_id in enumerate(slots):
+                    if idx >= len(slot_actions):
+                        break
+                    if not skill_id:
                         continue
-                    key_name = pygame.key.name(skill.key).upper()
-                    parts.append(f"{key_name}: {skill.name}")
+
+                    skill = active.skills.get(skill_id)
+                    if skill is None:
+                        continue
+
+                    key_labels: List[str] = []
+
+                    if input_manager is not None:
+                        try:
+                            bound_keys = input_manager.get_bindings(slot_actions[idx])
+                        except AttributeError:
+                            bound_keys = set()
+                        for key in sorted(bound_keys):
+                            key_labels.append(pygame.key.name(key).upper())
+
+                    # Fallback to the skill's own key if needed
+                    if not key_labels:
+                        key_code = getattr(skill, "key", None)
+                        if key_code is not None:
+                            key_labels.append(pygame.key.name(key_code).upper())
+
+                    if key_labels:
+                        parts.append(f"{'/'.join(key_labels)}: {skill.name}")
+                    else:
+                        parts.append(skill.name)
+
                 skills_str = " | ".join(parts) if parts else "No skills"
-            else:
-                skills_str = "No skills"
+
+            # --- 3) Basic attack hint (Space or whatever it's bound to) ----
+            atk_part = "SPACE atk"
+            if input_manager is not None:
+                try:
+                    atk_keys = input_manager.get_bindings(InputAction.BASIC_ATTACK)
+                except AttributeError:
+                    atk_keys = set()
+                atk_labels: List[str] = []
+                for key in sorted(atk_keys):
+                    atk_labels.append(pygame.key.name(key).upper())
+                if atk_labels:
+                    atk_part = f"{'/'.join(atk_labels)} atk"
 
             hint_text = self.font.render(
-                f"Battle: Move WASD/arrows | SPACE atk | {skills_str}",
+                f"{name_prefix}: move WASD/arrows | {atk_part} | {skills_str}",
                 True,
                 (180, 180, 180),
             )
             surface.blit(hint_text, (40, hint_y))
+
 
         elif self.status == "defeat":
             dead_text = self.font.render(
@@ -1208,8 +1533,21 @@ class BattleScene:
             surface.blit(dead_text, (dead_x, dead_y))
 
         elif self.status == "victory":
+            # Use the actual CONFIRM bindings for the victory hint
+            confirm_part = "SPACE"
+            input_manager = None
+            if game is not None:
+                input_manager = getattr(game, "input_manager", None)
+            if input_manager is not None:
+                confirm_keys = input_manager.get_bindings(InputAction.CONFIRM)
+                labels: List[str] = [
+                    pygame.key.name(k).upper() for k in sorted(confirm_keys)
+                ]
+                if labels:
+                    confirm_part = "/".join(labels)
+
             win_text = self.font.render(
-                "Victory! Press SPACE to continue.",
+                f"Victory! Press {confirm_part} to continue.",
                 True,
                 (120, 220, 120),
             )

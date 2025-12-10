@@ -9,6 +9,8 @@ from world.mapgen import generate_floor
 from world.game_map import GameMap
 from world.entities import Player, Enemy, Merchant
 from .battle_scene import BattleScene
+from .input import create_default_input_manager
+
 from .exploration import ExplorationController
 from .cheats import handle_cheat_key
 from systems.progression import HeroStats
@@ -29,11 +31,18 @@ from systems.enemies import (
     choose_pack_for_floor,
     get_archetype,
 )
+
 from ui.hud import (
     draw_exploration_ui,
     draw_inventory_overlay,
 )
-from ui.screens import BaseScreen, PerkChoiceScreen
+from ui.screens import (
+    BaseScreen,
+    PerkChoiceScreen,
+    InventoryScreen,
+    CharacterSheetScreen,
+    ShopScreen,
+)
 
 from systems.events import EVENTS  # registry of map events
 
@@ -60,6 +69,14 @@ class Game:
 
     def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior") -> None:
         self.screen = screen
+
+        # Logical input manager (actions -> keys/buttons).
+        # For Phase 1 this is wired but not yet *used* by game logic.
+        self.input_manager = create_default_input_manager()
+
+        # Hero progression for this run (will be set in _init_hero_for_class)
+        self.hero_stats = HeroStats()
+
 
         # Hero progression for this run (will be set in _init_hero_for_class)
         self.hero_stats = HeroStats()
@@ -99,7 +116,9 @@ class Game:
         # 0 = hero, 1..N = companions in self.party order.
         self.inventory_focus_index: int = 0
 
-
+        # Inventory list paging / scrolling
+        self.inventory_page_size: int = 10
+        self.inventory_scroll_offset: int = 0
 
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
@@ -118,11 +137,14 @@ class Game:
         # Helper object to handle perk-choice overlay UI logic.
         self.perk_choice_screen = PerkChoiceScreen()
 
-        # Currently active full-screen UI overlay (if any).
-        # For now we only use this for perk choices, but we can later plug
-        # in inventory / character sheet / logs as real screens too.
-        self.active_screen: Optional[BaseScreen] = None
+        # Inventory / character sheet / shop overlays as screen objects.
+        self.inventory_screen = InventoryScreen()
+        self.character_sheet_screen = CharacterSheetScreen()
+        self.shop_screen = ShopScreen()
 
+        # Currently active full-screen UI overlay (if any).
+        # Used for perk choices, inventory, character sheet, shop, etc.
+        self.active_screen: Optional[BaseScreen] = None
 
         # Mode handling
         self.mode: str = GameMode.EXPLORATION
@@ -149,12 +171,10 @@ class Game:
         self.zoom_index: int = 1  # start at 1.0x
 
         # Debug flags
-               # Debug flags
         self.debug_reveal_map: bool = False
 
         # Display mode
         self.fullscreen: bool = False
-
 
         # Initialize hero stats, perks, items and gold for the chosen class
         self._init_hero_for_class(hero_class_id)
@@ -193,19 +213,25 @@ class Game:
         self.active_screen = self.perk_choice_screen
 
     def toggle_inventory_overlay(self) -> None:
-        """
-        Toggle inventory overlay. When opened, it hides other overlays
-        that shouldn't overlap with it.
-        """
+        """Toggle inventory overlay and manage its active screen."""
         self.show_inventory = not self.show_inventory
+
         if self.show_inventory:
-            # Inventory takes focus; hide character sheet & logs
+            # Inventory takes focus; hide character sheet & logs.
             self.show_character_sheet = False
             self.show_battle_log = False
             if hasattr(self, "show_exploration_log"):
                 self.show_exploration_log = False
-            # When opening the inventory, default focus is the hero.
+            # When opening the inventory, default focus is the hero and reset scroll.
             self.inventory_focus_index = 0
+            self.inventory_scroll_offset = 0
+            # Route input to the inventory screen while it's open.
+            if hasattr(self, "inventory_screen"):
+                self.active_screen = self.inventory_screen
+        else:
+            # Closing the inventory: if it owned the focus, clear active_screen.
+            if getattr(self, "active_screen", None) is getattr(self, "inventory_screen", None):
+                self.active_screen = None
 
     def equip_item_for_inventory_focus(self, item_id: str) -> None:
         """
@@ -310,19 +336,23 @@ class Game:
 
         self.last_message = f"{display_name} equips {item_def.name}."
 
-
     def toggle_character_sheet_overlay(self) -> None:
-        """
-        Toggle character sheet overlay. When opened, hide the logs
-        to avoid stacking overlays.
-        """
+        """Toggle character sheet overlay and manage its active screen."""
         self.show_character_sheet = not self.show_character_sheet
+
         if self.show_character_sheet:
             # Whenever we open the sheet, default focus back to the hero.
             self.character_sheet_focus_index = 0
             self.show_battle_log = False
             if hasattr(self, "show_exploration_log"):
                 self.show_exploration_log = False
+            # Route input to the character sheet screen while it's open.
+            if hasattr(self, "character_sheet_screen"):
+                self.active_screen = self.character_sheet_screen
+        else:
+            # Closing the sheet: if it owned the focus, clear active_screen.
+            if getattr(self, "active_screen", None) is getattr(self, "character_sheet_screen", None):
+                self.active_screen = None
 
     def toggle_battle_log_overlay(self) -> None:
         """
@@ -402,7 +432,6 @@ class Game:
         step = -1 if direction < 0 else 1
         self.inventory_focus_index = (current + step) % total_slots
 
-
     # ------------------------------------------------------------------
     # Message log helpers (exploration history)
     # ------------------------------------------------------------------
@@ -467,7 +496,6 @@ class Game:
           directly (each non-empty line becomes its own log entry).
         """
         self.last_message = value
-
 
     # ------------------------------------------------------------------
     # Hero stats helpers
@@ -705,8 +733,6 @@ class Game:
 
         return messages
 
-
-
     def gain_xp_from_event(self, amount: int) -> None:
         """Grant XP from a map event, showing messages + perk choice overlay."""
         if amount <= 0:
@@ -721,7 +747,7 @@ class Game:
         leveled_up = new_level > old_level
         if leveled_up:
             # Hero gets a queued perk choice.
-            self.perk_choice_screen.enqueue_perk_choice(self, "hero")
+            self.perk_choice_screen.enqueue_perk_choice(self, "hero", None)
 
         # Companions share the same XP amount, but track their own levels
         companion_msgs = self._grant_xp_to_companions(amount)
@@ -815,7 +841,6 @@ class Game:
         self.camera_x = max(0.0, min(self.camera_x, max_x))
         self.camera_y = max(0.0, min(self.camera_y, max_y))
 
-
     def toggle_fullscreen(self) -> None:
         """
         Toggle between windowed and fullscreen display.
@@ -841,7 +866,6 @@ class Game:
         # Re-center / clamp camera to fit the new viewport
         self._center_camera_on_player()
         self._clamp_camera_to_map()
-
 
     # ------------------------------------------------------------------
     # Floor / map management
@@ -1595,7 +1619,6 @@ class Game:
 
         game_map.entities.append(merchant)
 
-
     # ------------------------------------------------------------------
     # Battle handling
     # ------------------------------------------------------------------
@@ -1771,7 +1794,7 @@ class Game:
                 leveled_up = new_level > old_level
                 if leveled_up:
                     # Queue a perk choice for the hero.
-                    self.perk_choice_screen.enqueue_perk_choice(self, "hero")
+                    self.perk_choice_screen.enqueue_perk_choice(self, "hero", None)
 
                 # Companions gain the same XP amount independently.
                 companion_msgs = self._grant_xp_to_companions(xp_reward)
@@ -1811,16 +1834,12 @@ class Game:
             if self.perk_choice_queue:
                 self.perk_choice_screen.start_next_perk_choice(self)
 
-
         elif status == "defeat":
             # Simple defeat handling: message + restart.
             self.add_message("You were defeated. The dungeon claims another hero...")
             self.restart_run()
             self.enter_exploration_mode()
             self.battle_scene = None
-
-
-
 
     # ------------------------------------------------------------------
     # Main loop: update
@@ -1830,6 +1849,11 @@ class Game:
         if self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
                 self.post_battle_grace = max(0.0, self.post_battle_grace - dt)
+
+            # If a major overlay (inventory / character sheet) is open,
+            # pause exploration updates so the world doesn't move behind the UI.
+            if self.is_overlay_open():
+                return
 
             # Exploration is handled by the controller...
             self.exploration.update(dt)
@@ -1856,54 +1880,43 @@ class Game:
         Dispatch events based on current game mode.
         Global debug / cheat keys are processed first.
         """
-        # Cheats: handle global debug keys, consume the event if needed
+        # Cheats: handle global debug keys, consume the event if needed.
         if handle_cheat_key(self, event):
             return
 
-        # Global fullscreen toggle
+        # Global fullscreen toggle.
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.toggle_fullscreen()
             return
 
-        # Character sheet focus cycling: works in any mode while the sheet is open.
-        if (
-            event.type == pygame.KEYDOWN
-            and getattr(self, "show_character_sheet", False)
-        ):
-            if event.key == pygame.K_q:
-                self.cycle_character_sheet_focus(-1)
-                return
-            elif event.key == pygame.K_e:
-                self.cycle_character_sheet_focus(+1)
-                return
-
-        # If inventory is open, allow cycling focus with Q/E there too.
-        if (
-            event.type == pygame.KEYDOWN
-            and getattr(self, "show_inventory", False)
-        ):
-            if event.key == pygame.K_q:
-                self.cycle_inventory_focus(-1)
-                return
-            elif event.key == pygame.K_e:
-                self.cycle_inventory_focus(+1)
-                return
-
-
+        # Mode-specific handling.
         if self.mode == GameMode.EXPLORATION:
-            self.exploration.handle_event(event)
+            # If a modal screen is active (inventory, character sheet, etc.),
+            # route input to it instead of the exploration controller.
+            if getattr(self, "active_screen", None) is not None:
+                self.active_screen.handle_event(self, event)
+            else:
+                self.exploration.handle_event(event)
+
+
         elif self.mode == GameMode.BATTLE:
-            if self.battle_scene is not None:
-                self.battle_scene.handle_event(event)
+            # In battle mode, a modal screen (inventory, character sheet, etc.)
+            # also takes input priority.
+            if getattr(self, "active_screen", None) is not None:
+                self.active_screen.handle_event(self, event)
+            elif self.battle_scene is not None:
+                # Pass the Game so the battle scene can read logical input actions.
+                self.battle_scene.handle_event(self, event)
                 self._check_battle_finished()
+
+
         elif self.mode == GameMode.PERK_CHOICE:
             # During perk-choice mode, input goes to the active screen if any.
             if self.active_screen is not None:
                 self.active_screen.handle_event(self, event)
             elif self.perk_choice_screen is not None:
-                # Fallback for safety
+                # Fallback for safety.
                 self.perk_choice_screen.handle_event(self, event)
-
 
     # ------------------------------------------------------------------
     # Drawing
@@ -1912,7 +1925,8 @@ class Game:
     def draw(self) -> None:
         """
         Top-level draw: render the world based on mode, then any active
-        full-screen overlay (such as the perk-choice screen).
+        full-screen overlay (perk choice, inventory, character sheet, etc.),
+        and finally flip the display once.
         """
         if self.mode == GameMode.EXPLORATION:
             self.draw_exploration()
@@ -1923,13 +1937,17 @@ class Game:
             # in the background, but world updates are paused in update().
             self.draw_exploration()
 
-        # Draw an active overlay screen (perk choice, etc.) on top.
-        if self.mode == GameMode.PERK_CHOICE:
-            if self.active_screen is not None:
-                self.active_screen.draw(self)
-            elif self.perk_choice_screen is not None:
-                # Fallback: draw the overlay directly.
-                self.perk_choice_screen.draw(self)
+        # Draw an active overlay screen on top (perk choice, inventory,
+        # character sheet, etc.).
+        if getattr(self, "active_screen", None) is not None:
+            self.active_screen.draw(self)
+        # Safety fallback: if we're in PERK_CHOICE mode but for some reason no
+        # active_screen is attached, let the perk_choice_screen draw itself.
+        elif self.mode == GameMode.PERK_CHOICE and self.perk_choice_screen is not None:
+            self.perk_choice_screen.draw(self)
+
+        # Flip the final composed frame to the screen.
+        pygame.display.flip()
 
     def draw_exploration(self) -> None:
         assert self.current_map is not None
@@ -1973,19 +1991,13 @@ class Game:
         # HUD + overlays
         draw_exploration_ui(self)
 
-        pygame.display.flip()
-
     def draw_battle(self) -> None:
         if self.battle_scene is None:
             return
 
         self.screen.fill(COLOR_BG)
-        self.battle_scene.draw(self.screen)
-
-        # Optional inventory / character overlays even during battle
-        if self.show_inventory and self.inventory is not None:
-            draw_inventory_overlay(self, self.inventory)
-        elif self.show_character_sheet:
-            draw_exploration_ui(self)
+        # Pass the Game instance so the battle scene can read input bindings
+        self.battle_scene.draw(self.screen, self)
 
         pygame.display.flip()
+

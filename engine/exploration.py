@@ -14,6 +14,9 @@ from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot, get_shop_stock_for_floor
 from systems.events import get_event_def, EventResult  # NEW
 
+from systems.input import InputAction
+
+
 
 if TYPE_CHECKING:
     # Only imported for type hints, to avoid circular imports at runtime
@@ -44,29 +47,43 @@ class ExplorationController:
         if event.type != pygame.KEYDOWN:
             return
 
-        # --- Shop overlay is open: handle shop input first ---
+        input_manager = getattr(game, "input_manager", None)
+
+        # --- Shop overlay is open: handle shop input first (legacy fallback) ---
+        # Normally, when the ShopScreen is active it will consume input via Game.handle_event.
         if getattr(game, "show_shop", False):
             self._handle_shop_key(event)
             return
 
-        # --- Inventory is open: handle item actions / closing first ---
-        if game.show_inventory:
-            self._handle_inventory_key(event)
+        # --- Blocking UI overlays ---
+        # While these are open, their screens receive input via Game.handle_event,
+        # so exploration has nothing to do here.
+        if getattr(game, "show_inventory", False) or getattr(game, "show_character_sheet", False):
             return
 
-        # --- Normal exploration input (inventory closed) ---
+        # --- Normal exploration input (overlays closed) ---
 
         # Toggle inventory
-        if event.key == pygame.K_i:
-            game.toggle_inventory_overlay()
-            return
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_INVENTORY, event):
+                game.toggle_inventory_overlay()
+                return
+        else:
+            if event.key == pygame.K_i:
+                game.toggle_inventory_overlay()
+                return
 
         # Toggle character sheet
-        if event.key == pygame.K_c:
-            game.toggle_character_sheet_overlay()
-            return
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_CHARACTER_SHEET, event):
+                game.toggle_character_sheet_overlay()
+                return
+        else:
+            if event.key == pygame.K_c:
+                game.toggle_character_sheet_overlay()
+                return
 
-        # Zoom controls (exploration view)
+        # Zoom controls (exploration view) – still raw key based for now
         if event.key == pygame.K_z:
             # Zoom out
             if hasattr(game, "zoom_levels"):
@@ -80,21 +97,36 @@ class ExplorationController:
             return
 
         # Toggle last battle log overlay
-        if event.key == pygame.K_l:
-            game.toggle_battle_log_overlay()
-            return
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_BATTLE_LOG, event):
+                game.toggle_battle_log_overlay()
+                return
+        else:
+            if event.key == pygame.K_l:
+                game.toggle_battle_log_overlay()
+                return
 
         # Toggle exploration log overlay
-        if event.key == pygame.K_k:
-            game.toggle_exploration_log_overlay()
-            return
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_EXPLORATION_LOG, event):
+                game.toggle_exploration_log_overlay()
+                return
+        else:
+            if event.key == pygame.K_k:
+                game.toggle_exploration_log_overlay()
+                return
 
         # Interact (chest / event / merchant / etc.)
-        if event.key == pygame.K_e:
-            self.try_interact()
-            return
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.INTERACT, event):
+                self.try_interact()
+                return
+        else:
+            if event.key == pygame.K_e:
+                self.try_interact()
+                return
 
-        # Stairs: go down / up
+        # Stairs: go down / up (still raw for now)
         if event.key == pygame.K_PERIOD:  # '.'
             game.try_change_floor(+1)
             return
@@ -114,17 +146,30 @@ class ExplorationController:
         if game.show_character_sheet or game.show_inventory or getattr(game, "show_shop", False):
             return
 
-        keys = pygame.key.get_pressed()
         direction = pygame.Vector2(0, 0)
+        input_manager = getattr(game, "input_manager", None)
 
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
-            direction.y -= 1
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            direction.y += 1
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            direction.x -= 1
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            direction.x += 1
+        if input_manager is not None:
+            # Logical movement via actions, so we can remap keys or support pads later.
+            if input_manager.is_action_pressed(InputAction.MOVE_UP):
+                direction.y -= 1
+            if input_manager.is_action_pressed(InputAction.MOVE_DOWN):
+                direction.y += 1
+            if input_manager.is_action_pressed(InputAction.MOVE_LEFT):
+                direction.x -= 1
+            if input_manager.is_action_pressed(InputAction.MOVE_RIGHT):
+                direction.x += 1
+        else:
+            # Fallback: direct key checks (legacy behaviour).
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_w] or keys[pygame.K_UP]:
+                direction.y -= 1
+            if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+                direction.y += 1
+            if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+                direction.x -= 1
+            if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+                direction.x += 1
 
         # Floor intro pause: wait until first movement input
         if getattr(game, "awaiting_floor_start", False):
@@ -188,57 +233,6 @@ class ExplorationController:
     # ---------------------------------------------------------------------
     # Internal helpers
     # ---------------------------------------------------------------------
-
-    def _handle_inventory_key(self, event: pygame.event.Event) -> None:
-        """
-        Handle key presses while the inventory overlay is open.
-        """
-        game = self.game
-
-        # Close inventory with I or ESC.
-        if event.key in (pygame.K_i, pygame.K_ESCAPE):
-            game.show_inventory = False
-            return
-
-        if game.inventory is None:
-            return
-
-        # 1–9 / Numpad 1–9: equip that item from the visible list
-        idx: Optional[int] = None
-        if event.key in (pygame.K_1, pygame.K_KP1):
-            idx = 0
-        elif event.key in (pygame.K_2, pygame.K_KP2):
-            idx = 1
-        elif event.key in (pygame.K_3, pygame.K_KP3):
-            idx = 2
-        elif event.key in (pygame.K_4, pygame.K_KP4):
-            idx = 3
-        elif event.key in (pygame.K_5, pygame.K_KP5):
-            idx = 4
-        elif event.key in (pygame.K_6, pygame.K_KP6):
-            idx = 5
-        elif event.key in (pygame.K_7, pygame.K_KP7):
-            idx = 6
-        elif event.key in (pygame.K_8, pygame.K_KP8):
-            idx = 7
-        elif event.key in (pygame.K_9, pygame.K_KP9):
-            idx = 8
-
-        if idx is None:
-            return
-
-        visible_items = game.inventory.items[:10]
-        if idx >= len(visible_items):
-            return
-
-        item_id = visible_items[idx]
-        # Delegate to the Game helper so it can handle hero vs companion
-        # equipment and stat updates.
-        game.equip_item_for_inventory_focus(item_id)
-
-        # Re-apply hero stats + gear to the player (no full heal)
-        if game.player is not None:
-            game.apply_hero_stats_to_player(full_heal=False)
 
     def _handle_shop_key(self, event: pygame.event.Event) -> None:
         """
@@ -566,10 +560,13 @@ class ExplorationController:
         # Attach transient shop state to the Game object.
         game.shop_stock = stock
         game.shop_cursor = 0
-        game.shop_mode = "buy"  # NEW: start in buy mode
+        game.shop_mode = "buy"
         game.show_shop = True
+        game.last_message = "The merchant shows you their wares."
 
-        game.last_message = "You start trading with a quiet dungeon merchant."
+        # Route shop input through the ShopScreen if available
+        if getattr(game, "shop_screen", None) is not None:
+            game.active_screen = game.shop_screen
 
     def _attempt_shop_purchase(self, index: int) -> None:
         """
@@ -623,9 +620,11 @@ class ExplorationController:
         if stock:
             game.shop_cursor = max(0, min(index, len(stock) - 1))
         else:
-            # Merchant sold out; close the shop
+            # Merchant sold out; close the shop and release the ShopScreen.
             game.shop_cursor = 0
             game.show_shop = False
+            if getattr(game, "active_screen", None) is getattr(game, "shop_screen", None):
+                game.active_screen = None
 
         # Re-sync stats in case gear matters (no full heal)
         if game.player is not None:
@@ -686,10 +685,13 @@ class ExplorationController:
         if game.player is not None:
             game.apply_hero_stats_to_player(full_heal=False)
 
-        # If both merchant stock and your sellable list are empty, close the shop.
         if not stock and not inv.get_sellable_item_ids():
             game.shop_cursor = 0
             game.show_shop = False
+            game.last_message = "There is nothing left to buy or sell."
+
+            if getattr(game, "active_screen", None) is getattr(game, "shop_screen", None):
+                game.active_screen = None
 
     def try_interact(self) -> None:
         """

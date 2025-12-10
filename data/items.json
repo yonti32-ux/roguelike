@@ -65,5 +65,124 @@
     "stats": {
       "skill_power": 0.2
     }
+  },
+
+
+  {
+    "id": "wooden_club",
+    "name": "Wooden Club",
+    "slot": "weapon",
+    "rarity": "common",
+    "value": 1,
+    "description": "A crude length of wood, barely worthy of the name weapon.",
+    "stats": {
+      "attack": 1
+    }
+  },
+  {
+    "id": "short_sword",
+    "name": "Short Sword",
+    "slot": "weapon",
+    "rarity": "common",
+    "value": 3,
+    "description": "A balanced blade favored by inexperienced adventurers.",
+    "stats": {
+      "attack": 3
+    }
+  },
+  {
+    "id": "steel_sword",
+    "name": "Steel Sword",
+    "slot": "weapon",
+    "rarity": "rare",
+    "value": 12,
+    "description": "Well-forged steel that bites deep into armor.",
+    "stats": {
+      "attack": 6
+    }
+  },
+  {
+    "id": "warhammer",
+    "name": "Warhammer",
+    "slot": "weapon",
+    "rarity": "epic",
+    "value": 18,
+    "description": "A heavy hammer that crushes shields and bones alike.",
+    "stats": {
+      "attack": 8
+    }
+  },
+
+
+  {
+    "id": "padded_jacket",
+    "name": "Padded Jacket",
+    "slot": "armor",
+    "rarity": "common",
+    "value": 3,
+    "description": "Layers of cloth and stuffing offer modest protection.",
+    "stats": {
+      "max_hp": 8
+    }
+  },
+  {
+    "id": "chainmail_armor",
+    "name": "Chainmail Armor",
+    "slot": "armor",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "Rings of steel that turn aside glancing blows.",
+    "stats": {
+      "max_hp": 16,
+      "defense": 2
+    }
+  },
+  {
+    "id": "plate_armor",
+    "name": "Plate Armor",
+    "slot": "armor",
+    "rarity": "rare",
+    "value": 20,
+    "description": "Full plates of metal that make you a walking fortress.",
+    "stats": {
+      "max_hp": 22,
+      "defense": 3
+    }
+  },
+
+
+  {
+    "id": "guardian_charm",
+    "name": "Charm of the Guardian",
+    "slot": "trinket",
+    "rarity": "rare",
+    "value": 16,
+    "description": "An engraved token said to ward off lethal blows.",
+    "stats": {
+      "max_hp": 8,
+      "defense": 1
+    }
+  },
+  {
+    "id": "berserker_charm",
+    "name": "Charm of the Berserker",
+    "slot": "trinket",
+    "rarity": "rare",
+    "value": 14,
+    "description": "Its bearer feels a constant urge to strike first and hard.",
+    "stats": {
+      "attack": 3
+    }
+  },
+  {
+    "id": "adept_charm",
+    "name": "Charm of the Adept",
+    "slot": "trinket",
+    "rarity": "epic",
+    "value": 22,
+    "description": "The crystal at its center hums with contained power.",
+    "stats": {
+      "skill_power": 0.35
+    }
   }
 ]

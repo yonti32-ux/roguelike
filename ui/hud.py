@@ -399,16 +399,10 @@ def draw_exploration_ui(game: "Game") -> None:
             (overlay_x + padding_x, overlay_y + log_height - line_height - 4),
         )
 
-    # --- Character sheet overlay (hero + proto-party) ---
-    if game.show_character_sheet:
-        _draw_character_sheet(game)
-
-    # --- Inventory overlay ---
-    if getattr(game, "show_inventory", False):
-        draw_inventory_overlay(game)
-
     # --- Shop overlay (merchant rooms) ---
-    if getattr(game, "show_shop", False):
+    # If the shop is open BUT not handled as a blocking screen (e.g. very old save / fallback),
+    # draw it here. When ShopScreen is active, it will draw the overlay itself.
+    if getattr(game, "show_shop", False) and getattr(game, "active_screen", None) is not getattr(game, "shop_screen", None):
         draw_shop_overlay(game)
 
 
@@ -985,7 +979,7 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
     screen.blit(backpack_title, (ox + 12, y))
     y += 24
 
-    if not inv or not inv.items:
+    if not inv or not getattr(inv, "items", None):
         none = ui_font.render(
             "You are not carrying anything yet.",
             True,
@@ -994,8 +988,25 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
         screen.blit(none, (ox + 24, y))
         y += 20
     else:
-        max_items = 10
-        for idx, item_id in enumerate(inv.items[:max_items]):
+        items = list(inv.items)
+        page_size = getattr(game, "inventory_page_size", 10)
+        offset = getattr(game, "inventory_scroll_offset", 0)
+        total_items = len(items)
+
+        # Normalise offset if inventory size / page changed
+        if total_items <= page_size:
+            offset = 0
+        else:
+            max_offset = max(0, total_items - page_size)
+            if offset < 0:
+                offset = 0
+            elif offset > max_offset:
+                offset = max_offset
+        game.inventory_scroll_offset = offset
+
+        visible_items = items[offset:offset + page_size]
+
+        for idx, item_id in enumerate(visible_items):
             item_def = get_item_def(item_id)
             if item_def is None:
                 continue
@@ -1024,13 +1035,28 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
         stats_surf = ui_font.render(stats_line_text, True, (200, 200, 200))
         screen.blit(stats_surf, (ox + 12, oy + height - 52))
 
+    # Scroll info line if more items than one page
+    if inv and getattr(inv, "items", None):
+        total_items = len(inv.items)
+        page_size = getattr(game, "inventory_page_size", 10)
+        offset = getattr(game, "inventory_scroll_offset", 0)
+        if total_items > page_size:
+            first_index = offset + 1
+            last_index = min(offset + page_size, total_items)
+            scroll_text = (
+                f"Items {first_index}-{last_index} of {total_items} "
+                "(↑/↓ or PgUp/PgDn to scroll)"
+            )
+            scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
+            screen.blit(scroll_surf, (ox + 12, oy + height - 72))
+
+    # Shorter footer so it stays within the window width
     footer = ui_font.render(
-        "1–9: equip on focused | Q/E: switch character | I or ESC: close",
+        "1–9: equip on focused | Q/E: switch | I/ESC: close",
         True,
         (170, 170, 170),
     )
     screen.blit(footer, (ox + 12, oy + height - 30))
-
 
 
 def draw_companion_choice_overlay(

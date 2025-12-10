@@ -5,6 +5,7 @@ from typing import List, Dict, Optional
 
 from systems.perks import total_stat_modifiers_for_perks
 from systems.inventory import get_item_def
+from systems import perks as perk_system
 
 
 
@@ -63,11 +64,18 @@ class CompanionState:
         }
     )
 
+    # Hotbar-style skill layout; indices 0–3 map to SKILL_1..SKILL_4.
+    # Values are skill IDs (strings) or None.
+    skill_slots: List[Optional[str]] = field(
+        default_factory=lambda: [None, None, None, None]
+    )
+
     # Runtime stats for this companion (filled by helper functions).
     max_hp: int = 0
     attack_power: int = 0
     defense: int = 0
     skill_power: float = 1.0
+
 
     # --- XP / Level helpers -----------------------------------------
 
@@ -180,6 +188,21 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
     state.defense = max(0, int(defense))
     state.skill_power = max(0.1, float(skill_power))
 
+def init_companion_stats(state: CompanionState, template: CompanionDef) -> None:
+    """
+    Initialise stats for a *fresh* companion at its current level.
+
+    This is intended to be called when the companion is first created
+    (e.g. at the start of a run or on recruitment).
+    """
+    # Ensure a sane level
+    if state.level < 1:
+        state.level = 1
+
+    recalc_companion_stats_for_level(state, template)
+
+    # Also seed a default skill-slot layout if we don't have one yet.
+    init_companion_skill_slots(state, template)
 
 def ensure_companion_stats(state: CompanionState, template: CompanionDef) -> None:
     """
@@ -197,6 +220,53 @@ def ensure_companion_stats(state: CompanionState, template: CompanionDef) -> Non
 
 
 _COMPANIONS: Dict[str, CompanionDef] = {}
+
+def init_companion_skill_slots(state: CompanionState, template: CompanionDef) -> None:
+    """
+    Ensure the companion has a reasonable default skill-slot layout.
+
+    - Uses template.skill_ids and perk-granted skills where possible.
+    - Skips 'guard' (handled by the dedicated GUARD action).
+    - Only fills empty layouts; existing layouts are preserved.
+    """
+    # If there is already at least one real slot, don't overwrite.
+    if any(state.skill_slots):
+        return
+
+    available: List[str] = []
+
+    # Base skills from template, excluding guard
+    for sid in template.skill_ids:
+        if not sid or sid == "guard":
+            continue
+        if sid not in available:
+            available.append(sid)
+
+    # Skills unlocked from perks (grant_skills on perk definitions)
+    if state.perks:
+        for pid in state.perks:
+            try:
+                perk = perk_system.get(pid)
+            except Exception:
+                continue
+            for sid in getattr(perk, "grant_skills", []):
+                if not sid or sid == "guard":
+                    continue
+                if sid not in available:
+                    available.append(sid)
+
+    # Build up to 4 slots from the available skills
+    slots: List[Optional[str]] = []
+    for sid in available:
+        slots.append(sid)
+        if len(slots) >= 4:
+            break
+
+    # Pad with Nones so the list is always length 4
+    while len(slots) < 4:
+        slots.append(None)
+
+    state.skill_slots = slots
 
 
 def register_companion(defn: CompanionDef) -> CompanionDef:
@@ -252,11 +322,13 @@ def default_party_states_for_class(hero_class_id: str, hero_level: int = 1) -> L
     """
     states: List[CompanionState] = []
     for comp_def in default_party_for_class(hero_class_id):
-        states.append(
-            CompanionState(
-                template_id=comp_def.id,
-                level=hero_level,
-                xp=0,
-            )
+        state = CompanionState(
+            template_id=comp_def.id,
+            level=hero_level,
+            xp=0,
         )
+        # Pre-seed a simple skill-slot layout from the template.
+        init_companion_skill_slots(state, comp_def)
+        states.append(state)
     return states
+

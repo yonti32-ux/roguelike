@@ -304,6 +304,51 @@ register(Perk(
 
 # --- Helper functions used by the game --------------------------------------
 
+def apply_perk_to_hero(hero_stats: object, perk: Perk) -> None:
+    """
+    Apply a single perk to a HeroStats-like object and record it as learned.
+
+    - Ensures hero_stats.perks exists.
+    - Skips if the perk is already learned.
+    - Uses the Perk.apply() hook to mutate base stats (max_hp, attack, etc.)
+      when the perk has an apply_fn.
+    """
+    # Make sure the hero has a perks list
+    if not hasattr(hero_stats, "perks"):
+        hero_stats.perks = []
+
+    owned = getattr(hero_stats, "perks")
+
+    # Don’t double-apply the same perk
+    if perk.id in owned:
+        return
+
+    # Apply stat modifications (if any)
+    perk.apply(hero_stats)
+
+    # Register as learned
+    owned.append(perk.id)
+
+
+def apply_perk_to_companion(companion_state: object, perk: Perk) -> None:
+    """
+    Register a perk as learned on a CompanionState-like object.
+
+    Companion stats are recalculated elsewhere (e.g. via
+    systems.party.recalc_companion_stats_for_level) based on the
+    companion_state.perks list, so this helper only updates that list.
+    """
+    if not hasattr(companion_state, "perks"):
+        companion_state.perks = []
+
+    owned = getattr(companion_state, "perks")
+
+    # Avoid duplicates
+    if perk.id in owned:
+        return
+
+    owned.append(perk.id)
+
 
 def auto_assign_perks(hero_stats: object) -> List[str]:
     """

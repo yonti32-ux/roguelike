@@ -1,7 +1,7 @@
 # systems/progression.py
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 import copy
 
 from .stats import StatBlock
@@ -39,6 +39,12 @@ class HeroStats:
 
     # Learned perk ids (e.g. ["toughness_1", "weapon_training_1"])
     perks: List[str] = field(default_factory=list)
+
+    # Hotbar-style skill layout; indices 0–3 map to SKILL_1..SKILL_4.
+    # Values are skill IDs (strings) or None.
+    skill_slots: List[Optional[str]] = field(
+        default_factory=lambda: [None, None, None, None]
+    )
 
     # ------------------------------------------------------------------
     # XP / Level
@@ -156,6 +162,12 @@ class HeroStats:
         # Start with the class's default perks
         self.perks = list(class_def.starting_perks)
 
+        # Seed a simple default hotbar layout for a fresh hero.
+        # Guard stays on its dedicated GUARD action; we prefer "power_strike"
+        # as the first slotted offensive skill if available.
+        self.skill_slots = [None, None, None, None]
+        self.ensure_default_skill_slots(["power_strike"])
+
     # ------------------------------------------------------------------
     # Convenience properties (so older code still works)
     # ------------------------------------------------------------------
@@ -191,3 +203,39 @@ class HeroStats:
     @skill_power.setter
     def skill_power(self, value: float) -> None:
         self.base.skill_power = float(value)
+
+    # ------------------------------------------------------------------
+    # Skill slot helpers
+    # ------------------------------------------------------------------
+
+    def ensure_default_skill_slots(
+        self,
+        available_skill_ids: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Ensure that skill_slots has a reasonable default layout.
+
+        - Keeps any existing non-empty layout.
+        - Otherwise, prefers 'power_strike' if available, then the first
+          remaining available skill id (excluding 'guard').
+        """
+        # If we already have at least one real slot, don't touch it.
+        if any(slot for slot in self.skill_slots):
+            return
+
+        ordered: List[Optional[str]] = []
+
+        available = list(available_skill_ids or [])
+        # Guard has its own dedicated GUARD action.
+        available = [sid for sid in available if sid != "guard"]
+
+        if "power_strike" in available:
+            ordered.append("power_strike")
+        elif available:
+            ordered.append(available[0])
+
+        # Pad to 4 entries
+        while len(ordered) < 4:
+            ordered.append(None)
+
+        self.skill_slots = ordered[:4]
