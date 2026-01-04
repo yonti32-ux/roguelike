@@ -15,3 +15,11 @@ __pycache__/
 # Other junk
 *.log
 .DS_Store
+# local artifacts
+RESUME_PACK.md
+WIP.patch
+WIP_staged.patch
+repomix-output.xml
+
+# runtime logs
+telemetry/*.jsonl
