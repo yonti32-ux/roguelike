@@ -57,8 +57,10 @@ def main() -> None:
     clock = pygame.time.Clock()
 
     # Init telemetry file (relative to repo root next to main.py)
-    telemetry_path = Path(__file__).resolve().parent / "telemetry" / "telemetry.jsonl"
-    telemetry.init(telemetry_path)
+    if TELEMETRY_ENABLED:
+        from pathlib import Path
+        telemetry_path = Path(__file__).resolve().parent / "telemetry" / "telemetry.jsonl"
+        telemetry.init(telemetry_path)
 
     # --- Character creation: choose class + name ---
     creation_scene = CharacterCreationScene(screen)

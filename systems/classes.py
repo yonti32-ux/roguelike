@@ -52,10 +52,15 @@ def all_classes() -> List[ClassDef]:
 
 # --- Concrete class definitions -----------------------------------------------
 
-# Numbers are tuned around the default StatBlock:
-#   max_hp=30, attack=6, defense=0, speed=1.0, skill_power=1.0
-# We give each a distinct silhouette but keep them in a similar power band
-# because perks / items will matter a lot later.
+# Baseline StatBlock:
+#   max_hp=30, attack=6, defense=0, speed=1.0, skill_power=1.0,
+#   crit_chance=0.05, dodge_chance=0.05, status_resist=0.0
+#
+# Stamina / mana design:
+# - Warrior: very high stamina pool (weapon skills), tiny mana.
+# - Rogue: decent stamina, small mana.
+# - Mage: modest stamina, big mana battery.
+
 
 WARRIOR = register_class(
     ClassDef(
@@ -71,6 +76,8 @@ WARRIOR = register_class(
             crit_chance=0.05,
             dodge_chance=0.02,
             status_resist=0.05,
+            max_mana=8,
+            max_stamina=40,
         ),
         # Perk ids from systems.perks
         starting_perks=[
@@ -106,6 +113,8 @@ ROGUE = register_class(
             crit_chance=0.12,
             dodge_chance=0.10,
             status_resist=0.0,
+            max_mana=10,
+            max_stamina=32,
         ),
         starting_perks=[
             "fleet_footwork_1",
@@ -137,6 +146,8 @@ MAGE = register_class(
             crit_chance=0.05,
             dodge_chance=0.05,
             status_resist=0.05,
+            max_mana=40,
+            max_stamina=20,
         ),
         starting_perks=[
             "battle_focus_1",

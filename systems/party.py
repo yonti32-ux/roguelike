@@ -8,19 +8,15 @@ from systems.inventory import get_item_def
 from systems import perks as perk_system
 
 
-
 @dataclass
 class CompanionDef:
     """
     Simple companion template for now.
 
-    For P1:
-    - Stats are derived from the hero and scaled by these factors.
+    For P1/B2:
+    - Stats are derived from a generic "hero-ish" curve and scaled by
+      these factors.
     - skill_ids are skill ids from systems.skills.
-
-    Later we can extend this into full heroes with:
-    - their own StatBlock
-    - their own inventory / perks / class
     """
     id: str
     name: str
@@ -31,6 +27,7 @@ class CompanionDef:
     defense_factor: float = 1.0
     skill_power_factor: float = 1.0
 
+    # Base skill list this companion knows.
     skill_ids: List[str] = field(default_factory=list)
 
 
@@ -43,8 +40,8 @@ class CompanionState:
     - level / xp track this specific companion's progression.
     - perks: list of perk ids this companion owns.
     - equipped: simple per-companion equipment slots.
-    - max_hp / attack_power / defense / skill_power are this specific
-      companion's stats (used by battle + UI).
+    - max_hp / attack_power / defense / skill_power / resources are this
+      specific companion's stats (used by battle + UI).
     """
     template_id: str
     name_override: Optional[str] = None
@@ -75,9 +72,10 @@ class CompanionState:
     attack_power: int = 0
     defense: int = 0
     skill_power: float = 1.0
+    max_mana: int = 0
+    max_stamina: int = 0
 
-
-    # --- XP / Level helpers -----------------------------------------
+    # --- XP / Level helpers -------------------------------------------------
 
     def xp_to_next(self) -> int:
         """
@@ -118,21 +116,7 @@ class CompanionState:
         return levels_gained
 
 
-# --- Companion stat helpers -----------------------------------------------
-
-
-def init_companion_stats(state: CompanionState, template: CompanionDef) -> None:
-    """
-    Initialise stats for a *fresh* companion at its current level.
-
-    This is intended to be called when the companion is first created
-    (e.g. at the start of a run or on recruitment).
-    """
-    # Ensure a sane level
-    if state.level < 1:
-        state.level = 1
-
-    recalc_companion_stats_for_level(state, template)
+# --- Companion stat helpers --------------------------------------------------
 
 
 def recalc_companion_stats_for_level(state: CompanionState, template: CompanionDef) -> None:
@@ -161,6 +145,20 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
     defense = def_linear * float(template.defense_factor)
     skill_power = sp_linear * float(template.skill_power_factor)
 
+    # Baseline resource pools.
+    # We keep these fairly generous so companions feel in line with the hero.
+    BASE_STAMINA = 36
+    BASE_MANA = 12
+
+    stamina_linear = BASE_STAMINA + (level - 1) * 4
+    mana_linear = BASE_MANA + (level - 1) * 3
+
+    # Scale with template specialisation as a rough heuristic:
+    # - Meaty frontliners (high hp_factor) get more stamina.
+    # - Casters (high skill_power_factor) get more mana.
+    stamina = stamina_linear * float(template.hp_factor)
+    mana = mana_linear * float(template.skill_power_factor)
+
     # Apply per-companion perk bonuses, if any.
     if state.perks:
         mods = total_stat_modifiers_for_perks(state.perks)
@@ -168,6 +166,8 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         atk += mods.get("attack", 0)
         defense += mods.get("defense", 0)
         skill_power += mods.get("skill_power", 0.0)
+        mana += int(mods.get("max_mana", 0))
+        stamina += int(mods.get("max_stamina", 0))
 
     # Apply equipment bonuses, if this companion has any gear equipped.
     equipped = getattr(state, "equipped", None) or {}
@@ -182,11 +182,16 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         atk += int(item_stats.get("attack", 0))
         defense += int(item_stats.get("defense", 0))
         skill_power += float(item_stats.get("skill_power", 0.0))
+        mana += int(item_stats.get("max_mana", 0))
+        stamina += int(item_stats.get("max_stamina", 0))
 
     state.max_hp = max(1, int(hp))
     state.attack_power = max(1, int(atk))
     state.defense = max(0, int(defense))
     state.skill_power = max(0.1, float(skill_power))
+    state.max_mana = max(0, int(mana))
+    state.max_stamina = max(0, int(stamina))
+
 
 def init_companion_stats(state: CompanionState, template: CompanionDef) -> None:
     """
@@ -204,6 +209,7 @@ def init_companion_stats(state: CompanionState, template: CompanionDef) -> None:
     # Also seed a default skill-slot layout if we don't have one yet.
     init_companion_skill_slots(state, template)
 
+
 def ensure_companion_stats(state: CompanionState, template: CompanionDef) -> None:
     """
     Make sure a companion has valid stats; if not, recompute them.
@@ -216,10 +222,10 @@ def ensure_companion_stats(state: CompanionState, template: CompanionDef) -> Non
         recalc_companion_stats_for_level(state, template)
 
 
-# --- Companion registry & templates ----------------------------------------
-
+# --- Companion registry & templates -----------------------------------------
 
 _COMPANIONS: Dict[str, CompanionDef] = {}
+
 
 def init_companion_skill_slots(state: CompanionState, template: CompanionDef) -> None:
     """
@@ -286,7 +292,7 @@ def all_companions() -> List[CompanionDef]:
 
 # --- Concrete companion templates -------------------------------------------
 
-# Very basic ally; stats derived from hero.
+# Very basic ally; stats derived from hero-ish baselines.
 DEFAULT_MERCENARY = register_companion(
     CompanionDef(
         id="mercenary",
@@ -331,4 +337,3 @@ def default_party_states_for_class(hero_class_id: str, hero_level: int = 1) -> L
         init_companion_skill_slots(state, comp_def)
         states.append(state)
     return states
-

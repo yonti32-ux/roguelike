@@ -45,6 +45,10 @@ from ui.screens import (
 )
 
 from systems.events import EVENTS  # registry of map events
+try:
+    from telemetry.logger import telemetry
+except Exception:  # telemetry must never break the game
+    telemetry = None
 
 
 # How far the player can see in tiles. Feel free to tweak.
@@ -73,9 +77,6 @@ class Game:
         # Logical input manager (actions -> keys/buttons).
         # For Phase 1 this is wired but not yet *used* by game logic.
         self.input_manager = create_default_input_manager()
-
-        # Hero progression for this run (will be set in _init_hero_for_class)
-        self.hero_stats = HeroStats()
 
 
         # Hero progression for this run (will be set in _init_hero_for_class)
@@ -191,26 +192,32 @@ class Game:
 
     def enter_exploration_mode(self) -> None:
         """Switch back to exploration mode and clear any active screen."""
+        prev = getattr(self, "mode", None)
         self.mode = GameMode.EXPLORATION
-        # When returning to exploration, close any transient overlay screen.
         self.active_screen = None
+        if telemetry is not None:
+            telemetry.log("mode_change", frm=prev, to=self.mode)
 
     def enter_battle_mode(self) -> None:
         """Switch into battle mode (BattleScene must already be created)."""
+        prev = getattr(self, "mode", None)
         self.mode = GameMode.BATTLE
-        # We don't keep generic overlay screens alive across mode changes.
         self.active_screen = None
+        if telemetry is not None:
+            telemetry.log("mode_change", frm=prev, to=self.mode)
 
     def enter_perk_choice_mode(self) -> None:
         """
         Switch into level-up perk choice overlay mode.
 
         We pause world updates (mode = PERK_CHOICE), keep the exploration
-        view on screen, and attach the perk-choice screen as the active UI
-        overlay.
+        view on screen, and attach the perk-choice screen as the active UI overlay.
         """
+        prev = getattr(self, "mode", None)
         self.mode = GameMode.PERK_CHOICE
         self.active_screen = self.perk_choice_screen
+        if telemetry is not None:
+            telemetry.log("mode_change", frm=prev, to=self.mode)
 
     def toggle_inventory_overlay(self) -> None:
         """Toggle inventory overlay and manage its active screen."""
@@ -602,6 +609,13 @@ class Game:
                                            getattr(hs, "dodge", 0.0))
         self.player.status_resist = getattr(hs, "status_resist", 0.0)
 
+        # --- New: resource pools from HeroStats (max stamina / mana) ---
+        # HeroStats already exposes max_stamina / max_mana properties.
+        max_sta = max(0, int(getattr(hs, "max_stamina", 0)))
+        max_mana = max(0, int(getattr(hs, "max_mana", 0)))
+
+        self.player.max_stamina = max_sta
+        self.player.max_mana = max_mana
         # ---- Move speed ----
         move_speed = getattr(hs, "move_speed",
                              getattr(hs, "speed",
@@ -1681,6 +1695,15 @@ class Game:
             xp_total += int(getattr(e, "xp_reward", 5))
         self.pending_battle_xp = xp_total
 
+        if telemetry is not None:
+            telemetry.log(
+                "battle_start",
+                floor=getattr(self, "floor", None),
+                enemy_count=len(encounter_enemies),
+                xp_total=int(xp_total),
+            )
+
+
         # 4) Create battle scene with the entire group + current party.
         # Pass runtime CompanionState objects directly; BattleScene knows how
         # to use their own stats (HP / ATK / DEF / skill_power).
@@ -1774,6 +1797,14 @@ class Game:
         status = self.battle_scene.status
         xp_reward = self.pending_battle_xp
         self.pending_battle_xp = 0
+        if telemetry is not None:
+            telemetry.log(
+                "battle_end",
+                status=status,
+                xp_reward=int(xp_reward),
+                floor=getattr(self, "floor", None),
+            )
+
 
         # Keep a copy of the combat log so we can display it in exploration
         if self.battle_scene.combat_log:

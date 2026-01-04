@@ -45,6 +45,10 @@ class BattleUnit:
     # Optional hotbar-style layout; indices 0–3 map to SKILL_1..SKILL_4.
     skill_slots: List[str] = field(default_factory=list)
 
+    # Current resource pools used by some skills.
+    current_mana: int = 0
+    current_stamina: int = 0
+
     @property
     def hp(self) -> int:
         return getattr(self.entity, "hp", 0)
@@ -56,6 +60,14 @@ class BattleUnit:
     @property
     def attack_power(self) -> int:
         return getattr(self.entity, "attack_power", 0)
+
+    @property
+    def max_mana(self) -> int:
+        return getattr(self.entity, "max_mana", 0)
+
+    @property
+    def max_stamina(self) -> int:
+        return getattr(self.entity, "max_stamina", 0)
 
     @property
     def is_alive(self) -> bool:
@@ -111,6 +123,23 @@ class BattleScene:
             gy=self.grid_height // 2,
             name=hero_name,
         )
+
+        # --- New: initialise hero resource pools from the Player entity ---
+        # These values are populated in Game.apply_hero_stats_to_player.
+        hero_max_stamina = int(getattr(self.player, "max_stamina", 0) or 0)
+        hero_max_mana = int(getattr(self.player, "max_mana", 0) or 0)
+
+        # Backwards-compatible safety defaults so hero can always use skills.
+        if hero_max_stamina <= 0:
+            hero_max_stamina = 6
+        if hero_max_mana < 0:
+            hero_max_mana = 0
+
+        setattr(self.player, "max_stamina", hero_max_stamina)
+        setattr(self.player, "max_mana", hero_max_mana)
+
+        hero_unit.current_stamina = hero_max_stamina
+        hero_unit.current_mana = hero_max_mana
 
         # Core hero skills – now robust against missing registry
         hero_unit.skills = {}
@@ -230,6 +259,22 @@ class BattleScene:
                 setattr(companion_entity, "defense", comp_defense)
                 setattr(companion_entity, "skill_power", comp_sp)
 
+                # Resource pools: prefer CompanionState values; fallback to a
+                # simple default stamina pool so they can use skills.
+                comp_max_mana = 0
+                comp_max_stamina = 0
+                if comp_state is not None:
+                    comp_max_mana = int(getattr(comp_state, "max_mana", 0) or 0)
+                    comp_max_stamina = int(getattr(comp_state, "max_stamina", 0) or 0)
+
+                if comp_max_stamina <= 0:
+                    comp_max_stamina = 4
+                if comp_max_mana < 0:
+                    comp_max_mana = 0
+
+                setattr(companion_entity, "max_mana", comp_max_mana)
+                setattr(companion_entity, "max_stamina", comp_max_stamina)
+
                 # Prefer state name_override if present, then template name,
                 # then player's generic companion_name, then plain "Companion".
                 companion_name = getattr(comp_state, "name_override", None) or comp_def.name
@@ -243,6 +288,9 @@ class BattleScene:
                     gy=companion_row,
                     name=companion_name,
                 )
+
+                companion_unit.current_mana = comp_max_mana
+                companion_unit.current_stamina = comp_max_stamina
 
                 # Skills for the companion: from template, fallback to Guard
                 skills: Dict[str, Skill] = {}
@@ -307,6 +355,12 @@ class BattleScene:
                 hp=int(companion_max_hp * 0.8),
                 attack_power=max(2, int(getattr(self.player, "attack_power", 5) * 0.7)),
             )
+            # Simple default pools for the generic companion.
+            generic_max_mana = 0
+            generic_max_stamina = 4
+            setattr(companion, "max_mana", generic_max_mana)
+            setattr(companion, "max_stamina", generic_max_stamina)
+
             companion_unit = BattleUnit(
                 entity=companion,
                 side="player",
@@ -314,6 +368,9 @@ class BattleScene:
                 gy=max(0, self.grid_height // 2 - 1),
                 name=companion_display_name,
             )
+            companion_unit.current_mana = generic_max_mana
+            companion_unit.current_stamina = generic_max_stamina
+
             try:
                 companion_unit.skills = {
                     "guard": get_skill("guard"),
@@ -364,6 +421,14 @@ class BattleScene:
                 gy=gy,
                 name=enemy_name,
             )
+            # Simple default resource pools for enemies so stamina-based
+            # skills can work without extra data wiring.
+            enemy_max_mana = 0
+            enemy_max_stamina = 6
+            setattr(enemy, "max_mana", enemy_max_mana)
+            setattr(enemy, "max_stamina", enemy_max_stamina)
+            unit.current_mana = enemy_max_mana
+            unit.current_stamina = enemy_max_stamina
 
             # Skills from archetype
             if arch_id is not None:
@@ -493,6 +558,11 @@ class BattleScene:
         for k in list(unit.cooldowns.keys()):
             if unit.cooldowns[k] > 0:
                 unit.cooldowns[k] -= 1
+
+        # Simple stamina regeneration each turn so skills recover over time.
+        max_stamina = getattr(unit, "max_stamina", 0)
+        if max_stamina > 0 and hasattr(unit, "current_stamina"):
+            unit.current_stamina = min(max_stamina, unit.current_stamina + 1)
 
     # ----- Grid / movement helpers -----
 
@@ -624,34 +694,7 @@ class BattleScene:
         # Take at most 4 skills for now.
         unit.skill_slots = ordered[:4]
 
-    def _auto_assign_skill_slots(self, unit: BattleUnit) -> None:
-        """
-        Populate unit.skill_slots from its current skills dict.
 
-        Guard is deliberately left OUT of slots – it has its own
-        dedicated GUARD action (usually bound to G).
-
-        Simple default:
-        - prefer 'power_strike' (or other core attacks) first
-        - then fill with any remaining non-guard skills in dict order
-        - cap at 4 entries (SKILL_1..SKILL_4)
-        """
-        ordered: List[str] = []
-
-        # Priority skills first, if present on this unit.
-        for prio in ("power_strike",):
-            if prio in unit.skills and prio not in ordered:
-                ordered.append(prio)
-
-        # Then everything else EXCEPT 'guard', in insertion order.
-        for sid in unit.skills.keys():
-            if sid == "guard":
-                continue
-            if sid not in ordered:
-                ordered.append(sid)
-
-        # Take at most 4 skills for now.
-        unit.skill_slots = ordered[:4]
 
     def _apply_persisted_slots(self, unit: BattleUnit, persisted_ids) -> None:
         """
@@ -760,6 +803,29 @@ class BattleScene:
                     self._log(f"No enemy in range for {skill.name}!")
                 return False
             target_unit = candidates[0]
+
+        # Resource costs: mana / stamina
+        mana_cost = getattr(skill, "mana_cost", 0)
+        stamina_cost = getattr(skill, "stamina_cost", 0)
+
+        if mana_cost > 0:
+            current_mana = getattr(unit, "current_mana", 0)
+            if current_mana < mana_cost:
+                if not for_ai:
+                    self._log("Not enough mana!")
+                return False
+
+        if stamina_cost > 0:
+            current_stamina = getattr(unit, "current_stamina", 0)
+            if current_stamina < stamina_cost:
+                if not for_ai:
+                    self._log("Not enough stamina!")
+                return False
+
+        if mana_cost > 0 and hasattr(unit, "current_mana"):
+            unit.current_mana -= mana_cost
+        if stamina_cost > 0 and hasattr(unit, "current_stamina"):
+            unit.current_stamina -= stamina_cost
 
         # Apply damage if any
         damage = 0
@@ -1125,11 +1191,29 @@ class BattleScene:
         defense = getattr(unit.entity, "defense", 0)
         stats_line = f"ATK {atk}   DEF {defense}"
 
+        # Resource line (stamina, and later mana)
+        res_line = ""
+        max_sta = getattr(unit, "max_stamina", 0)
+        cur_sta = getattr(unit, "current_stamina", 0)
+        max_mana = getattr(unit, "max_mana", 0)
+        cur_mana = getattr(unit, "current_mana", 0)
+
+        if max_sta > 0:
+            res_line = f"STA {cur_sta}/{max_sta}"
+        if max_mana > 0:
+            if res_line:
+                res_line = f"MP {cur_mana}/{max_mana}   {res_line}"
+            else:
+                res_line = f"MP {cur_mana}/{max_mana}"
+
         hp_surf = self.font.render(hp_line, True, (210, 210, 210))
         stats_surf = self.font.render(stats_line, True, (200, 200, 200))
+        res_surf = self.font.render(res_line, True, (190, 190, 230)) if res_line else None
 
         surface.blit(hp_surf, (x + 10, y + 32))
-        surface.blit(stats_surf, (x + 10, y + 52))
+        surface.blit(stats_surf, (x + 10, y + 48))
+        if res_surf is not None:
+            surface.blit(res_surf, (x + 10, y + 64))
 
         # Simple status indicators on the right side of the panel
         icon_x = x + panel_width - 18

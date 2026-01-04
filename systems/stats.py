@@ -12,3 +12,5 @@ class StatBlock:
     crit_chance: float = 0.0
     dodge_chance: float = 0.0
     status_resist: float = 0.0
+    max_mana: int = 0
+    max_stamina: int = 0

@@ -35,6 +35,8 @@ class Skill:
     base_power: float = 1.0
     uses_skill_power: bool = False
     cooldown: int = 0
+    mana_cost: int = 0
+    stamina_cost: int = 0
 
     make_self_status: Optional[Callable[[], StatusEffect]] = None
     make_target_status: Optional[Callable[[], StatusEffect]] = None
@@ -88,7 +90,9 @@ def _build_core_skills() -> None:
             base_power=1.6,
             uses_skill_power=True,
             cooldown=3,
+            stamina_cost=2,
             make_target_status=lambda: StatusEffect(
+
                 name="weakened",
                 duration=2,
                 outgoing_mult=0.7,
@@ -215,8 +219,11 @@ def _build_core_skills() -> None:
             base_power=1.25,
             uses_skill_power=False,
             cooldown=2,
+            stamina_cost=2,
         )
+
     )
+
 
     # Ward perk: control skill (stun)
     shield_bash = register(
@@ -229,6 +236,7 @@ def _build_core_skills() -> None:
             base_power=1.1,
             uses_skill_power=False,
             cooldown=3,
+            stamina_cost=3,
             make_target_status=lambda: StatusEffect(
                 name="stunned",
                 duration=1,
@@ -248,8 +256,9 @@ def _build_core_skills() -> None:
             base_power=1.4,
             uses_skill_power=True,
             cooldown=3,
+            stamina_cost=3,
         )
-    )
+)
 
     nimble_step = register(
         Skill(
@@ -261,7 +270,9 @@ def _build_core_skills() -> None:
             base_power=0.0,
             uses_skill_power=False,
             cooldown=3,
+            stamina_cost=1,
             make_self_status=lambda: StatusEffect(
+
                 name="nimble",
                 duration=1,
                 incoming_mult=0.5,

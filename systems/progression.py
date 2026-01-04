@@ -204,6 +204,22 @@ class HeroStats:
     def skill_power(self, value: float) -> None:
         self.base.skill_power = float(value)
 
+    @property
+    def max_mana(self) -> int:
+        return self.base.max_mana
+
+    @max_mana.setter
+    def max_mana(self, value: int) -> None:
+        self.base.max_mana = int(value)
+
+    @property
+    def max_stamina(self) -> int:
+        return self.base.max_stamina
+
+    @max_stamina.setter
+    def max_stamina(self, value: int) -> None:
+        self.base.max_stamina = int(value)
+
     # ------------------------------------------------------------------
     # Skill slot helpers
     # ------------------------------------------------------------------

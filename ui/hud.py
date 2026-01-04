@@ -27,17 +27,20 @@ def _draw_bar(
     border_color: tuple[int, int, int] | None = (255, 255, 255),
 ) -> None:
     """
-    Utility: draw a simple filled bar (e.g. HP / XP) at [x, y] with a given
-    fill fraction in [0, 1].
+    Utility: draw a simple filled bar (e.g. HP / XP / stamina / mana).
     """
     fraction = max(0.0, min(1.0, float(fraction)))
-    # Background
     pygame.draw.rect(surface, back_color, (x, y, width, height))
     if fraction > 0.0:
         fill_w = int(width * fraction)
         pygame.draw.rect(surface, fill_color, (x, y, fill_w, height))
-    if border_color is not None and height > 2 and width > 2:
+    if border_color is not None and width > 2 and height > 2:
         pygame.draw.rect(surface, border_color, (x, y, width, height), 1)
+
+
+# ---------------------------------------------------------------------------
+# Exploration HUD
+# ---------------------------------------------------------------------------
 
 
 def draw_exploration_ui(game: "Game") -> None:
@@ -60,14 +63,11 @@ def draw_exploration_ui(game: "Game") -> None:
 
     screen_w, screen_h = screen.get_size()
 
-    # --------------------------------------------------------------
-    # HERO PANEL (top-left)
-    # --------------------------------------------------------------
+    # --- Hero panel (top-left) ---
     panel_x = 8
     panel_y = 8
     panel_w = 280
-    # A bit taller so context panel doesn't overlap gold text
-    panel_h = 160
+    panel_h = 210
 
     panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
     panel_surf.fill((0, 0, 0, 180))
@@ -78,13 +78,12 @@ def draw_exploration_ui(game: "Game") -> None:
 
     hero_name = getattr(game.hero_stats, "hero_name", "Adventurer")
     hero_class_id = getattr(game.hero_stats, "hero_class_id", "warrior")
-    hero_class_label = hero_class_id.capitalize()
+    hero_class_label = str(hero_class_id).capitalize()
 
     name_text = ui_font.render(f"{hero_name} ({hero_class_label})", True, (245, 245, 230))
     screen.blit(name_text, (text_x, y))
     y += 24
 
-    # Floor + debug flags
     floor_text = ui_font.render(f"Floor {game.floor}", True, (220, 220, 220))
     screen.blit(floor_text, (text_x, y))
     y += 20
@@ -124,14 +123,14 @@ def draw_exploration_ui(game: "Game") -> None:
     )
     y = bar_y + bar_h + 6
 
-    # Gear bonuses
-    gear_mods = game.inventory.total_stat_modifiers() if game.inventory is not None else {}
-    atk_base = game.hero_stats.attack_power
-    def_base = game.hero_stats.defense
+    # Gear bonuses for ATK / DEF
+    gear_mods = game.inventory.total_stat_modifiers() if game.inventory else {}
+    atk_base = float(getattr(game.hero_stats, "attack_power", 0))
+    def_base = float(getattr(game.hero_stats, "defense", 0))
     atk_bonus = int(gear_mods.get("attack", 0))
     def_bonus = int(gear_mods.get("defense", 0))
 
-    # HP + bar
+    # HP bar
     player_hp = getattr(player, "hp", 0)
     player_max_hp = max(1, getattr(player, "max_hp", 1))
     hp_ratio = player_hp / player_max_hp
@@ -154,6 +153,67 @@ def draw_exploration_ui(game: "Game") -> None:
     )
     y = hp_bar_y + bar_h + 6
 
+    # Stamina / Mana bars (if the hero has them).
+    hero_max_stamina = int(getattr(game.hero_stats, "max_stamina", 0))
+    hero_max_mana = int(getattr(game.hero_stats, "max_mana", 0))
+
+    # If meta-stats aren't set, mirror from the player entity.
+    if hero_max_stamina <= 0:
+        hero_max_stamina = int(getattr(player, "max_stamina", 0))
+    if hero_max_mana <= 0:
+        hero_max_mana = int(getattr(player, "max_mana", 0))
+
+    current_stamina = int(getattr(player, "current_stamina", hero_max_stamina))
+    current_mana = int(getattr(player, "current_mana", hero_max_mana))
+
+    if hero_max_stamina > 0:
+        current_stamina = max(0, min(current_stamina, hero_max_stamina))
+        sta_text = ui_font.render(
+            f"Stamina {current_stamina}/{hero_max_stamina}",
+            True,
+            (200, 230, 200),
+        )
+        screen.blit(sta_text, (text_x, y))
+        y += 18
+
+        sta_bar_y = y
+        _draw_bar(
+            screen,
+            bar_x,
+            sta_bar_y,
+            bar_w,
+            bar_h,
+            current_stamina / hero_max_stamina,
+            back_color=(30, 50, 30),
+            fill_color=(80, 200, 80),
+            border_color=(255, 255, 255),
+        )
+        y = sta_bar_y + bar_h + 6
+
+    if hero_max_mana > 0:
+        current_mana = max(0, min(current_mana, hero_max_mana))
+        mana_text = ui_font.render(
+            f"Mana {current_mana}/{hero_max_mana}",
+            True,
+            (180, 210, 255),
+        )
+        screen.blit(mana_text, (text_x, y))
+        y += 18
+
+        mana_bar_y = y
+        _draw_bar(
+            screen,
+            bar_x,
+            mana_bar_y,
+            bar_w,
+            bar_h,
+            current_mana / hero_max_mana,
+            back_color=(20, 40, 60),
+            fill_color=(80, 120, 220),
+            border_color=(255, 255, 255),
+        )
+        y = mana_bar_y + bar_h + 6
+
     atk_total = atk_base + atk_bonus
     def_total = def_base + def_bonus
 
@@ -174,7 +234,7 @@ def draw_exploration_ui(game: "Game") -> None:
     hero_panel_bottom = panel_y + panel_h
 
     # --------------------------------------------------------------
-    # CONTEXTUAL HINTS (stairs, room vibe, threats, chests/events)
+    # Contextual hints – stairs, room tag, nearby enemies, chests/events
     # --------------------------------------------------------------
     stairs_hint: str | None = None
     threat_hint: str | None = None
@@ -192,7 +252,7 @@ def draw_exploration_ui(game: "Game") -> None:
         elif game_map.down_stairs is not None and (tx, ty) == game_map.down_stairs:
             stairs_hint = "On stairs down – press '.' to descend."
 
-        # Room 'vibes' based on room tag
+        # Room tag "vibes"
         room = game_map.get_room_at(tx, ty)
         if room is not None:
             tag = getattr(room, "tag", "generic")
@@ -203,11 +263,11 @@ def draw_exploration_ui(game: "Game") -> None:
             elif tag == "event":
                 room_hint = "Something unusual is anchored in this room."
             elif tag == "start":
-                room_hint = "A moment of calm before the descent."
+                room_hint = "A quiet moment before the descent."
             elif tag == "shop":
-                room_hint = "A quiet merchant has set up here – find them and press E to trade."
+                room_hint = "A merchant waits here – find them and press E to trade."
 
-        # Count nearby enemies for ambient info
+        # Ambient nearby enemy info
         nearby = 0
         radius_tiles = 7
         radius_sq = (TILE_SIZE * radius_tiles) ** 2
@@ -226,21 +286,18 @@ def draw_exploration_ui(game: "Game") -> None:
             else:
                 threat_hint = "The air hums with many hostile presences."
 
-        # Chest / event nearby?
+        # Chest / event proximity
         chest = None
         event_node = None
-        if hasattr(game, "exploration") and game.exploration is not None:
-            chest = game.exploration.find_chest_near_player(max_distance_px=TILE_SIZE)
-            # Only bother looking for events if there's no unopened chest
+        exploration = getattr(game, "exploration", None)
+        if exploration is not None:
+            chest = exploration.find_chest_near_player(max_distance_px=TILE_SIZE)
             if chest is None or getattr(chest, "opened", False):
-                event_node = game.exploration.find_event_near_player(
-                    max_distance_px=TILE_SIZE
-                )
+                event_node = exploration.find_event_near_player(max_distance_px=TILE_SIZE)
 
         if chest is not None and not getattr(chest, "opened", False):
             chest_hint = "There is a chest here – press E to open."
         elif event_node is not None:
-            # Look up event definition to tailor the hint
             event_id = getattr(event_node, "event_id", "")
             event_def = get_event_def(event_id)
             if event_def is not None:
@@ -255,7 +312,6 @@ def draw_exploration_ui(game: "Game") -> None:
             else:
                 event_hint = "There is something unusual here – press E to interact."
 
-    # Context panel background sized to the number of active hints
     context_lines: list[str] = []
     if stairs_hint:
         context_lines.append(stairs_hint)
@@ -282,7 +338,7 @@ def draw_exploration_ui(game: "Game") -> None:
         y_ui = ctx_y + 4
         for text in context_lines:
             color = (180, 200, 220)
-            if "dangerous" in text or "hostile" in text or "enemy" in text:
+            if any(word in text for word in ("dangerous", "hostile", "enemy")):
                 color = (220, 150, 150)
             elif "wealth" in text or "chest" in text:
                 color = (220, 210, 160)
@@ -290,9 +346,7 @@ def draw_exploration_ui(game: "Game") -> None:
             screen.blit(hint_surf, (ctx_x + 8, y_ui))
             y_ui += line_h
 
-    # --------------------------------------------------------------
-    # BOTTOM MESSAGE BAND + CONTROLS
-    # --------------------------------------------------------------
+    # Bottom message band
     band_h = 52
     band_y = screen_h - band_h
     band_surf = pygame.Surface((screen_w, band_h), pygame.SRCALPHA)
@@ -300,25 +354,23 @@ def draw_exploration_ui(game: "Game") -> None:
     screen.blit(band_surf, (0, band_y))
 
     msg_y = band_y + 8
-    if getattr(game, "last_message", ""):
-        msg_text = ui_font.render(game.last_message, True, (200, 200, 200))
+    last_msg = getattr(game, "last_message", "")
+    if last_msg:
+        msg_text = ui_font.render(last_msg, True, (200, 200, 200))
         screen.blit(msg_text, (10, msg_y))
 
-    # Controls hint (bottom line)
     hint_text = ui_font.render(
-        "Move WASD/arrows | '.' down ',' up | E: interact | C: sheet | I: inventory | K: history | L: battle log | Z/X: zoom",
+        "Move WASD/arrows | '.' down ',' up | E: interact | C: sheet | I: inventory | "
+        "K: history | L: battle log | Z/X: zoom",
         True,
         (170, 170, 170),
     )
     screen.blit(hint_text, (10, band_y + band_h - 24))
 
-    # --------------------------------------------------------------
-    # Overlays on top of the exploration HUD
-    # --------------------------------------------------------------
-    # --- Last battle log overlay (if enabled) ---
+    # Overlays: battle log
     if getattr(game, "show_battle_log", False) and getattr(game, "last_battle_log", None):
         max_lines = 8
-        lines = game.last_battle_log[-max_lines:]
+        lines = game.last_battle_log[-max_lines:]  # type: ignore[index]
 
         line_height = 18
         log_width = 520
@@ -332,21 +384,14 @@ def draw_exploration_ui(game: "Game") -> None:
 
         y_log = overlay_y + 6
         for line in lines:
-            txt = ui_font.render(line, True, (220, 220, 220))
+            txt = ui_font.render(str(line), True, (220, 220, 220))
             screen.blit(txt, (overlay_x + 6, y_log))
             y_log += line_height
 
-        close_txt = ui_font.render(
-            "Press L to hide battle log",
-            True,
-            (160, 160, 160),
-        )
-        screen.blit(
-            close_txt,
-            (overlay_x + 6, overlay_y + log_height - line_height - 4),
-        )
+        close_txt = ui_font.render("Press L to hide battle log", True, (160, 160, 160))
+        screen.blit(close_txt, (overlay_x + 6, overlay_y + log_height - line_height - 4))
 
-    # --- Exploration log overlay (recent exploration messages) ---
+    # Exploration log overlay
     if getattr(game, "show_exploration_log", False):
         history: List[str] = list(getattr(game, "exploration_log", []))
         if not history:
@@ -361,12 +406,7 @@ def draw_exploration_ui(game: "Game") -> None:
         title_height = 22
 
         log_width = min(520, screen_w - 16)
-        log_height = (
-            padding_y * 2
-            + title_height
-            + len(lines) * line_height
-            + 20
-        )
+        log_height = padding_y * 2 + title_height + len(lines) * line_height + 20
 
         overlay = pygame.Surface((log_width, log_height), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 190))
@@ -385,7 +425,7 @@ def draw_exploration_ui(game: "Game") -> None:
         y_log += title_height
 
         for line in lines:
-            txt = ui_font.render(line, True, (220, 220, 220))
+            txt = ui_font.render(str(line), True, (220, 220, 220))
             screen.blit(txt, (overlay_x + padding_x, y_log))
             y_log += line_height
 
@@ -399,11 +439,14 @@ def draw_exploration_ui(game: "Game") -> None:
             (overlay_x + padding_x, overlay_y + log_height - line_height - 4),
         )
 
-    # --- Shop overlay (merchant rooms) ---
-    # If the shop is open BUT not handled as a blocking screen (e.g. very old save / fallback),
-    # draw it here. When ShopScreen is active, it will draw the overlay itself.
+    # Legacy merchant overlay (only when not using separate ShopScreen)
     if getattr(game, "show_shop", False) and getattr(game, "active_screen", None) is not getattr(game, "shop_screen", None):
         draw_shop_overlay(game)
+
+
+# ---------------------------------------------------------------------------
+# Character sheet
+# ---------------------------------------------------------------------------
 
 
 def _draw_character_sheet(game: "Game") -> None:
@@ -429,33 +472,29 @@ def _draw_character_sheet(game: "Game") -> None:
     overlay.fill((0, 0, 0, 210))
     screen.blit(overlay, (ox, oy))
 
-    # Title
     title = ui_font.render("Character Sheet", True, (240, 240, 200))
     screen.blit(title, (ox + 12, oy + 10))
 
-    # ------------------------------------------------------------------
-    # Determine which character we are focusing:
-    # 0 = hero, 1..N = companions in game.party.
-    # ------------------------------------------------------------------
+    # Determine focus: 0 = hero, 1..N = companions
     focus_index = int(getattr(game, "character_sheet_focus_index", 0))
-    party_list = getattr(game, "party", None) or []
+    party_list: List[CompanionState] = getattr(game, "party", None) or []
     total_slots = 1 + len(party_list)
     if total_slots <= 1:
         focus_index = 0
     else:
         focus_index = max(0, min(focus_index, total_slots - 1))
 
-    focused_is_hero = (focus_index == 0)
+    focused_is_hero = focus_index == 0
     focused_comp: CompanionState | None = None
     focused_template: CompanionDef | None = None
 
     if not focused_is_hero and party_list:
         comp_idx = focus_index - 1
         if 0 <= comp_idx < len(party_list):
-            raw_comp = party_list[comp_idx]
-            if isinstance(raw_comp, CompanionState):
-                focused_comp = raw_comp
-                template_id = getattr(raw_comp, "template_id", None)
+            candidate = party_list[comp_idx]
+            if isinstance(candidate, CompanionState):
+                focused_comp = candidate
+                template_id = getattr(candidate, "template_id", None)
                 if template_id:
                     try:
                         focused_template = get_companion(template_id)
@@ -463,16 +502,12 @@ def _draw_character_sheet(game: "Game") -> None:
                         focused_template = None
                 if focused_template is not None:
                     try:
-                        ensure_companion_stats(raw_comp, focused_template)
+                        ensure_companion_stats(candidate, focused_template)
                     except Exception:
                         pass
             else:
-                # Legacy / unknown type → fall back to hero view
                 focused_is_hero = True
 
-    # ------------------------------------------------------------------
-    # Focused character core info + stats
-    # ------------------------------------------------------------------
     y = oy + 40
 
     if focused_is_hero:
@@ -542,6 +577,27 @@ def _draw_character_sheet(game: "Game") -> None:
             )
         else:
             stats_lines.append(f"HP: {hp}/{max_hp}")
+
+        # Resource pools (only shown if non-zero).
+        hero_max_stamina = int(getattr(game.hero_stats, "max_stamina", 0))
+        hero_max_mana = int(getattr(game.hero_stats, "max_mana", 0))
+
+        # Fall back to the player entity if meta-stats aren't wired yet.
+        if hero_max_stamina <= 0:
+            hero_max_stamina = int(getattr(game.player, "max_stamina", 0))
+        if hero_max_mana <= 0:
+            hero_max_mana = int(getattr(game.player, "max_mana", 0))
+
+        current_stamina = int(getattr(game.player, "current_stamina", hero_max_stamina))
+        current_mana = int(getattr(game.player, "current_mana", hero_max_mana))
+
+        if hero_max_stamina > 0:
+            current_stamina = max(0, min(current_stamina, hero_max_stamina))
+            stats_lines.append(f"Stamina: {current_stamina}/{hero_max_stamina}")
+
+        if hero_max_mana > 0:
+            current_mana = max(0, min(current_mana, hero_max_mana))
+            stats_lines.append(f"Mana: {current_mana}/{hero_max_mana}")
 
         if atk_bonus:
             stats_lines.append(
@@ -635,12 +691,12 @@ def _draw_character_sheet(game: "Game") -> None:
         screen.blit(gold_line, (ox + 12, y))
         y += 26
 
-        # Companion stats (no gear breakdown yet)
-        stats_lines: List[str] = []
-        stats_lines.append(f"HP: {hp}/{max_hp}")
-        stats_lines.append(f"ATK: {atk}")
-        stats_lines.append(f"DEF: {defense}")
-        stats_lines.append(f"Skill Power: {skill_power:.2f}x")
+        stats_lines = [
+            f"HP: {hp}/{max_hp}",
+            f"ATK: {atk}",
+            f"DEF: {defense}",
+            f"Skill Power: {skill_power:.2f}x",
+        ]
 
     # Render stat lines
     for line in stats_lines:
@@ -648,9 +704,7 @@ def _draw_character_sheet(game: "Game") -> None:
         screen.blit(t, (ox + 12, y))
         y += 20
 
-    # ------------------------------------------------------------------
-    # Perks (hero only for now)
-    # ------------------------------------------------------------------
+    # Perks
     y += 8
     perks_title = ui_font.render("Perks:", True, (220, 220, 180))
     screen.blit(perks_title, (ox + 12, y))
@@ -692,17 +746,46 @@ def _draw_character_sheet(game: "Game") -> None:
                 screen.blit(t, (ox + 24, y))
                 y += 20
     else:
-        placeholder = ui_font.render(
-            "Companion perks: (not implemented yet)",
-            True,
-            (180, 180, 180),
-        )
-        screen.blit(placeholder, (ox + 24, y))
-        y += 20
+        comp = focused_comp
+        perk_ids: List[str] = []
+        if comp is not None:
+            perk_ids = getattr(comp, "perks", []) or []
 
-    # ------------------------------------------------------------------
-    # Party preview block (hero + companions, with focus marker)
-    # ------------------------------------------------------------------
+        if not perk_ids:
+            placeholder = ui_font.render(
+                "This companion has no perks yet.",
+                True,
+                (180, 180, 180),
+            )
+            screen.blit(placeholder, (ox + 24, y))
+            y += 20
+        else:
+            getter = getattr(perk_system, "get_perk", None)
+            if not callable(getter):
+                getter = getattr(perk_system, "get", None)
+
+            for pid in perk_ids:
+                perk_def = None
+                if callable(getter):
+                    try:
+                        perk_def = getter(pid)
+                    except KeyError:
+                        perk_def = None
+
+                if perk_def is None:
+                    pretty_name = pid.replace("_", " ").title()
+                    line = f"- {pretty_name}"
+                else:
+                    branch = getattr(perk_def, "branch_name", None)
+                    if branch:
+                        line = f"- {branch}: {perk_def.name}"
+                    else:
+                        line = f"- {perk_def.name}"
+                t = ui_font.render(line, True, (210, 210, 210))
+                screen.blit(t, (ox + 24, y))
+                y += 20
+
+    # Party preview
     y += 12
     party_title = ui_font.render("Party Preview:", True, (220, 220, 180))
     screen.blit(party_title, (ox + 12, y))
@@ -716,7 +799,7 @@ def _draw_character_sheet(game: "Game") -> None:
     class_id = getattr(game.hero_stats, "hero_class_id", "unknown")
     class_str = class_id.capitalize()
 
-    hero_selected = (focus_index == 0)
+    hero_selected = focus_index == 0
     hero_marker = " [*]" if hero_selected else ""
     hero_line = ui_font.render(
         f"[Hero] {hero_name_list} ({class_str}){hero_marker}",
@@ -725,6 +808,10 @@ def _draw_character_sheet(game: "Game") -> None:
     )
     screen.blit(hero_line, (ox + 24, y))
     y += 20
+
+    base_max_hp = getattr(game.player, "max_hp", 24)
+    base_atk = getattr(game.player, "attack_power", 5)
+    base_defense = getattr(game.player, "defense", 0)
 
     if not party_list:
         companion_line = ui_font.render(
@@ -735,10 +822,6 @@ def _draw_character_sheet(game: "Game") -> None:
         screen.blit(companion_line, (ox + 24, y))
         y += 20
     else:
-        base_max_hp = getattr(game.player, "max_hp", 24)
-        base_atk = getattr(game.player, "attack_power", 5)
-        base_defense = int(getattr(game.player, "defense", 0))
-
         for idx, comp in enumerate(party_list):
             template = None
             comp_level = None
@@ -768,7 +851,6 @@ def _draw_character_sheet(game: "Game") -> None:
                 else:
                     name = getattr(comp, "name_override", None) or "Companion"
                     role = "Companion"
-
             elif isinstance(comp, CompanionDef):
                 template = comp
                 name = getattr(template, "name", "Companion")
@@ -791,7 +873,7 @@ def _draw_character_sheet(game: "Game") -> None:
                 comp_level = None
 
             lvl_prefix = f"Lv {comp_level} " if comp_level is not None else ""
-            is_selected = (focus_index == idx + 1)
+            is_selected = focus_index == idx + 1
             sel_marker = " [*]" if is_selected else ""
             line = (
                 f"[Companion] {lvl_prefix}{name} ({role}){sel_marker} – "
@@ -801,7 +883,6 @@ def _draw_character_sheet(game: "Game") -> None:
             screen.blit(t, (ox + 24, y))
             y += 20
 
-    # Close hint + switching hint
     hint = ui_font.render(
         "Press Q/E to switch character, C to close",
         True,
@@ -810,14 +891,17 @@ def _draw_character_sheet(game: "Game") -> None:
     screen.blit(hint, (ox + 40, oy + height - 30))
 
 
+# ---------------------------------------------------------------------------
+# Perk choice overlay
+# ---------------------------------------------------------------------------
 
 
 def draw_perk_choice_overlay(game: "Game") -> None:
     """
-    Draw the perk choice overlay used both for level-ups and events that
-    grant a free perk. Uses game.pending_perk_choices (list of Perk defs).
+    Perk choice overlay, used for level-ups and events that grant a free perk.
+
+    Expects game.pending_perk_choices to be a list of Perk objects (or None).
     """
-    # If there are no pending choices, nothing to draw.
     choices = getattr(game, "pending_perk_choices", None)
     if not choices:
         return
@@ -839,7 +923,6 @@ def draw_perk_choice_overlay(game: "Game") -> None:
 
     y = oy + 50
     for i, perk in enumerate(choices):
-        # perk is a Perk object from perk_system.pick_perk_choices
         if perk is None:
             label = f"{i + 1}) (unknown perk)"
             desc = ""
@@ -856,7 +939,7 @@ def draw_perk_choice_overlay(game: "Game") -> None:
         y += 22
 
         if desc:
-            desc_surf = ui_font.render(desc, True, (190, 190, 200))
+            desc_surf = ui_font.render(str(desc), True, (190, 190, 200))
             screen.blit(desc_surf, (ox + 36, y))
             y += 30
         else:
@@ -866,16 +949,20 @@ def draw_perk_choice_overlay(game: "Game") -> None:
     screen.blit(hint, (ox + 12, oy + height - 28))
 
 
+# ---------------------------------------------------------------------------
+# Inventory overlay (hero + companions)
+# ---------------------------------------------------------------------------
+
+
 def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -> None:
     """
     Inventory + equipment screen overlay.
 
-    This version is aware of the current inventory focus:
-    - Index 0: hero
-    - Index 1..N: companions in game.party order
+    Focus index (on Game):
+        0  -> hero
+        1+ -> companions from game.party
 
-    Q/E while the inventory is open will cycle this focus (handled in Game),
-    and we show / equip items for the focused character.
+    Q/E while the inventory is open cycles the focus index (handled on Game).
     """
     screen = game.screen
     ui_font = game.ui_font
@@ -890,9 +977,8 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
     overlay.fill((0, 0, 0, 210))
     screen.blit(overlay, (ox, oy))
 
-    # Figure out who we're focusing in this overlay.
-    party_list: list[CompanionState] = getattr(game, "party", None) or []
-    total_slots = 1 + len(party_list)  # hero + companions
+    party_list: List[CompanionState] = getattr(game, "party", None) or []
+    total_slots = 1 + len(party_list)
 
     focus_index = int(getattr(game, "inventory_focus_index", 0))
     if total_slots <= 1:
@@ -900,7 +986,7 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
     else:
         focus_index = focus_index % total_slots
 
-    focused_is_hero = (focus_index == 0)
+    focused_is_hero = focus_index == 0
     focused_comp: CompanionState | None = None
     focused_template: CompanionDef | None = None
 
@@ -915,13 +1001,13 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
                 except KeyError:
                     focused_template = None
                 else:
-                    # Safety: make sure stats are initialised.
                     ensure_companion_stats(candidate, focused_template)
 
-    # Resolve a display name + stat line for the focused character.
+    # Resolve display name + stat line + equipped map for the focused character
     if focused_is_hero:
         hero_name = getattr(game.hero_stats, "hero_name", "Adventurer")
         title_text = f"Inventory – {hero_name}"
+
         hero_stats = getattr(game, "hero_stats", None)
         if hero_stats is not None:
             stats_line_text = (
@@ -929,16 +1015,16 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
             )
         else:
             stats_line_text = ""
-        # Hero equipment comes from the main Inventory object
+
         equipped_map = inv.equipped if inv is not None else {}
     else:
-        # Companion focus
         if focused_comp is not None:
             display_name = getattr(focused_comp, "name_override", None)
             if not display_name and focused_template is not None:
                 display_name = focused_template.name
             if not display_name:
                 display_name = "Companion"
+
             title_text = f"Inventory – {display_name}"
             stats_line_text = (
                 f"HP {focused_comp.max_hp}  ATK {focused_comp.attack_power}  DEF {focused_comp.defense}"
@@ -973,7 +1059,7 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
         screen.blit(t, (ox + 24, y))
         y += 22
 
-    # Backpack items list (always from the shared inventory)
+    # Backpack items (shared inventory)
     y += 12
     backpack_title = ui_font.render("Backpack:", True, (220, 220, 180))
     screen.blit(backpack_title, (ox + 12, y))
@@ -989,29 +1075,24 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
         y += 20
     else:
         items = list(inv.items)
-        page_size = getattr(game, "inventory_page_size", 10)
-        offset = getattr(game, "inventory_scroll_offset", 0)
+        page_size = int(getattr(game, "inventory_page_size", 10))
+        offset = int(getattr(game, "inventory_scroll_offset", 0))
         total_items = len(items)
 
-        # Normalise offset if inventory size / page changed
         if total_items <= page_size:
             offset = 0
         else:
             max_offset = max(0, total_items - page_size)
-            if offset < 0:
-                offset = 0
-            elif offset > max_offset:
-                offset = max_offset
+            offset = max(0, min(offset, max_offset))
         game.inventory_scroll_offset = offset
 
-        visible_items = items[offset:offset + page_size]
+        visible_items = items[offset : offset + page_size]
 
         for idx, item_id in enumerate(visible_items):
             item_def = get_item_def(item_id)
             if item_def is None:
                 continue
 
-            # Check if this item is equipped on the focused character.
             equipped_marker = ""
             if equipped_map:
                 if equipped_map.get("weapon") == item_id:
@@ -1021,36 +1102,27 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
                 elif equipped_map.get("trinket") == item_id:
                     equipped_marker = " [T]"
 
-            hotkey = ""
-            if idx < 9:
-                hotkey = f"[{idx + 1}] "
-
+            hotkey = f"[{idx + 1}] " if idx < 9 else ""
             line = f"{hotkey}{item_def.name}{equipped_marker}"
             t = ui_font.render(line, True, (220, 220, 220))
             screen.blit(t, (ox + 24, y))
             y += 20
 
-    # Stats + footer hint
-    if stats_line_text:
-        stats_surf = ui_font.render(stats_line_text, True, (200, 200, 200))
-        screen.blit(stats_surf, (ox + 12, oy + height - 52))
-
-    # Scroll info line if more items than one page
-    if inv and getattr(inv, "items", None):
-        total_items = len(inv.items)
-        page_size = getattr(game, "inventory_page_size", 10)
-        offset = getattr(game, "inventory_scroll_offset", 0)
+        # Scroll info when there are more items than one page
         if total_items > page_size:
             first_index = offset + 1
             last_index = min(offset + page_size, total_items)
             scroll_text = (
-                f"Items {first_index}-{last_index} of {total_items} "
-                "(↑/↓ or PgUp/PgDn to scroll)"
+                f"Items {first_index}-{last_index} of {total_items} (↑/↓ or PgUp/PgDn to scroll)"
             )
             scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
             screen.blit(scroll_surf, (ox + 12, oy + height - 72))
 
-    # Shorter footer so it stays within the window width
+    # Stats line + footer hints
+    if stats_line_text:
+        stats_surf = ui_font.render(stats_line_text, True, (200, 200, 200))
+        screen.blit(stats_surf, (ox + 12, oy + height - 52))
+
     footer = ui_font.render(
         "1–9: equip on focused | Q/E: switch | I/ESC: close",
         True,
@@ -1059,19 +1131,19 @@ def draw_inventory_overlay(game: "Game", inventory: "Inventory | None" = None) -
     screen.blit(footer, (ox + 12, oy + height - 30))
 
 
+# ---------------------------------------------------------------------------
+# Companion choice overlay (for future recruitment)
+# ---------------------------------------------------------------------------
+
+
 def draw_companion_choice_overlay(
     game: "Game",
-    companion_defs: list[CompanionDef],
+    companion_defs: List[CompanionDef],
     selected_index: int | None = None,
 ) -> None:
     """
-    Draws a simple overlay for choosing a companion from a list of
-    CompanionDef templates.
-
-    This is not wired into gameplay yet, but the stat preview is kept
-    in sync with how companions are currently derived from the hero:
-    we scale off the hero's current stats using the factors on each
-    CompanionDef.
+    Simple overlay for choosing a companion from a list of CompanionDef
+    templates. Stat preview is scaled off the current hero.
     """
     screen = game.screen
     ui_font = game.ui_font
@@ -1089,20 +1161,22 @@ def draw_companion_choice_overlay(
     screen.blit(title, (ox + 12, oy + 10))
 
     if not companion_defs:
-        msg = ui_font.render("No companions available to recruit yet.", True, (200, 200, 200))
+        msg = ui_font.render(
+            "No companions available to recruit yet.",
+            True,
+            (200, 200, 200),
+        )
         screen.blit(msg, (ox + 12, oy + 60))
         hint = ui_font.render("Press ESC to cancel.", True, (160, 160, 160))
         screen.blit(hint, (ox + 12, oy + height - 30))
         return
 
-    # Baseline stats taken from the current hero entity
     base_max_hp = getattr(game.player, "max_hp", 24)
     base_atk = getattr(game.player, "attack_power", 5)
-    base_defense = int(getattr(game.player, "defense", 0))
+    base_defense = getattr(game.player, "defense", 0)
 
     y = oy + 50
     for i, comp in enumerate(companion_defs):
-        # Background highlight for selected index
         if selected_index is not None and i == selected_index:
             bg = pygame.Surface((width - 24, 68), pygame.SRCALPHA)
             bg.fill((60, 60, 90, 200))
@@ -1115,7 +1189,6 @@ def draw_companion_choice_overlay(
         screen.blit(label_surf, (ox + 18, y))
         y += 22
 
-        # Lightweight stat preview derived from hero stats
         hp_factor = float(getattr(comp, "hp_factor", 1.0))
         atk_factor = float(getattr(comp, "attack_factor", 1.0))
         def_factor = float(getattr(comp, "defense_factor", 1.0))
@@ -1137,20 +1210,28 @@ def draw_companion_choice_overlay(
         else:
             y += 8
 
-    hint = ui_font.render("Press 1–3 to recruit (ESC to cancel)", True, (160, 160, 160))
+    hint = ui_font.render(
+        "Press 1–3 to recruit (ESC to cancel)",
+        True,
+        (160, 160, 160),
+    )
     screen.blit(hint, (ox + 12, oy + height - 30))
 
+
+# ---------------------------------------------------------------------------
+# Simple shop overlay (merchant rooms)
+# ---------------------------------------------------------------------------
 
 
 def draw_shop_overlay(game: "Game") -> None:
     """
     Simple shop UI overlay for merchant rooms.
 
-    Uses transient state on the Game object:
-    - game.shop_stock: list of item_ids for sale
-    - game.shop_cursor: index of the currently highlighted entry
-    - game.shop_mode: "buy" or "sell"
-    - game.hero_stats.gold: current gold
+    Transient fields on Game:
+        - shop_stock: list of item_ids for sale
+        - shop_cursor: index of highlighted entry
+        - shop_mode: "buy" or "sell"
+        - hero_stats.gold: current gold
     """
     screen = game.screen
     ui_font = game.ui_font
@@ -1167,25 +1248,18 @@ def draw_shop_overlay(game: "Game") -> None:
     mode = getattr(game, "shop_mode", "buy")
     mode_label = "BUY" if mode == "buy" else "SELL"
 
-    # Title
     title = ui_font.render(f"Dungeon Merchant — {mode_label}", True, (240, 240, 200))
     screen.blit(title, (ox + 12, oy + 10))
 
-    # Player gold
-    gold_value = getattr(getattr(game, "hero_stats", None), "gold", 0)
-    gold_line = ui_font.render(
-        f"Your gold: {gold_value}",
-        True,
-        (230, 210, 120),
-    )
+    gold_value = int(getattr(getattr(game, "hero_stats", None), "gold", 0))
+    gold_line = ui_font.render(f"Your gold: {gold_value}", True, (230, 210, 120))
     screen.blit(gold_line, (ox + 12, oy + 36))
 
     stock_buy: List[str] = list(getattr(game, "shop_stock", []))
-    inv = getattr(game, "inventory", None)
+    inv: Inventory | None = getattr(game, "inventory", None)
     cursor = int(getattr(game, "shop_cursor", 0))
     y = oy + 70
 
-    # Determine which list we're showing
     if mode == "buy":
         active_list = stock_buy
     else:
@@ -1195,16 +1269,16 @@ def draw_shop_overlay(game: "Game") -> None:
             active_list = inv.get_sellable_item_ids()
 
     if not active_list:
-        if mode == "buy":
-            msg_text = "The merchant has nothing left to sell."
-        else:
-            msg_text = "You have nothing you're willing to sell."
+        msg_text = (
+            "The merchant has nothing left to sell."
+            if mode == "buy"
+            else "You have nothing you're willing to sell."
+        )
         msg = ui_font.render(msg_text, True, (190, 190, 190))
         screen.blit(msg, (ox + 12, y))
     else:
         max_items = len(active_list)
         line_height = 24
-
         if max_items > 0:
             cursor = max(0, min(cursor, max_items - 1))
 
@@ -1216,25 +1290,20 @@ def draw_shop_overlay(game: "Game") -> None:
                 rarity = ""
             else:
                 name = item_def.name
-                base_price = getattr(item_def, "value", 0) or 0
+                base_price = int(getattr(item_def, "value", 0) or 0)
                 rarity = getattr(item_def, "rarity", "")
 
             if mode == "buy":
                 price = base_price
             else:
-                # Sell price: 50% of value, minimum 1g
                 price = max(1, base_price // 2) if base_price > 0 else 1
 
             label = f"{i + 1}) {name}"
             if rarity:
                 label += f" [{rarity}]"
 
-            if mode == "buy":
-                price_str = f"{price}g"
-            else:
-                price_str = f"{price}g (sell)"
+            price_str = f"{price}g" if mode == "buy" else f"{price}g (sell)"
 
-            # Highlight selected line
             if i == cursor:
                 bg = pygame.Surface((width - 24, line_height), pygame.SRCALPHA)
                 bg.fill((60, 60, 90, 210))
@@ -1248,7 +1317,6 @@ def draw_shop_overlay(game: "Game") -> None:
 
             y += line_height
 
-    # Footer hints (wrapped into two shorter lines so they fit)
     color = (170, 170, 170)
     if mode == "buy":
         footer_line1 = "Up/Down or W/S: move • Enter/Space: buy • 1–9: quick buy"
@@ -1260,9 +1328,6 @@ def draw_shop_overlay(game: "Game") -> None:
     line1_surf = ui_font.render(footer_line1, True, color)
     line2_surf = ui_font.render(footer_line2, True, color)
 
-    # Two lines near the bottom of the panel
     base_y = oy + height - 40
     screen.blit(line1_surf, (ox + 12, base_y))
     screen.blit(line2_surf, (ox + 12, base_y + 18))
-
-
