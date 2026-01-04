@@ -1,21 +1,4 @@
-# Virtual env
-venv/
-.venv/
-
-# PyCharm
-.idea/
-
-# Python cache
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.pdb
-
-# Other junk
-*.log
-.DS_Store
-# local artifacts
+﻿# local artifacts
 RESUME_PACK.md
 WIP.patch
 WIP_staged.patch
@@ -23,3 +6,11 @@ repomix-output.xml
 
 # runtime logs
 telemetry/*.jsonl
+
+# PyCharm / IDE
+.idea/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
