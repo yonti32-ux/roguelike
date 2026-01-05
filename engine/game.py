@@ -38,11 +38,11 @@ from ui.hud import (
 )
 from ui.screens import (
     BaseScreen,
-    PerkChoiceScreen,
     InventoryScreen,
     CharacterSheetScreen,
     ShopScreen,
 )
+from .perk_selection_scene import PerkSelectionScene
 
 from systems.events import EVENTS  # registry of map events
 try:
@@ -58,7 +58,6 @@ FOV_RADIUS_TILES = 12
 class GameMode:
     EXPLORATION = "exploration"
     BATTLE = "battle"
-    PERK_CHOICE = "perk_choice"
 
 
 class Game:
@@ -68,7 +67,6 @@ class Game:
     Modes:
     - "exploration": dungeon movement, floors, enemies on the map
     - "battle": zoomed turn-based fight handled by BattleScene
-    - "perk_choice": level-up perk choice overlay after a battle
     """
 
     def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior") -> None:
@@ -123,20 +121,6 @@ class Game:
 
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
-
-        # --- Pending perk choices (level-up) ---
-        # Perk objects currently shown in the overlay.
-        self.pending_perk_choices: List[perk_system.Perk] = []
-
-        # Queue of "who needs to pick a perk" after XP/level-up.
-        # Entries are ("hero", None) or ("companion", companion_index).
-        self.perk_choice_queue: List[tuple[str, Optional[int]]] = []
-        # Owner of the currently open perk-choice overlay.
-        self.perk_choice_owner: Optional[str] = None
-        self.perk_choice_companion_index: Optional[int] = None
-
-        # Helper object to handle perk-choice overlay UI logic.
-        self.perk_choice_screen = PerkChoiceScreen()
 
         # Inventory / character sheet / shop overlays as screen objects.
         self.inventory_screen = InventoryScreen()
@@ -206,18 +190,25 @@ class Game:
         if telemetry is not None:
             telemetry.log("mode_change", frm=prev, to=self.mode)
 
-    def enter_perk_choice_mode(self) -> None:
+    def run_perk_selection(self, entries: List[tuple[str, Optional[int]]]) -> None:
         """
-        Switch into level-up perk choice overlay mode.
-
-        We pause world updates (mode = PERK_CHOICE), keep the exploration
-        view on screen, and attach the perk-choice screen as the active UI overlay.
+        Run the perk selection scene (blocking).
+        
+        Args:
+            entries: List of (owner, companion_index) tuples to enqueue.
+                    owner is "hero" or "companion", companion_index is None for hero.
+        
+        The scene will handle its own queue and run until all selections are done.
         """
-        prev = getattr(self, "mode", None)
-        self.mode = GameMode.PERK_CHOICE
-        self.active_screen = self.perk_choice_screen
-        if telemetry is not None:
-            telemetry.log("mode_change", frm=prev, to=self.mode)
+        if not entries:
+            return
+        
+        scene = PerkSelectionScene(self)
+        for owner, comp_idx in entries:
+            scene.enqueue(owner, comp_idx)
+        
+        # Run the scene (blocking)
+        scene.run()
 
     def toggle_inventory_overlay(self) -> None:
         """Toggle inventory overlay and manage its active screen."""
@@ -647,12 +638,16 @@ class Game:
             comp_state.level = hero_level
             comp_state.xp = hero_xp
 
-    def _grant_xp_to_companions(self, amount: int) -> List[str]:
+    def _grant_xp_to_companions(self, amount: int, leveled_indices: Optional[List[int]] = None) -> List[str]:
         """
         Grant XP to all recruited companions and recalc their stats.
 
         This keeps companion progression independent from the hero: they share
         XP gains, but track their own levels.
+
+        Args:
+            amount: XP amount to grant
+            leveled_indices: Optional list to append indices of companions that leveled up
 
         Returns a list of log strings about companion level-ups.
         """
@@ -696,6 +691,10 @@ class Game:
             if levels_gained <= 0 or new_level <= old_level:
                 continue
 
+            # Track that this companion leveled up
+            if leveled_indices is not None:
+                leveled_indices.append(idx)
+
             # Recompute stats from template + level + perks
             template = None
             try:
@@ -707,8 +706,7 @@ class Game:
 
             recalc_companion_stats_for_level(comp_state, template)
 
-            # Queue one perk choice for this companion.
-            self.perk_choice_screen.enqueue_perk_choice(self, "companion", idx)
+            # Note: Perk selection is handled after all level-ups via run_perk_selection()
 
             # Compose a quick summary line with stat gains
             new_max_hp = getattr(comp_state, "max_hp", old_max_hp)
@@ -748,7 +746,7 @@ class Game:
         return messages
 
     def gain_xp_from_event(self, amount: int) -> None:
-        """Grant XP from a map event, showing messages + perk choice overlay."""
+        """Grant XP from a map event, showing messages + perk selection scene."""
         if amount <= 0:
             return
 
@@ -758,25 +756,33 @@ class Game:
             self.add_message(msg)
 
         new_level = self.hero_stats.level
-        leveled_up = new_level > old_level
-        if leveled_up:
-            # Hero gets a queued perk choice.
-            self.perk_choice_screen.enqueue_perk_choice(self, "hero", None)
+        hero_leveled_up = new_level > old_level
+        
+        # Track perk selection entries
+        perk_entries: List[tuple[str, Optional[int]]] = []
+        if hero_leveled_up:
+            perk_entries.append(("hero", None))
 
         # Companions share the same XP amount, but track their own levels
-        companion_msgs = self._grant_xp_to_companions(amount)
+        # Track which companions leveled up
+        leveled_companions: List[int] = []
+        companion_msgs = self._grant_xp_to_companions(amount, leveled_companions)
         for msg in companion_msgs:
             self.add_message(msg)
+        
+        # Add leveled companions to perk entries
+        for idx in leveled_companions:
+            perk_entries.append(("companion", idx))
 
         # On level-up from an event, full-heal the hero immediately.
-        if leveled_up and self.player is not None:
+        if hero_leveled_up and self.player is not None:
             self.apply_hero_stats_to_player(full_heal=False)
             self.player.hp = self.hero_stats.max_hp
             self.add_message("You feel completely renewed!")
 
-        # If anyone leveled and has perk choices, start the perk-choice flow.
-        if self.perk_choice_queue:
-            self.perk_choice_screen.start_next_perk_choice(self)
+        # Run perk selection scene if anyone leveled up
+        if perk_entries:
+            self.run_perk_selection(perk_entries)
 
         return messages
 
@@ -1654,7 +1660,6 @@ class Game:
         # As soon as we start a new battle, hide any previous overlays
         self.show_battle_log = False
         self.show_character_sheet = False
-        self.pending_perk_choices = []
 
         # 1) Build encounter group around the player
         group: List[Enemy] = []
@@ -1745,11 +1750,7 @@ class Game:
         self.show_exploration_log = False
         self.show_character_sheet = False
 
-        # Clear any pending perk choices / queue.
-        self.pending_perk_choices = []
-        self.perk_choice_queue = []
-        self.perk_choice_owner = None
-        self.perk_choice_companion_index = None
+        # Perk selection is now handled by PerkSelectionScene (no cleanup needed here)
 
         # Reset floor back to 1
         self.floor = 1
@@ -1817,6 +1818,8 @@ class Game:
 
             # 1) XP + level ups
             leveled_up = False
+            perk_entries: List[tuple[str, Optional[int]]] = []
+            
             if xp_reward > 0:
                 old_level = self.hero_stats.level
                 messages.extend(self.hero_stats.grant_xp(xp_reward))
@@ -1824,13 +1827,17 @@ class Game:
                 new_level = self.hero_stats.level
                 leveled_up = new_level > old_level
                 if leveled_up:
-                    # Queue a perk choice for the hero.
-                    self.perk_choice_screen.enqueue_perk_choice(self, "hero", None)
+                    perk_entries.append(("hero", None))
 
                 # Companions gain the same XP amount independently.
-                companion_msgs = self._grant_xp_to_companions(xp_reward)
+                leveled_companions: List[int] = []
+                companion_msgs = self._grant_xp_to_companions(xp_reward, leveled_companions)
                 if companion_msgs:
                     messages.extend(companion_msgs)
+                
+                # Add leveled companions to perk entries
+                for idx in leveled_companions:
+                    perk_entries.append(("companion", idx))
 
             # 2) Sync stats onto player and apply baseline healing
             if self.player is not None:
@@ -1861,9 +1868,9 @@ class Game:
             for msg in messages:
                 self.add_message(msg)
 
-            # 6) If anyone has pending perk choices, start the flow.
-            if self.perk_choice_queue:
-                self.perk_choice_screen.start_next_perk_choice(self)
+            # 6) Run perk selection scene if anyone leveled up
+            if perk_entries:
+                self.run_perk_selection(perk_entries)
 
         elif status == "defeat":
             # Simple defeat handling: message + restart.
@@ -1898,9 +1905,6 @@ class Game:
             if self.battle_scene is not None:
                 self.battle_scene.update(dt)
                 self._check_battle_finished()
-        elif self.mode == GameMode.PERK_CHOICE:
-            # No world updates while choosing a perk
-            pass
 
     # ------------------------------------------------------------------
     # Main loop: event handling
@@ -1940,15 +1944,6 @@ class Game:
                 self.battle_scene.handle_event(self, event)
                 self._check_battle_finished()
 
-
-        elif self.mode == GameMode.PERK_CHOICE:
-            # During perk-choice mode, input goes to the active screen if any.
-            if self.active_screen is not None:
-                self.active_screen.handle_event(self, event)
-            elif self.perk_choice_screen is not None:
-                # Fallback for safety.
-                self.perk_choice_screen.handle_event(self, event)
-
     # ------------------------------------------------------------------
     # Drawing
     # ------------------------------------------------------------------
@@ -1963,19 +1958,10 @@ class Game:
             self.draw_exploration()
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
-        elif self.mode == GameMode.PERK_CHOICE:
-            # Even while choosing perks we still show the exploration view
-            # in the background, but world updates are paused in update().
-            self.draw_exploration()
 
-        # Draw an active overlay screen on top (perk choice, inventory,
-        # character sheet, etc.).
+        # Draw an active overlay screen on top (inventory, character sheet, etc.).
         if getattr(self, "active_screen", None) is not None:
             self.active_screen.draw(self)
-        # Safety fallback: if we're in PERK_CHOICE mode but for some reason no
-        # active_screen is attached, let the perk_choice_screen draw itself.
-        elif self.mode == GameMode.PERK_CHOICE and self.perk_choice_screen is not None:
-            self.perk_choice_screen.draw(self)
 
         # Flip the final composed frame to the screen.
         pygame.display.flip()

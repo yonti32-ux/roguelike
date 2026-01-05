@@ -1,8 +1,12 @@
 """Lightweight screen / overlay system for modal UI/overlays.
 
-Right now this is used for the level-up perk choice overlay, but the idea is
-generic: each "screen" owns its own input-handling + drawing, and Game just
-forwards events/draw calls to the active screen when appropriate.
+This module contains screen controllers for various UI overlays:
+- Inventory screen
+- Character sheet screen  
+- Shop screen
+
+Each screen owns its own input-handling + drawing, and Game forwards
+events/draw calls to the active screen when appropriate.
 """
 
 from __future__ import annotations
@@ -12,13 +16,10 @@ from typing import Optional, Protocol, TYPE_CHECKING
 import pygame
 
 from ui.hud import (
-    draw_perk_choice_overlay,
     draw_inventory_overlay,
     _draw_character_sheet,
     draw_shop_overlay,
 )
-from systems import perks as perk_system
-from systems.party import get_companion, recalc_companion_stats_for_level
 from systems.input import InputAction
 
 if TYPE_CHECKING:
@@ -33,202 +34,6 @@ class BaseScreen(Protocol):
 
     def draw(self, game: "Game") -> None:
         ...
-
-
-class PerkChoiceScreen:
-    """
-    Screen controller for the perk-choice overlay used on level-ups.
-
-    It is responsible for:
-      - Tracking a queue of "who needs to pick a perk next"
-      - Asking systems.perks for the actual Perk objects for each owner
-      - Handling input (ESC to cancel, 1–3 to pick)
-      - Applying the chosen perk via systems.perks and updating hero/companion
-        stats accordingly.
-    """
-
-    # -------- Queue management --------
-
-    def enqueue_perk_choice(self, game: "Game", owner: str, companion_index: Optional[int]) -> None:
-        """
-        Add a perk choice request to the queue.
-
-        owner:
-          - "hero" for the main character
-          - "companion" for an entry in game.party indexed by companion_index
-        """
-        if not hasattr(game, "perk_choice_queue"):
-            game.perk_choice_queue = []
-        game.perk_choice_queue.append((owner, companion_index))
-
-    def start_next_perk_choice(self, game: "Game") -> None:
-        """
-        Pop the next entry from the queue and generate perk choices for it.
-
-        If there are no more entries, this will ensure the game mode is back
-        to exploration (unless something else has already changed it).
-        """
-        # Reset current owner + choices.
-        game.pending_perk_choices = []
-        game.perk_choice_owner = None
-        game.perk_choice_companion_index = None
-
-        # Defensive default if the queue is missing.
-        queue = getattr(game, "perk_choice_queue", None)
-        if queue is None:
-            return
-
-        from engine.game import GameMode  # local import to avoid cycles
-
-        while queue:
-            owner, companion_index = queue.pop(0)
-
-            if owner == "hero":
-                choices = perk_system.pick_perk_choices(game.hero_stats, max_choices=3)
-                target_label = "Hero"
-
-            elif (
-                owner == "companion"
-                and companion_index is not None
-                and 0 <= companion_index < len(game.party)
-            ):
-                comp_state = game.party[companion_index]
-
-                # Use the same perk system but operating on the companion state.
-                choices = perk_system.pick_perk_choices(comp_state, max_choices=3)
-
-                # Try to build a friendly label for the overlay.
-                display_name = getattr(comp_state, "name_override", None)
-                if not display_name:
-                    display_name = getattr(comp_state, "name", None)
-                if not display_name:
-                    try:
-                        template_for_name = get_companion(comp_state.template_id)
-                    except Exception:
-                        template_for_name = None
-                    if template_for_name is not None:
-                        display_name = getattr(template_for_name, "name", None)
-                if not display_name:
-                    display_name = f"Companion {companion_index + 1}"
-
-                target_label = display_name
-            else:
-                # Invalid entry, move on.
-                continue
-
-            if not choices:
-                # No valid perks for this owner; skip to the next entry in queue.
-                continue
-
-            # Activate this owner + choices.
-            game.pending_perk_choices = choices
-            game.perk_choice_owner = owner
-            game.perk_choice_companion_index = companion_index
-
-            # Switch to perk-choice overlay via the Game helper if it exists.
-            if hasattr(game, "enter_perk_choice_mode"):
-                game.enter_perk_choice_mode()
-            else:
-                game.mode = GameMode.PERK_CHOICE  # type: ignore[assignment]
-
-            # Optional: a message so the log shows whose perk this is.
-            if game.perk_choice_owner == "hero":
-                game.add_message("Level up! Choose a new perk for your hero.")
-            else:
-                game.add_message(f"{target_label} reached a new level! Choose a new perk.")
-
-            return
-
-        # If we ran out of entries, make sure we are back in exploration mode
-        # (unless some other mode has taken over).
-        if getattr(game, "mode", None) == GameMode.PERK_CHOICE:
-            if hasattr(game, "enter_exploration_mode"):
-                game.enter_exploration_mode()
-            else:
-                game.mode = GameMode.EXPLORATION  # type: ignore[assignment]
-
-    # -------- Input & drawing --------
-
-    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
-        """Handle input while the perk-choice overlay is open."""
-        if event.type != pygame.KEYDOWN:
-            return
-
-        input_manager = getattr(game, "input_manager", None)
-
-        # Cancel perk selection with ESC / generic CANCEL:
-        # clear everything and go back to exploration.
-        should_cancel = False
-        if input_manager is not None:
-            if input_manager.event_matches_action(InputAction.CANCEL, event):
-                should_cancel = True
-        else:
-            if event.key == pygame.K_ESCAPE:
-                should_cancel = True
-
-        if should_cancel:
-            game.pending_perk_choices = []
-            game.perk_choice_queue = []
-            game.perk_choice_owner = None
-            game.perk_choice_companion_index = None
-            game.enter_exploration_mode()
-            return
-
-        if not game.pending_perk_choices:
-            return
-
-        # Choice index still mapped directly to number keys 1–3
-        index: Optional[int] = None
-        if event.key in (pygame.K_1, pygame.K_KP1):
-            index = 0
-        elif event.key in (pygame.K_2, pygame.K_KP2):
-            index = 1
-        elif event.key in (pygame.K_3, pygame.K_KP3):
-            index = 2
-
-        if index is None:
-            return
-
-        if index < 0 or index >= len(game.pending_perk_choices):
-            return
-
-        chosen_perk = game.pending_perk_choices[index]
-        if chosen_perk is None:
-            return
-
-        owner = getattr(game, "perk_choice_owner", None)
-        comp_index = getattr(game, "perk_choice_companion_index", None)
-
-        if owner == "hero":
-            perk_system.apply_perk_to_hero(game.hero_stats, chosen_perk)
-            game.add_message(f"You chose perk: {chosen_perk.name}")
-            # Rebuild hero stats derived from perks & level, then mirror to the player entity.
-            if hasattr(game, "recalc_hero_stats_from_perks_and_level"):
-                game.recalc_hero_stats_from_perks_and_level()
-            if game.player is not None:
-                game.apply_hero_stats_to_player(full_heal=False)
-
-        elif owner == "companion" and comp_index is not None:
-            if 0 <= comp_index < len(game.party):
-                comp_state = game.party[comp_index]
-                perk_system.apply_perk_to_companion(comp_state, chosen_perk)
-                game.add_message(f"Companion gained perk: {chosen_perk.name}")
-                # Recompute companion stats if we have such a helper.
-                try:
-                    recalc_companion_stats_for_level(
-                        comp_state,
-                        get_companion(comp_state.template_id),
-                    )
-                except Exception:
-                    # Be defensive; a bad template shouldn't crash the run.
-                    pass
-
-        # After applying the perk, move on to the next in the queue.
-        self.start_next_perk_choice(game)
-
-    def draw(self, game: "Game") -> None:
-        """Render the perk-choice overlay using the HUD helper."""
-        draw_perk_choice_overlay(game)
 
 
 class InventoryScreen:
