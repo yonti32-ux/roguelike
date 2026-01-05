@@ -116,7 +116,7 @@ class Game:
         self.inventory_focus_index: int = 0
 
         # Inventory list paging / scrolling
-        self.inventory_page_size: int = 10
+        self.inventory_page_size: int = 20  # More items visible in fullscreen
         self.inventory_scroll_offset: int = 0
 
         # --- Exploration log overlay (multi-line message history) ---
@@ -333,6 +333,68 @@ class Game:
                 return
 
         self.last_message = f"{display_name} equips {item_def.name}."
+
+    def get_available_screens(self) -> List[str]:
+        """Get list of available screen names (shop only if vendor nearby)."""
+        screens = ["inventory", "character"]
+        if getattr(self, "show_shop", False):
+            screens.append("shop")
+        return screens
+    
+    def switch_to_screen(self, screen_name: str) -> None:
+        """Switch to a different full-screen UI."""
+        # Close all screen flags
+        self.show_inventory = False
+        self.show_character_sheet = False
+        self.show_battle_log = False
+        if hasattr(self, "show_exploration_log"):
+            self.show_exploration_log = False
+        
+        # Open the requested screen
+        if screen_name == "inventory":
+            self.show_inventory = True
+            self.inventory_focus_index = 0
+            self.inventory_scroll_offset = 0
+            self.active_screen = self.inventory_screen
+        elif screen_name == "character":
+            self.show_character_sheet = True
+            self.character_sheet_focus_index = 0
+            self.active_screen = self.character_sheet_screen
+        elif screen_name == "shop" and getattr(self, "show_shop", False):
+            # Shop is already open (show_shop is True), just set active screen
+            self.active_screen = self.shop_screen
+        else:
+            # Invalid screen, clear active
+            self.active_screen = None
+    
+    def cycle_to_next_screen(self, direction: int = 1) -> None:
+        """Cycle to next/previous available screen. direction: 1 for next, -1 for previous."""
+        available = self.get_available_screens()
+        if not available:
+            return
+        
+        # Determine current screen
+        current = None
+        if self.show_inventory:
+            current = "inventory"
+        elif self.show_character_sheet:
+            current = "character"
+        elif getattr(self, "show_shop", False) and getattr(self, "active_screen", None) is self.shop_screen:
+            current = "shop"
+        
+        if current is None:
+            # No screen open, open first available
+            self.switch_to_screen(available[0])
+            return
+        
+        # Find current index and cycle
+        try:
+            current_idx = available.index(current)
+            next_idx = (current_idx + direction) % len(available)
+            self.switch_to_screen(available[next_idx])
+        except ValueError:
+            # Current screen not in available list, open first
+            self.switch_to_screen(available[0])
 
     def toggle_character_sheet_overlay(self) -> None:
         """Toggle character sheet overlay and manage its active screen."""

@@ -19,6 +19,9 @@ from ui.hud import (
     draw_inventory_overlay,
     _draw_character_sheet,
     draw_shop_overlay,
+    draw_inventory_fullscreen,
+    draw_character_sheet_fullscreen,
+    draw_shop_fullscreen,
 )
 from systems.input import InputAction
 
@@ -54,6 +57,22 @@ class InventoryScreen:
         input_manager = getattr(game, "input_manager", None)
         key = event.key
 
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+        
         # Close inventory overlay (I or ESC)
         should_close = False
         if input_manager is not None:
@@ -98,7 +117,7 @@ class InventoryScreen:
 
         items = list(getattr(inventory, "items", []))
         total_items = len(items)
-        page_size = getattr(game, "inventory_page_size", 10)
+        page_size = getattr(game, "inventory_page_size", 20)  # More items visible in fullscreen
         offset = getattr(game, "inventory_scroll_offset", 0)
 
         # Normalise offset in case inventory size changed.
@@ -214,8 +233,8 @@ class InventoryScreen:
         game.equip_item_for_inventory_focus(item_id)
 
     def draw(self, game: "Game") -> None:
-        """Render the inventory/equipment overlay."""
-        draw_inventory_overlay(game)
+        """Render the full-screen inventory view."""
+        draw_inventory_fullscreen(game)
 
 
 class CharacterSheetScreen:
@@ -234,6 +253,22 @@ class CharacterSheetScreen:
         input_manager = getattr(game, "input_manager", None)
         key = event.key
 
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+        
         # Close character sheet (C or ESC)
         should_close = False
         if input_manager is not None:
@@ -267,8 +302,8 @@ class CharacterSheetScreen:
                 game.cycle_character_sheet_focus(+1)
 
     def draw(self, game: "Game") -> None:
-        """Render the character sheet overlay."""
-        _draw_character_sheet(game)
+        """Render the full-screen character sheet view."""
+        draw_character_sheet_fullscreen(game)
 
 class ShopScreen(BaseScreen):
     """Blocking screen wrapper for the merchant/shop overlay.
@@ -318,10 +353,25 @@ class ShopScreen(BaseScreen):
                 game.active_screen = None
             return
 
-        # --- Toggle between buy / sell ---
+        # --- Screen switching with TAB (only if not holding modifier) ---
+        # Check modifiers - if no modifier, switch screens; if shift, switch buy/sell
+        mods = pygame.key.get_mods()
         if key == pygame.K_TAB:
-            game.shop_mode = "sell" if mode == "buy" else "buy"
-            game.shop_cursor = 0
+            if mods & pygame.KMOD_SHIFT:
+                # Shift+TAB: Toggle between buy / sell
+                game.shop_mode = "sell" if mode == "buy" else "buy"
+                game.shop_cursor = 0
+            else:
+                # TAB: Switch to next screen
+                game.cycle_to_next_screen(1)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
             return
 
         # --- Build active list (copied from ExplorationController._handle_shop_key) ---
@@ -441,4 +491,5 @@ class ShopScreen(BaseScreen):
                 return
 
     def draw(self, game: "Game") -> None:
-        draw_shop_overlay(game)
+        """Render the full-screen shop view."""
+        draw_shop_fullscreen(game)

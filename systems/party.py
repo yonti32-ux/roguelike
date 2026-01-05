@@ -1,11 +1,21 @@
 # systems/party.py
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 
 from systems.perks import total_stat_modifiers_for_perks
 from systems.inventory import get_item_def
 from systems import perks as perk_system
+from settings import (
+    DEFAULT_PLAYER_MAX_HP,
+    DEFAULT_PLAYER_ATTACK,
+    DEFAULT_COMPANION_STAMINA,
+    DEFAULT_COMPANION_HP_FACTOR,
+    DEFAULT_COMPANION_ATTACK_FACTOR,
+)
+
+if TYPE_CHECKING:
+    from world.entities import Player
 
 
 @dataclass
@@ -220,6 +230,104 @@ def ensure_companion_stats(state: CompanionState, template: CompanionDef) -> Non
     """
     if state.max_hp <= 0 or state.attack_power <= 0 or state.skill_power <= 0:
         recalc_companion_stats_for_level(state, template)
+
+
+def create_companion_entity(
+    template: CompanionDef,
+    state: Optional[CompanionState] = None,
+    reference_player: Optional["Player"] = None,
+    hero_base_hp: Optional[int] = None,
+    hero_base_attack: Optional[int] = None,
+    hero_base_defense: int = 0,
+    hero_base_skill_power: float = 1.0,
+) -> "Player":
+    """
+    Create a Player entity from companion data for use in battle or exploration.
+    
+    Args:
+        template: CompanionDef template with stat factors
+        state: Optional CompanionState with runtime stats (preferred if available)
+        reference_player: Optional Player entity to copy dimensions/color from
+        hero_base_hp, hero_base_attack, hero_base_defense, hero_base_skill_power:
+            Hero stats for legacy path when state is None
+    
+    Returns:
+        A Player entity configured as a companion with appropriate stats.
+    """
+    from world.entities import Player
+    
+    # Ensure stats are initialized if we have a state
+    if state is not None:
+        try:
+            ensure_companion_stats(state, template)
+        except Exception:
+            # Fallback to stored values if recalculation fails
+            pass
+    
+    # Extract or derive companion stats
+    if state is not None:
+        # Use state's computed stats (preferred path)
+        comp_max_hp = max(1, int(getattr(state, "max_hp", 1)))
+        comp_hp = comp_max_hp
+        comp_atk = max(1, int(getattr(state, "attack_power", 1)))
+        comp_defense = max(0, int(getattr(state, "defense", 0)))
+        comp_sp = max(0.1, float(getattr(state, "skill_power", 1.0)))
+        
+        # Resource pools from state
+        comp_max_mana = int(getattr(state, "max_mana", 0) or 0)
+        comp_max_stamina = int(getattr(state, "max_stamina", 0) or 0)
+    else:
+        # Legacy path: derive from hero stats + template factors
+        base_hp = hero_base_hp if hero_base_hp is not None else DEFAULT_PLAYER_MAX_HP
+        base_atk = hero_base_attack if hero_base_attack is not None else DEFAULT_PLAYER_ATTACK
+        
+        comp_max_hp = max(1, int(base_hp * template.hp_factor))
+        comp_hp = comp_max_hp
+        comp_atk = max(1, int(base_atk * template.attack_factor))
+        comp_defense = int(hero_base_defense * template.defense_factor)
+        comp_sp = max(0.1, hero_base_skill_power * template.skill_power_factor)
+        
+        # No resource pools for legacy path (will use defaults)
+        comp_max_mana = 0
+        comp_max_stamina = 0
+    
+    # Apply resource pool defaults if needed
+    if comp_max_stamina <= 0:
+        comp_max_stamina = DEFAULT_COMPANION_STAMINA
+    if comp_max_mana < 0:
+        comp_max_mana = 0
+    
+    # Use reference player for dimensions/color, or defaults
+    if reference_player is not None:
+        width = reference_player.width
+        height = reference_player.height
+        color = reference_player.color
+    else:
+        # Default dimensions (32x32 typical for entities)
+        width = 24
+        height = 24
+        color = (200, 200, 200)
+    
+    # Create the Player entity
+    companion_entity = Player(
+        x=0,  # Position should be set by caller
+        y=0,
+        width=width,
+        height=height,
+        speed=0.0,  # Companions don't move independently in exploration
+        color=color,
+        max_hp=comp_max_hp,
+        hp=comp_hp,
+        attack_power=comp_atk,
+    )
+    
+    # Set additional stats as attributes
+    setattr(companion_entity, "defense", comp_defense)
+    setattr(companion_entity, "skill_power", comp_sp)
+    setattr(companion_entity, "max_mana", comp_max_mana)
+    setattr(companion_entity, "max_stamina", comp_max_stamina)
+    
+    return companion_entity
 
 
 # --- Companion registry & templates -----------------------------------------

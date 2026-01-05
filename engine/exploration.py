@@ -563,6 +563,13 @@ class ExplorationController:
         game.shop_mode = "buy"
         game.show_shop = True
         game.last_message = "The merchant shows you their wares."
+        
+        # Close other screens when opening shop
+        game.show_inventory = False
+        game.show_character_sheet = False
+        game.show_battle_log = False
+        if hasattr(game, "show_exploration_log"):
+            game.show_exploration_log = False
 
         # Route shop input through the ShopScreen if available
         if getattr(game, "shop_screen", None) is not None:

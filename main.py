@@ -10,18 +10,6 @@ TELEMETRY_ENABLED = False  # flip to True when needed
 if TELEMETRY_ENABLED:
     from pathlib import Path
     from telemetry.logger import telemetry
-
-    def _game_snapshot(game: Game) -> dict:
-        snap = {
-            "mode": getattr(game, "mode", None),
-            "floor": getattr(game, "floor", None),
-        }
-        player = getattr(game, "player", None)
-        if player is not None and hasattr(player, "rect"):
-            snap["player_xy"] = [player.rect.centerx, player.rect.centery]
-        if player is not None and hasattr(player, "hp"):
-            snap["player_hp"] = getattr(player, "hp", None)
-        return snap
 else:
     class _NullTelemetry:
         enabled = False
@@ -33,10 +21,11 @@ else:
     telemetry = _NullTelemetry()
 
 
-
-
 def _game_snapshot(game: Game) -> dict:
-    # Keep it defensive: never assume fields exist.
+    """
+    Create a lightweight snapshot of game state for telemetry/logging.
+    Keep it defensive: never assume fields exist.
+    """
     snap = {
         "mode": getattr(game, "mode", None),
         "floor": getattr(game, "floor", None),

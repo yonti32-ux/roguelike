@@ -1,11 +1,32 @@
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Literal, List, Dict, Optional
+from typing import Literal, List, Dict, Optional, Union
 
 import random
 import pygame
 
-from settings import COLOR_PLAYER, COLOR_ENEMY
+from settings import (
+    COLOR_PLAYER,
+    COLOR_ENEMY,
+    BATTLE_GRID_WIDTH,
+    BATTLE_GRID_HEIGHT,
+    BATTLE_CELL_SIZE,
+    BATTLE_ENEMY_TIMER,
+    MAX_BATTLE_ENEMIES,
+    BATTLE_AI_DEFENSIVE_HP_THRESHOLD,
+    BATTLE_AI_SKILL_CHANCE,
+    BATTLE_AI_DEFENSIVE_SKILL_CHANCE,
+    MAX_SKILL_SLOTS,
+    DEFAULT_PLAYER_MAX_HP,
+    DEFAULT_PLAYER_ATTACK,
+    DEFAULT_PLAYER_STAMINA,
+    DEFAULT_COMPANION_STAMINA,
+    DEFAULT_ENEMY_STAMINA,
+    DEFAULT_COMPANION_HP_FACTOR,
+    DEFAULT_COMPANION_ATTACK_FACTOR,
+    DEFAULT_MIN_SKILL_POWER,
+    BATTLE_ENEMY_START_COL_OFFSET,
+)
 from world.entities import Player, Enemy
 from systems.statuses import (
     StatusEffect,
@@ -17,9 +38,21 @@ from systems.statuses import (
 )
 from systems.skills import Skill, get as get_skill
 from systems import perks as perk_system
-from systems.party import CompanionDef, CompanionState, get_companion, ensure_companion_stats
+from systems.party import (
+    CompanionDef,
+    CompanionState,
+    get_companion,
+    ensure_companion_stats,
+    create_companion_entity,
+)
 from systems.enemies import get_archetype  # NEW
 from systems.input import InputAction  # NEW
+from ui.hud import (
+    _draw_battle_unit_card,
+    _draw_battle_skill_hotbar,
+    _draw_battle_log_line,
+    _draw_status_indicators,
+)
 
 
 BattleStatus = Literal["ongoing", "victory", "defeat"]
@@ -33,7 +66,7 @@ class BattleUnit:
 
     Keeps track of side, grid position, and combat state.
     """
-    entity: object
+    entity: Union[Player, Enemy]
     side: Side
     gx: int
     gy: int
@@ -73,6 +106,52 @@ class BattleUnit:
     def is_alive(self) -> bool:
         return self.hp > 0
 
+    def init_resources_from_entity(self) -> None:
+        """Initialize current resource pools from entity's max values."""
+        self.current_mana = self.max_mana
+        self.current_stamina = self.max_stamina
+
+    def regenerate_stamina(self, amount: int = 1) -> None:
+        """
+        Regenerate stamina (used at turn start).
+        
+        Args:
+            amount: Amount to regenerate (default 1 per turn)
+        """
+        max_sta = self.max_stamina
+        if max_sta > 0:
+            self.current_stamina = min(max_sta, self.current_stamina + amount)
+
+    def has_resources_for_skill(self, skill: Skill) -> tuple[bool, Optional[str]]:
+        """
+        Check if unit has enough resources to use a skill.
+        
+        Returns:
+            Tuple of (can_use, error_message)
+            - (True, None) if resources are sufficient
+            - (False, "Not enough mana!") or (False, "Not enough stamina!") if insufficient
+        """
+        mana_cost = getattr(skill, "mana_cost", 0)
+        stamina_cost = getattr(skill, "stamina_cost", 0)
+
+        if mana_cost > 0 and self.current_mana < mana_cost:
+            return False, "Not enough mana!"
+        
+        if stamina_cost > 0 and self.current_stamina < stamina_cost:
+            return False, "Not enough stamina!"
+        
+        return True, None
+
+    def consume_resources_for_skill(self, skill: Skill) -> None:
+        """Deduct resource costs for using a skill."""
+        mana_cost = getattr(skill, "mana_cost", 0)
+        stamina_cost = getattr(skill, "stamina_cost", 0)
+
+        if mana_cost > 0:
+            self.current_mana = max(0, self.current_mana - mana_cost)
+        if stamina_cost > 0:
+            self.current_stamina = max(0, self.current_stamina - stamina_cost)
+
 
 
 class BattleScene:
@@ -99,9 +178,9 @@ class BattleScene:
 
         # Grid configuration (battlefield, not dungeon grid)
         # Wider battlefield; origin is centered dynamically in draw().
-        self.grid_width = 11
-        self.grid_height = 5
-        self.cell_size = 80
+        self.grid_width = BATTLE_GRID_WIDTH
+        self.grid_height = BATTLE_GRID_HEIGHT
+        self.cell_size = BATTLE_CELL_SIZE
         self.grid_origin_x = 0
         self.grid_origin_y = 0
 
@@ -131,15 +210,15 @@ class BattleScene:
 
         # Backwards-compatible safety defaults so hero can always use skills.
         if hero_max_stamina <= 0:
-            hero_max_stamina = 6
+            hero_max_stamina = DEFAULT_PLAYER_STAMINA
         if hero_max_mana < 0:
             hero_max_mana = 0
 
         setattr(self.player, "max_stamina", hero_max_stamina)
         setattr(self.player, "max_mana", hero_max_mana)
 
-        hero_unit.current_stamina = hero_max_stamina
-        hero_unit.current_mana = hero_max_mana
+        # Initialize resource pools from entity max values
+        hero_unit.init_resources_from_entity()
 
         # Core hero skills – now robust against missing registry
         hero_unit.skills = {}
@@ -185,8 +264,8 @@ class BattleScene:
         self.player_units: List[BattleUnit] = [hero_unit]
 
         # Base stats used to derive simple companion stats in P1
-        base_max_hp = getattr(self.player, "max_hp", 24)
-        base_atk = getattr(self.player, "attack_power", 5)
+        base_max_hp = getattr(self.player, "max_hp", DEFAULT_PLAYER_MAX_HP)
+        base_atk = getattr(self.player, "attack_power", DEFAULT_PLAYER_ATTACK)
         base_def = int(getattr(self.player, "defense", 0))
         base_sp = float(getattr(self.player, "skill_power", 1.0))
 
@@ -217,64 +296,22 @@ class BattleScene:
                 comp_def = raw_comp
 
             if comp_def is not None:
-                # If we have a runtime CompanionState, use its own stats.
-                if comp_state is not None:
-                    try:
-                        # Make sure stats are sane (init/recalc if needed).
-                        ensure_companion_stats(comp_state, comp_def)
-                    except Exception:
-                        # If something goes wrong, we'll still fall back to the
-                        # stored values, which should be non-zero in normal runs.
-                        pass
-
-                    comp_max_hp = max(1, int(getattr(comp_state, "max_hp", 1)))
-                    comp_hp = comp_max_hp
-                    comp_atk = max(1, int(getattr(comp_state, "attack_power", 1)))
-                    comp_defense = max(0, int(getattr(comp_state, "defense", 0)))
-                    comp_sp = max(0.1, float(getattr(comp_state, "skill_power", 1.0)))
-                else:
-                    # Legacy path: derive companion stats from hero + template
-                    base_max_hp = getattr(self.player, "max_hp", 24)
-                    base_atk = getattr(self.player, "attack_power", 5)
-                    base_def = int(getattr(self.player, "defense", 0))
-                    base_sp = float(getattr(self.player, "skill_power", 1.0))
-
-                    comp_max_hp = max(1, int(base_max_hp * comp_def.hp_factor))
-                    comp_hp = comp_max_hp
-                    comp_atk = max(1, int(base_atk * comp_def.attack_factor))
-                    comp_defense = int(base_def * comp_def.defense_factor)
-                    comp_sp = max(0.1, base_sp * comp_def.skill_power_factor)
-
-                companion_entity = Player(
-                    x=0,
-                    y=0,
-                    width=self.player.width,
-                    height=self.player.height,
-                    speed=0.0,
-                    color=self.player.color,
-                    max_hp=comp_max_hp,
-                    hp=comp_hp,
-                    attack_power=comp_atk,
+                # Create companion entity using the helper function
+                base_max_hp = getattr(self.player, "max_hp", DEFAULT_PLAYER_MAX_HP)
+                base_atk = getattr(self.player, "attack_power", DEFAULT_PLAYER_ATTACK)
+                base_def = int(getattr(self.player, "defense", 0))
+                base_sp = float(getattr(self.player, "skill_power", 1.0))
+                
+                companion_entity = create_companion_entity(
+                    template=comp_def,
+                    state=comp_state,
+                    reference_player=self.player,
+                    hero_base_hp=base_max_hp,
+                    hero_base_attack=base_atk,
+                    hero_base_defense=base_def,
+                    hero_base_skill_power=base_sp,
                 )
-                setattr(companion_entity, "defense", comp_defense)
-                setattr(companion_entity, "skill_power", comp_sp)
-
-                # Resource pools: prefer CompanionState values; fallback to a
-                # simple default stamina pool so they can use skills.
-                comp_max_mana = 0
-                comp_max_stamina = 0
-                if comp_state is not None:
-                    comp_max_mana = int(getattr(comp_state, "max_mana", 0) or 0)
-                    comp_max_stamina = int(getattr(comp_state, "max_stamina", 0) or 0)
-
-                if comp_max_stamina <= 0:
-                    comp_max_stamina = 4
-                if comp_max_mana < 0:
-                    comp_max_mana = 0
-
-                setattr(companion_entity, "max_mana", comp_max_mana)
-                setattr(companion_entity, "max_stamina", comp_max_stamina)
-
+                
                 # Prefer state name_override if present, then template name,
                 # then player's generic companion_name, then plain "Companion".
                 companion_name = getattr(comp_state, "name_override", None) or comp_def.name
@@ -289,8 +326,8 @@ class BattleScene:
                     name=companion_name,
                 )
 
-                companion_unit.current_mana = comp_max_mana
-                companion_unit.current_stamina = comp_max_stamina
+                # Initialize resource pools from entity max values
+                companion_unit.init_resources_from_entity()
 
                 # Skills for the companion: from template, fallback to Guard
                 skills: Dict[str, Skill] = {}
@@ -342,25 +379,34 @@ class BattleScene:
 
         if not created_any_companion:
             # Fallback to old behaviour: one generic companion
-            companion_max_hp = getattr(self.player, "max_hp", 24)
-            companion_display_name = getattr(self.player, "companion_name", "Companion")
-            companion = Player(
-                x=0,
-                y=0,
-                width=self.player.width,
-                height=self.player.height,
-                speed=0.0,
-                color=self.player.color,
-                max_hp=int(companion_max_hp * 0.8),
-                hp=int(companion_max_hp * 0.8),
-                attack_power=max(2, int(getattr(self.player, "attack_power", 5) * 0.7)),
+            # Create a minimal CompanionDef for the fallback
+            from dataclasses import dataclass
+            @dataclass
+            class _GenericCompanionDef(CompanionDef):
+                pass
+            
+            generic_template = _GenericCompanionDef(
+                id="generic",
+                name="Companion",
+                role="Companion",
+                hp_factor=DEFAULT_COMPANION_HP_FACTOR,
+                attack_factor=DEFAULT_COMPANION_ATTACK_FACTOR,
+                defense_factor=1.0,
+                skill_power_factor=1.0,
             )
-            # Simple default pools for the generic companion.
-            generic_max_mana = 0
-            generic_max_stamina = 4
-            setattr(companion, "max_mana", generic_max_mana)
-            setattr(companion, "max_stamina", generic_max_stamina)
-
+            
+            base_max_hp = getattr(self.player, "max_hp", DEFAULT_PLAYER_MAX_HP)
+            base_atk = getattr(self.player, "attack_power", DEFAULT_PLAYER_ATTACK)
+            
+            companion = create_companion_entity(
+                template=generic_template,
+                state=None,  # No state for generic companion
+                reference_player=self.player,
+                hero_base_hp=base_max_hp,
+                hero_base_attack=base_atk,
+            )
+            
+            companion_display_name = getattr(self.player, "companion_name", "Companion")
             companion_unit = BattleUnit(
                 entity=companion,
                 side="player",
@@ -368,8 +414,8 @@ class BattleScene:
                 gy=max(0, self.grid_height // 2 - 1),
                 name=companion_display_name,
             )
-            companion_unit.current_mana = generic_max_mana
-            companion_unit.current_stamina = generic_max_stamina
+            # Initialize resource pools from entity max values
+            companion_unit.init_resources_from_entity()
 
             try:
                 companion_unit.skills = {
@@ -385,13 +431,13 @@ class BattleScene:
         # --- Enemy side: create a unit per enemy in the encounter group ---
         self.enemy_units: List[BattleUnit] = []
 
-        max_enemies = min(len(enemies), 3)
+        max_enemies = min(len(enemies), MAX_BATTLE_ENEMIES)
         grid_width = self.grid_width
         grid_height = self.grid_height
 
         # Enemies start a few columns in from the right edge so there's
         # real distance between the two lines.
-        start_col = grid_width - 3
+        start_col = grid_width - BATTLE_ENEMY_START_COL_OFFSET
         start_row = max(0, grid_height // 2 - (max_enemies // 2))
 
         enemy_type_list: List[str] = []
@@ -424,11 +470,11 @@ class BattleScene:
             # Simple default resource pools for enemies so stamina-based
             # skills can work without extra data wiring.
             enemy_max_mana = 0
-            enemy_max_stamina = 6
+            enemy_max_stamina = DEFAULT_ENEMY_STAMINA
             setattr(enemy, "max_mana", enemy_max_mana)
             setattr(enemy, "max_stamina", enemy_max_stamina)
-            unit.current_mana = enemy_max_mana
-            unit.current_stamina = enemy_max_stamina
+            # Initialize resource pools from entity max values
+            unit.init_resources_from_entity()
 
             # Skills from archetype
             if arch_id is not None:
@@ -477,7 +523,7 @@ class BattleScene:
         self.finished: bool = False
 
         # Enemy AI timer – small delay so actions are readable
-        self.enemy_timer: float = 0.6
+        self.enemy_timer: float = BATTLE_ENEMY_TIMER
 
         # Initialize cooldowns / statuses for first unit
         if self.turn_order:
@@ -560,9 +606,7 @@ class BattleScene:
                 unit.cooldowns[k] -= 1
 
         # Simple stamina regeneration each turn so skills recover over time.
-        max_stamina = getattr(unit, "max_stamina", 0)
-        if max_stamina > 0 and hasattr(unit, "current_stamina"):
-            unit.current_stamina = min(max_stamina, unit.current_stamina + 1)
+        unit.regenerate_stamina(amount=1)
 
     # ----- Grid / movement helpers -----
 
@@ -691,8 +735,8 @@ class BattleScene:
             if sid not in ordered:
                 ordered.append(sid)
 
-        # Take at most 4 skills for now.
-        unit.skill_slots = ordered[:4]
+        # Take at most MAX_SKILL_SLOTS skills for now.
+        unit.skill_slots = ordered[:MAX_SKILL_SLOTS]
 
 
 
@@ -726,8 +770,8 @@ class BattleScene:
             if len(ordered) >= 4:
                 break
 
-        # Ensure we always have 4 entries to match SKILL_1..4
-        while len(ordered) < 4:
+        # Ensure we always have MAX_SKILL_SLOTS entries to match SKILL_1..SKILL_4
+        while len(ordered) < MAX_SKILL_SLOTS:
             ordered.append(None)
 
         # Strip trailing Nones so a fully-empty layout becomes [].
@@ -804,28 +848,14 @@ class BattleScene:
                 return False
             target_unit = candidates[0]
 
-        # Resource costs: mana / stamina
-        mana_cost = getattr(skill, "mana_cost", 0)
-        stamina_cost = getattr(skill, "stamina_cost", 0)
-
-        if mana_cost > 0:
-            current_mana = getattr(unit, "current_mana", 0)
-            if current_mana < mana_cost:
-                if not for_ai:
-                    self._log("Not enough mana!")
-                return False
-
-        if stamina_cost > 0:
-            current_stamina = getattr(unit, "current_stamina", 0)
-            if current_stamina < stamina_cost:
-                if not for_ai:
-                    self._log("Not enough stamina!")
-                return False
-
-        if mana_cost > 0 and hasattr(unit, "current_mana"):
-            unit.current_mana -= mana_cost
-        if stamina_cost > 0 and hasattr(unit, "current_stamina"):
-            unit.current_stamina -= stamina_cost
+        # Check and consume resource costs
+        can_use, error_msg = unit.has_resources_for_skill(skill)
+        if not can_use:
+            if not for_ai and error_msg:
+                self._log(error_msg)
+            return False
+        
+        unit.consume_resources_for_skill(skill)
 
         # Apply damage if any
         damage = 0
@@ -834,7 +864,7 @@ class BattleScene:
             dmg = base * skill.base_power
             if skill.uses_skill_power:
                 sp = float(getattr(unit.entity, "skill_power", 1.0))
-                dmg *= max(0.5, sp)
+                dmg *= max(DEFAULT_MIN_SKILL_POWER, sp)
             damage = self._apply_damage(unit, target_unit, int(dmg))
 
         # Apply statuses
@@ -905,7 +935,7 @@ class BattleScene:
             if unit.is_alive:
                 self.turn = unit.side
                 if unit.side == "enemy":
-                    self.enemy_timer = 0.6
+                    self.enemy_timer = BATTLE_ENEMY_TIMER
                 else:
                     self.enemy_timer = 0.0
                 self._on_unit_turn_start(unit)
@@ -1094,11 +1124,11 @@ class BattleScene:
         else:
             hp_ratio = 1.0
 
-        if hp_ratio < 0.4:
+        if hp_ratio < BATTLE_AI_DEFENSIVE_HP_THRESHOLD:
             for skill in unit.skills.values():
                 if skill.target_mode == "self":
                     cd = unit.cooldowns.get(skill.id, 0)
-                    if cd == 0 and random.random() < 0.5:
+                    if cd == 0 and random.random() < BATTLE_AI_DEFENSIVE_SKILL_CHANCE:
                         if self._use_skill(unit, skill, for_ai=True):
                             # _use_skill already advanced the turn
                             return
@@ -1125,7 +1155,7 @@ class BattleScene:
                 continue
 
             cd = unit.cooldowns.get(skill.id, 0)
-            if cd == 0 and random.random() < 0.4:
+            if cd == 0 and random.random() < BATTLE_AI_SKILL_CHANCE:
                 if self._use_skill(unit, skill, for_ai=True):
                     # _use_skill handles logging, damage, win checks, and _next_turn()
                     return
@@ -1218,25 +1248,18 @@ class BattleScene:
         # Simple status indicators on the right side of the panel
         icon_x = x + panel_width - 18
         icon_y = y + 10
-
-        if self._has_status(unit, "guard"):
-            g_text = self.font.render("G", True, (255, 255, 180))
-            surface.blit(g_text, (icon_x, icon_y))
-            icon_y += 18
-
-        if self._has_status(unit, "weakened"):
-            w_text = self.font.render("W", True, (255, 200, 100))
-            surface.blit(w_text, (icon_x, icon_y))
-            icon_y += 18
-
-        if self._has_dot(unit):
-            dot_text = self.font.render("•", True, (180, 255, 180))
-            surface.blit(dot_text, (icon_x, icon_y))
-            icon_y += 18
-
-        if self._is_stunned(unit):
-            s_text = self.font.render("!", True, (255, 100, 100))
-            surface.blit(s_text, (icon_x, icon_y))
+        
+        _draw_status_indicators(
+            surface,
+            self.font,
+            icon_x,
+            icon_y,
+            has_guard=self._has_status(unit, "guard"),
+            has_weakened=self._has_status(unit, "weakened"),
+            has_stunned=self._is_stunned(unit),
+            has_dot=self._has_dot(unit),
+            icon_spacing=18,
+        )
 
 
     def _draw_grid(self, surface: pygame.Surface) -> None:
@@ -1308,23 +1331,20 @@ class BattleScene:
             # HP bar
             self._draw_hp_bar(surface, rect, unit, is_player=True)
 
-            # Status icons above the HP bar
+            # Status icons above the HP bar (horizontal layout, going upward)
             icon_y = rect.y - 18
-            if self._has_status(unit, "guard"):
-                g_text = self.font.render("G", True, (255, 255, 180))
-                surface.blit(g_text, (rect.x + 4, icon_y))
-                icon_y -= 18
-            if self._has_status(unit, "weakened"):
-                w_text = self.font.render("W", True, (255, 200, 100))
-                surface.blit(w_text, (rect.x + 20, icon_y))
-                icon_y -= 18
-            if self._has_dot(unit):
-                dot_text = self.font.render("•", True, (180, 255, 180))
-                surface.blit(dot_text, (rect.x + 36, icon_y))
-                icon_y -= 18
-            if self._is_stunned(unit):
-                s_text = self.font.render("!", True, (255, 100, 100))
-                surface.blit(s_text, (rect.x + 52, icon_y))
+            _draw_status_indicators(
+                surface,
+                self.font,
+                rect.x + 4,  # Start x position
+                icon_y,
+                has_guard=self._has_status(unit, "guard"),
+                has_weakened=self._has_status(unit, "weakened"),
+                has_stunned=self._is_stunned(unit),
+                has_dot=self._has_dot(unit),
+                icon_spacing=-18,  # Negative for upward
+                vertical=True,
+            )
 
             # Cooldown indicator for hero's Power Strike
             hero = self._hero_unit()
@@ -1363,23 +1383,20 @@ class BattleScene:
             # HP bar
             self._draw_hp_bar(surface, rect, unit, is_player=False)
 
-            # Status icons
+            # Status icons (horizontal layout, going upward)
             icon_y = rect.y - 18
-            if self._has_status(unit, "guard"):
-                g_text = self.font.render("G", True, (255, 255, 180))
-                surface.blit(g_text, (rect.x + 4, icon_y))
-                icon_y -= 18
-            if self._has_status(unit, "weakened"):
-                w_text = self.font.render("W", True, (255, 200, 100))
-                surface.blit(w_text, (rect.x + 20, icon_y))
-                icon_y -= 18
-            if self._has_dot(unit):
-                dot_text = self.font.render("•", True, (180, 255, 180))
-                surface.blit(dot_text, (rect.x + 36, icon_y))
-                icon_y -= 18
-            if self._is_stunned(unit):
-                s_text = self.font.render("!", True, (255, 100, 100))
-                surface.blit(s_text, (rect.x + 52, icon_y))
+            _draw_status_indicators(
+                surface,
+                self.font,
+                rect.x + 4,  # Start x position
+                icon_y,
+                has_guard=self._has_status(unit, "guard"),
+                has_weakened=self._has_status(unit, "weakened"),
+                has_stunned=self._is_stunned(unit),
+                has_dot=self._has_dot(unit),
+                icon_spacing=-18,  # Negative for upward
+                vertical=True,
+            )
 
             # Name label
             name_surf = self.font.render(unit.name, True, (230, 210, 210))
@@ -1415,67 +1432,80 @@ class BattleScene:
         self._draw_units(surface)
 
         # ------------------------------------------------------------------
-        # 3) Top UI: party / enemy overview + turn info
+        # 3) Top UI: party / enemy unit cards + active unit panel
         # ------------------------------------------------------------------
-        total_player_hp = sum(u.hp for u in self.player_units)
-        total_player_maxhp = sum(u.max_hp for u in self.player_units)
-        total_enemy_hp = sum(u.hp for u in self.enemy_units)
-        total_enemy_maxhp = sum(u.max_hp for u in self.enemy_units)
-
-        # Party HP (top-left)
-        player_hp_text = self.font.render(
-            f"Party HP: {total_player_hp}/{total_player_maxhp}",
-            True,
-            (220, 220, 220),
-        )
-        surface.blit(player_hp_text, (40, 20))
-
-        # Enemy HP (top-right-ish)
-        enemy_hp_text = self.font.render(
-            f"Enemy HP: {total_enemy_hp}/{total_enemy_maxhp}",
-            True,
-            (220, 220, 220),
-        )
-        surface.blit(enemy_hp_text, (screen_w // 2 + 40, 20))
-
-        # Turn side label
+        active_unit = self._active_unit() if self.status == "ongoing" and self.turn_order else None
+        
+        # Party unit cards (left side)
+        party_x = 20
+        party_y = 20
+        card_width = 180
+        card_spacing = 10
+        
+        for idx, unit in enumerate(self.player_units):
+            if not unit.is_alive:
+                continue
+            is_active = (active_unit == unit)
+            _draw_battle_unit_card(
+                surface,
+                self.font,
+                party_x,
+                party_y + idx * (70 + card_spacing),
+                card_width,
+                unit.name,
+                unit.hp,
+                unit.max_hp,
+                getattr(unit, "current_stamina", 0),
+                getattr(unit, "max_stamina", 0),
+                getattr(unit, "current_mana", 0),
+                getattr(unit, "max_mana", 0),
+                is_active=is_active,
+                is_player=True,
+                statuses=getattr(unit, "statuses", []),
+            )
+        
+        # Enemy unit cards (right side)
+        enemy_x = screen_w - card_width - 20
+        enemy_y = 20
+        
+        for idx, unit in enumerate(self.enemy_units):
+            if not unit.is_alive:
+                continue
+            is_active = (active_unit == unit)
+            _draw_battle_unit_card(
+                surface,
+                self.font,
+                enemy_x,
+                enemy_y + idx * (70 + card_spacing),
+                card_width,
+                unit.name,
+                unit.hp,
+                unit.max_hp,
+                getattr(unit, "current_stamina", 0),
+                getattr(unit, "max_stamina", 0),
+                getattr(unit, "current_mana", 0),
+                getattr(unit, "max_mana", 0),
+                is_active=is_active,
+                is_player=False,
+                statuses=getattr(unit, "statuses", []),
+            )
+        
+        # Active unit HUD panel (center top) - keep existing for detailed info
+        self._draw_active_unit_panel(surface, active_unit, screen_w)
+        
+        # Turn indicator (center, above active panel)
         if self.status == "ongoing" and self.turn_order:
-            side_label = self._active_unit().side
+            side_label = active_unit.side if active_unit else "-"
         else:
             side_label = "-"
-
-        status_text = self.font.render(
-            f"Turn: {side_label}",
+        
+        turn_text = self.font.render(
+            f"Turn: {side_label.upper()}",
             True,
             (200, 200, 255),
         )
-        surface.blit(status_text, (40, 48))
-
-        # Active unit label
-        active_unit = self._active_unit() if self.status == "ongoing" and self.turn_order else None
-        if active_unit is not None:
-            role = "Party" if active_unit.side == "player" else "Enemy"
-            active_label = f"Active: {active_unit.name} ({role})"
-        else:
-            active_label = "Active: -"
-        active_text = self.font.render(
-            active_label,
-            True,
-            (200, 200, 230),
-        )
-        surface.blit(active_text, (40, 70))
-
-        # Active unit HUD panel (center top)
-        self._draw_active_unit_panel(surface, active_unit, screen_w)
-
-        # Enemy group label, top-right (future home for an enemy panel)
-        group_surf = self.font.render(
-            f"Enemies: {self.enemy_group_label}",
-            True,
-            (220, 200, 200),
-        )
-        group_x = screen_w - group_surf.get_width() - 40
-        surface.blit(group_surf, (group_x, 48))
+        turn_x = (screen_w - turn_text.get_width()) // 2
+        surface.blit(turn_text, (turn_x, 8))
 
         # ------------------------------------------------------------------
         # 4) Bottom UI: combat log + key hints
@@ -1498,9 +1528,10 @@ class BattleScene:
         log_y_start = max(min_log_top, max_log_top)
         log_y = log_y_start
 
+        # Draw log on the left side (hotbar will be on right)
+        log_x = 40  # Left side
         for msg in log_lines:
-            log_text = self.font.render(msg, True, (200, 200, 200))
-            surface.blit(log_text, (40, log_y))
+            _draw_battle_log_line(surface, self.font, log_x, log_y, msg)
             log_y += line_height
 
         # ------------------------------------------------------------------
@@ -1515,77 +1546,11 @@ class BattleScene:
                 input_manager = getattr(game, "input_manager", None)
 
             name_prefix = "Party"
-            skills_str = "No skills"
-
+            
             if active is not None and active.side == "player":
                 name_prefix = active.name
-                parts: List[str] = []
 
-                # --- 1) Dedicated Guard hint (G: Guard) --------------------
-                guard_skill = active.skills.get("guard")
-                if guard_skill is not None:
-                    guard_labels: List[str] = []
-
-                    if input_manager is not None:
-                        try:
-                            guard_keys = input_manager.get_bindings(InputAction.GUARD)
-                        except AttributeError:
-                            guard_keys = set()
-                        for key in sorted(guard_keys):
-                            guard_labels.append(pygame.key.name(key).upper())
-
-                    # Fallback: use the skill's own key if no binding info
-                    if not guard_labels:
-                        key_code = getattr(guard_skill, "key", None)
-                        if key_code is not None:
-                            guard_labels.append(pygame.key.name(key_code).upper())
-
-                    if guard_labels:
-                        parts.append(f"{'/'.join(guard_labels)}: {guard_skill.name}")
-
-                # --- 2) Slot-based skills (Q/E/F/R, perk skills, etc.) ------
-                slot_actions = [
-                    InputAction.SKILL_1,
-                    InputAction.SKILL_2,
-                    InputAction.SKILL_3,
-                    InputAction.SKILL_4,
-                ]
-                slots = getattr(active, "skill_slots", None) or []
-
-                for idx, skill_id in enumerate(slots):
-                    if idx >= len(slot_actions):
-                        break
-                    if not skill_id:
-                        continue
-
-                    skill = active.skills.get(skill_id)
-                    if skill is None:
-                        continue
-
-                    key_labels: List[str] = []
-
-                    if input_manager is not None:
-                        try:
-                            bound_keys = input_manager.get_bindings(slot_actions[idx])
-                        except AttributeError:
-                            bound_keys = set()
-                        for key in sorted(bound_keys):
-                            key_labels.append(pygame.key.name(key).upper())
-
-                    # Fallback to the skill's own key if needed
-                    if not key_labels:
-                        key_code = getattr(skill, "key", None)
-                        if key_code is not None:
-                            key_labels.append(pygame.key.name(key_code).upper())
-
-                    if key_labels:
-                        parts.append(f"{'/'.join(key_labels)}: {skill.name}")
-                    else:
-                        parts.append(skill.name)
-
-                skills_str = " | ".join(parts) if parts else "No skills"
-
-            # --- 3) Basic attack hint (Space or whatever it's bound to) ----
+            # --- Basic attack hint (Space or whatever it's bound to) ----
             atk_part = "SPACE atk"
             if input_manager is not None:
                 try:
@@ -1598,8 +1563,39 @@ class BattleScene:
                 if atk_labels:
                     atk_part = f"{'/'.join(atk_labels)} atk"
 
+            # Draw skill hotbar if it's a player unit's turn (right side, log is on left)
+            if active is not None and active.side == "player":
+                # Get input manager for key bindings
+                input_manager = None
+                if game is not None:
+                    input_manager = getattr(game, "input_manager", None)
+                
+                # Draw hotbar on the right side, above hint line
+                hotbar_y = hint_y - 80
+                # Calculate hotbar width to position it on the right
+                skill_slots = getattr(active, "skill_slots", [])
+                slot_width = 100
+                slot_spacing = 8
+                hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
+                hotbar_x = screen_w - hotbar_w - 40  # Right side with margin
+                _draw_battle_skill_hotbar(
+                    surface,
+                    self.font,
+                    hotbar_x,
+                    hotbar_y,
+                    active.skills,
+                    skill_slots,
+                    getattr(active, "cooldowns", {}),
+                    getattr(active, "current_stamina", 0),
+                    getattr(active, "max_stamina", 0),
+                    getattr(active, "current_mana", 0),
+                    getattr(active, "max_mana", 0),
+                    input_manager,
+                )
+            
+            # Simplified hint - skills are shown in visual hotbar, so just show movement and attack
             hint_text = self.font.render(
-                f"{name_prefix}: move WASD/arrows | {atk_part} | {skills_str}",
+                f"{name_prefix}: move WASD/arrows | {atk_part}",
                 True,
                 (180, 180, 180),
             )
