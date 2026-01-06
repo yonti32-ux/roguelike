@@ -155,10 +155,11 @@ class BattleCombat:
         is_kill = was_alive and getattr(target.entity, "hp", 0) <= 0
         
         # Store damage for floating number display
+        # Increased duration: crits 2.0s, normal 1.8s (was 1.2s and 1.0s)
         self.scene._floating_damage.append({
             "target": target,
             "damage": damage,
-            "timer": 1.2 if is_crit else 1.0,  # Crits last slightly longer
+            "timer": 2.0 if is_crit else 1.8,  # Longer duration for better visibility
             "y_offset": 0,
             "is_crit": is_crit,
             "is_kill": is_kill,

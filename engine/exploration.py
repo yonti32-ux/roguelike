@@ -197,42 +197,85 @@ class ExplorationController:
             new_x = game.player.x + move_vector.x
             new_y = game.player.y + move_vector.y
 
-            new_rect = pygame.Rect(
-                int(new_x),
-                int(new_y),
-                game.player.width,
-                game.player.height,
-            )
+            def _can_player_move_to(x: float, y: float) -> tuple[bool, list[Enemy], list[Merchant]]:
+                """Check if player can move to position, returns (can_move, blocking_enemies, blocking_merchants)."""
+                test_rect = pygame.Rect(
+                    int(x),
+                    int(y),
+                    game.player.width,
+                    game.player.height,
+                )
 
-            blocked_by_tiles = not game.current_map.rect_can_move_to(new_rect)
+                blocked_by_tiles = not game.current_map.rect_can_move_to(test_rect)
 
-            # Enemies block movement; stepping into them triggers battle instead
-            blocking_enemies: list[Enemy] = [
-                e
-                for e in game.current_map.entities
-                if isinstance(e, Enemy)
-                and getattr(e, "blocks_movement", True)
-                and e.rect.colliderect(new_rect)
-            ]
+                # Enemies block movement; stepping into them triggers battle instead
+                blocking_enemies: list[Enemy] = [
+                    e
+                    for e in game.current_map.entities
+                    if isinstance(e, Enemy)
+                    and getattr(e, "blocks_movement", True)
+                    and e.rect.colliderect(test_rect)
+                ]
 
-            # Merchants also block movement, but do NOT start battles
-            blocking_merchants: list[Merchant] = [
-                m
-                for m in game.current_map.entities
-                if isinstance(m, Merchant)
-                and getattr(m, "blocks_movement", True)
-                and m.rect.colliderect(new_rect)
-            ]
+                # Merchants also block movement, but do NOT start battles
+                blocking_merchants: list[Merchant] = [
+                    m
+                    for m in game.current_map.entities
+                    if isinstance(m, Merchant)
+                    and getattr(m, "blocks_movement", True)
+                    and m.rect.colliderect(test_rect)
+                ]
 
-            if not blocked_by_tiles and not blocking_enemies and not blocking_merchants:
+                can_move = not blocked_by_tiles and not blocking_enemies and not blocking_merchants
+                return can_move, blocking_enemies, blocking_merchants
+
+            # Try full diagonal movement first
+            can_move, blocking_enemies, blocking_merchants = _can_player_move_to(new_x, new_y)
+            
+            if can_move:
                 game.player.move_to(new_x, new_y)
             elif blocking_enemies:
-                # During grace, you simply can't walk through them; no new battle yet
-                if game.post_battle_grace <= 0.0:
-                    game.start_battle(blocking_enemies[0])
+                # Blocked by enemies - try sliding to see if we can go around them
+                # Try X-axis movement (horizontal sliding)
+                can_move_x, blocking_enemies_x, blocking_merchants_x = _can_player_move_to(
+                    game.player.x + move_vector.x, game.player.y
+                )
+                if can_move_x:
+                    game.player.move_to(game.player.x + move_vector.x, game.player.y)
+                elif blocking_enemies_x and game.post_battle_grace <= 0.0:
+                    # Can't slide past enemy on X axis, trigger battle
+                    game.start_battle(blocking_enemies_x[0])
+                else:
+                    # Try Y-axis movement (vertical sliding)
+                    can_move_y, blocking_enemies_y, blocking_merchants_y = _can_player_move_to(
+                        game.player.x, game.player.y + move_vector.y
+                    )
+                    if can_move_y:
+                        game.player.move_to(game.player.x, game.player.y + move_vector.y)
+                    elif blocking_enemies_y and game.post_battle_grace <= 0.0:
+                        # Can't slide past enemy on Y axis either, trigger battle
+                        game.start_battle(blocking_enemies_y[0])
+                    # If completely blocked and no battle triggered, do nothing
             else:
-                # Blocked by tiles or merchants only: do nothing (can't move through)
-                pass
+                # Blocked by tiles or merchants - try sliding along one axis
+                # Try X-axis movement (horizontal sliding)
+                can_move_x, blocking_enemies_x, blocking_merchants_x = _can_player_move_to(
+                    game.player.x + move_vector.x, game.player.y
+                )
+                if can_move_x:
+                    game.player.move_to(game.player.x + move_vector.x, game.player.y)
+                elif blocking_enemies_x and game.post_battle_grace <= 0.0:
+                    game.start_battle(blocking_enemies_x[0])
+                else:
+                    # Try Y-axis movement (vertical sliding)
+                    can_move_y, blocking_enemies_y, blocking_merchants_y = _can_player_move_to(
+                        game.player.x, game.player.y + move_vector.y
+                    )
+                    if can_move_y:
+                        game.player.move_to(game.player.x, game.player.y + move_vector.y)
+                    elif blocking_enemies_y and game.post_battle_grace <= 0.0:
+                        game.start_battle(blocking_enemies_y[0])
+                    # If completely blocked, do nothing
 
         # --- Enemy updates (delegated to world.ai) ---
         for entity in list(game.current_map.entities):

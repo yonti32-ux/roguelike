@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Dict, Any
+from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
 import pygame
 
 from settings import COLOR_BG
@@ -443,73 +443,180 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         none = ui_font.render("You are not carrying anything yet.", True, (180, 180, 180))
         screen.blit(none, (right_x, y))
     else:
-        items = list(inv.items)
-        page_size = int(getattr(game, "inventory_page_size", 20))  # More items visible
-        offset = int(getattr(game, "inventory_scroll_offset", 0))
-        total_items = len(items)
-        
-        if total_items <= page_size:
-            offset = 0
-        else:
-            max_offset = max(0, total_items - page_size)
-            offset = max(0, min(offset, max_offset))
-        game.inventory_scroll_offset = offset
-        
-        visible_items = items[offset : offset + page_size]
-        
-        # Get all equipped items from entire party (hero + companions)
-        all_equipped = _get_all_equipped_items(game)
-        
-        for idx, item_id in enumerate(visible_items):
+        # Group items by slot/category
+        items_by_slot: Dict[str, List[str]] = {}
+        for item_id in inv.items:
             item_def = get_item_def(item_id)
             if item_def is None:
-                continue
-            
-            # Build equipped marker showing who has it equipped
-            equipped_marker = ""
-            if item_id in all_equipped:
-                markers = []
-                for char_name, slot in all_equipped[item_id]:
-                    slot_abbrev = slot[0].upper()  # W, A, or T
-                    # Shorten character names for display
-                    if char_name == "Hero" or char_name.startswith("Hero"):
-                        char_abbrev = "H"
-                    else:
-                        # Use first letter of companion name or "C" for Companion
-                        char_abbrev = char_name[0].upper() if char_name and char_name != "Companion" else "C"
-                    markers.append(f"{slot_abbrev}-{char_abbrev}")
-                if markers:
-                    equipped_marker = " [" + ",".join(markers) + "]"
-            
-            hotkey = f"[{idx + 1}] " if idx < 9 else ""
-            line = f"{hotkey}{item_def.name}{equipped_marker}"
-            # Use brighter color if equipped by anyone
-            item_color = (255, 255, 200) if equipped_marker else (220, 220, 220)
-            t = ui_font.render(line, True, item_color)
-            screen.blit(t, (right_x, y))
-            y += 20
-
-            # One-line stats/description, slightly dimmer and indented
-            info_line = _build_item_info_line(item_def)
-            if info_line:
-                info_surf = ui_font.render(info_line, True, (170, 170, 170))
-                screen.blit(info_surf, (right_x + 24, y))
-                y += 18
+                slot = "misc"
             else:
-                # Small extra spacing if no info line, to keep rows readable
-                y += 4
+                slot = item_def.slot or "misc"
+            if slot not in items_by_slot:
+                items_by_slot[slot] = []
+            items_by_slot[slot].append(item_id)
         
-        # Scroll info
-        if total_items > page_size:
-            first_index = offset + 1
-            last_index = min(offset + page_size, total_items)
-            scroll_text = f"Items {first_index}-{last_index} of {total_items}"
-            scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
-            screen.blit(scroll_surf, (right_x, y + 10))
+        # Build flat list with category markers: (item_id or None for category header, slot_name)
+        flat_list: List[Tuple[Optional[str], str]] = []
+        slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
+        for slot in slot_order:
+            if slot in items_by_slot and items_by_slot[slot]:
+                flat_list.append((None, slot))  # Category header
+                for item_id in items_by_slot[slot]:
+                    flat_list.append((item_id, slot))
+        
+        # Add any remaining slots not in the preferred order
+        for slot in sorted(items_by_slot.keys()):
+            if slot not in slot_order and items_by_slot[slot]:
+                flat_list.append((None, slot))  # Category header
+                for item_id in items_by_slot[slot]:
+                    flat_list.append((item_id, slot))
+        
+        # Get cursor position
+        cursor = int(getattr(game, "inventory_cursor", 0))
+        
+        # Find the actual item indices (skip category headers)
+        item_indices = [i for i, (item_id, _) in enumerate(flat_list) if item_id is not None]
+        if not item_indices:
+            none = ui_font.render("You are not carrying anything yet.", True, (180, 180, 180))
+            screen.blit(none, (right_x, y))
+        else:
+            # Clamp cursor to valid range
+            cursor = max(0, min(cursor, len(item_indices) - 1))
+            game.inventory_cursor = cursor
+            
+            # Get current item index in flat_list
+            current_flat_index = item_indices[cursor]
+            
+            # Calculate scroll offset to keep cursor visible
+            page_size = int(getattr(game, "inventory_page_size", 20))
+            start_y = y
+            line_height = 38  # Approximate height per item (including stats line)
+            max_visible_lines = (h - start_y - 100) // line_height  # Leave space for footer
+            
+            # Calculate which items to show (scroll to keep cursor visible)
+            visible_start = max(0, cursor - max_visible_lines // 2)
+            visible_end = min(len(item_indices), visible_start + max_visible_lines)
+            
+            # Get all equipped items from entire party (hero + companions)
+            all_equipped = _get_all_equipped_items(game)
+            
+            # Build a map of flat_idx -> item_global_idx for quick lookup
+            flat_to_global = {}
+            for global_idx, flat_idx in enumerate(item_indices):
+                flat_to_global[flat_idx] = global_idx
+            
+            # Track last shown category to avoid duplicate headers
+            last_shown_category = None
+            
+            # Display items with category headers
+            for flat_idx, (item_id, slot) in enumerate(flat_list):
+                if item_id is None:
+                    # Category header - check if any items in this category are visible
+                    category_has_visible = False
+                    for check_idx in range(flat_idx + 1, len(flat_list)):
+                        check_item_id, check_slot = flat_list[check_idx]
+                        if check_item_id is None:  # Hit next category
+                            break
+                        if check_slot == slot and check_idx in flat_to_global:
+                            item_global_idx = flat_to_global[check_idx]
+                            if visible_start <= item_global_idx < visible_end:
+                                category_has_visible = True
+                                break
+                    
+                    if category_has_visible and last_shown_category != slot:
+                        slot_display = slot.capitalize()
+                        if slot == "misc":
+                            slot_display = "Miscellaneous"
+                        category_surf = ui_font.render(f"--- {slot_display} ---", True, (200, 200, 150))
+                        screen.blit(category_surf, (right_x, y))
+                        y += 24
+                        last_shown_category = slot
+                else:
+                    # Check if this item should be visible
+                    if flat_idx not in flat_to_global:
+                        continue
+                    
+                    item_global_idx = flat_to_global[flat_idx]
+                    
+                    # Only show items in visible range
+                    if visible_start <= item_global_idx < visible_end:
+                        # Show category header if this is the first item in this category
+                        if last_shown_category != slot:
+                            slot_display = slot.capitalize()
+                            if slot == "misc":
+                                slot_display = "Miscellaneous"
+                            category_surf = ui_font.render(f"--- {slot_display} ---", True, (200, 200, 150))
+                            screen.blit(category_surf, (right_x, y))
+                            y += 24
+                            last_shown_category = slot
+                        
+                        item_def = get_item_def(item_id)
+                        if item_def is None:
+                            continue
+                        
+                        # Check if this is the selected item
+                        is_selected = (item_global_idx == cursor)
+                        
+                        # Build equipped marker showing who has it equipped
+                        equipped_marker = ""
+                        if item_id in all_equipped:
+                            markers = []
+                            for char_name, slot_name in all_equipped[item_id]:
+                                slot_abbrev = slot_name[0].upper()  # W, A, or T
+                                # Shorten character names for display
+                                if char_name == "Hero" or char_name.startswith("Hero"):
+                                    char_abbrev = "H"
+                                else:
+                                    # Use first letter of companion name or "C" for Companion
+                                    char_abbrev = char_name[0].upper() if char_name and char_name != "Companion" else "C"
+                                markers.append(f"{slot_abbrev}-{char_abbrev}")
+                            if markers:
+                                equipped_marker = " [" + ",".join(markers) + "]"
+                        
+                        # Highlight selected item with background
+                        if is_selected:
+                            bg_width = w - right_x - 80
+                            bg_height = 38
+                            bg = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
+                            bg.fill((60, 60, 90, 210))
+                            screen.blit(bg, (right_x - 10, y - 2))
+                        
+                        # Item name with selection indicator
+                        selection_marker = "> " if is_selected else "  "
+                        line = f"{selection_marker}{item_def.name}{equipped_marker}"
+                        # Use brighter color if equipped or selected
+                        if is_selected:
+                            item_color = (255, 255, 150)
+                        elif equipped_marker:
+                            item_color = (255, 255, 200)
+                        else:
+                            item_color = (220, 220, 220)
+                        t = ui_font.render(line, True, item_color)
+                        screen.blit(t, (right_x, y))
+                        y += 20
+
+                        # One-line stats/description, slightly dimmer and indented
+                        info_line = _build_item_info_line(item_def)
+                        if info_line:
+                            info_color = (200, 200, 180) if is_selected else (170, 170, 170)
+                            info_surf = ui_font.render(info_line, True, info_color)
+                            screen.blit(info_surf, (right_x + 24, y))
+                            y += 18
+                        else:
+                            # Small extra spacing if no info line, to keep rows readable
+                            y += 4
+            
+            # Scroll info
+            if len(item_indices) > max_visible_lines:
+                first_index = visible_start + 1
+                last_index = min(visible_end, len(item_indices))
+                scroll_text = f"Items {first_index}-{last_index} of {len(item_indices)}"
+                scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
+                screen.blit(scroll_surf, (right_x, y + 10))
     
     # Footer hints
     hints = [
-        "1–9: equip item | Q/E: switch character | Up/Down/PgUp/PgDn: scroll",
+        "Up/Down: select item | Enter/Space: equip | Q/E: switch character | PgUp/PgDn: page",
         "TAB: switch screen | I/ESC: close"
     ]
     _draw_screen_footer(screen, ui_font, hints, w, h)

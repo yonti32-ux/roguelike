@@ -122,6 +122,7 @@ class Game:
         # Inventory list paging / scrolling
         self.inventory_page_size: int = 20  # More items visible in fullscreen
         self.inventory_scroll_offset: int = 0
+        self.inventory_cursor: int = 0  # Cursor position for item selection
 
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
@@ -251,6 +252,8 @@ class Game:
             # When opening the inventory, default focus is the hero and reset scroll.
             self.inventory_focus_index = 0
             self.inventory_scroll_offset = 0
+            self.inventory_cursor = 0
+            self.inventory_cursor = 0
             # Route input to the inventory screen while it's open.
             if hasattr(self, "inventory_screen"):
                 self.active_screen = self.inventory_screen

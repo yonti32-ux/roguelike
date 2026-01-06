@@ -71,7 +71,7 @@ def create_default_input_manager() -> InputManager:
     mgr.bind_key(InputAction.CONFIRM, pygame.K_KP_ENTER)
     mgr.bind_key(InputAction.CONFIRM, pygame.K_SPACE)
 
-    mgr.bind_key(InputAction.CANCEL, pygame.K_ESCAPE)
+    mgr.bind_key(InputAction.CANCEL, pygame.K_x)  # X for cancel (ESC is for pause menu)
 
     # ------------------------------------------------------------------
     # Battle-related – hotbar + basic attack

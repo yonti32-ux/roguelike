@@ -6,6 +6,7 @@ import pygame
 from typing import Optional
 
 from settings import COLOR_BG, FPS
+from engine.config import get_config, save_config
 
 
 class PauseMenuScene:
@@ -156,9 +157,27 @@ class OptionsMenuScene:
         self.mode = "main"  # "main" or "controls"
         self.selected_index = 0
         
+        # Battle speed options (multipliers) - must be defined before use
+        self.battle_speed_levels = [0.5, 1.0, 1.5, 2.0]
+        self.battle_speed_index = 1  # Default to 1.0x (normal speed)
+        
+        # Load current battle speed from config
+        config = get_config()
+        current_speed = getattr(config, "battle_speed", 1.0)
+        # Find the closest matching speed level
+        if current_speed in self.battle_speed_levels:
+            self.battle_speed_index = self.battle_speed_levels.index(current_speed)
+        else:
+            # Find closest match
+            self.battle_speed_index = min(
+                range(len(self.battle_speed_levels)),
+                key=lambda i: abs(self.battle_speed_levels[i] - current_speed)
+            )
+        
         # Main menu options
         self.main_options = [
             ("controls", "View Controls & Hotkeys"),
+            ("battle_speed", "Battle Speed"),  # Will show current speed
             ("resolution", "Change Resolution"),
             ("back", "Back"),
         ]
@@ -224,14 +243,27 @@ class OptionsMenuScene:
         """Handle key presses in options menu."""
         key = event.key
         
-        # ESC always goes back
+        # ESC always goes back/closes options
         if key == pygame.K_ESCAPE:
             if self.mode == "controls":
                 self.mode = "main"
                 return None
-            return None  # Close options
+            return "back"  # Explicitly return "back" to close options
         
         if self.mode == "main":
+            # Check if battle speed is selected
+            option_id, _ = self.main_options[self.selected_index]
+            if option_id == "battle_speed":
+                # Left/Right arrows adjust battle speed
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.battle_speed_index = (self.battle_speed_index - 1) % len(self.battle_speed_levels)
+                    self._apply_battle_speed()
+                    return None
+                if key in (pygame.K_RIGHT, pygame.K_d):
+                    self.battle_speed_index = (self.battle_speed_index + 1) % len(self.battle_speed_levels)
+                    self._apply_battle_speed()
+                    return None
+            
             # Navigation
             if key in (pygame.K_UP, pygame.K_w):
                 self.selected_index = (self.selected_index - 1) % len(self.main_options)
@@ -290,13 +322,25 @@ class OptionsMenuScene:
                 
                 # Option text
                 color = (255, 255, 210) if is_selected else (180, 180, 180)
-                text_surf = self.font_main.render(option_text, True, color)
+                
+                # Special handling for battle speed to show current value
+                if option_id == "battle_speed":
+                    current_speed = self.battle_speed_levels[self.battle_speed_index]
+                    display_text = f"Battle Speed: {current_speed:.1f}x"
+                else:
+                    display_text = option_text
+                
+                text_surf = self.font_main.render(display_text, True, color)
                 text_x = w // 2 - text_surf.get_width() // 2
                 text_y = menu_start_y + idx * option_spacing
                 self.screen.blit(text_surf, (text_x, text_y))
             
             # Hint
-            hint_text = "↑/↓: Navigate   Enter: Select   Esc: Back"
+            option_id, _ = self.main_options[self.selected_index]
+            if option_id == "battle_speed":
+                hint_text = "←/→: Adjust Speed   ↑/↓: Navigate   Esc: Back"
+            else:
+                hint_text = "↑/↓: Navigate   Enter: Select   Esc: Back"
             hint_surf = self.font_small.render(hint_text, True, (150, 150, 150))
             hint_x = w // 2 - hint_surf.get_width() // 2
             self.screen.blit(hint_surf, (hint_x, h - 40))
@@ -349,4 +393,10 @@ class OptionsMenuScene:
             hint_surf = self.font_small.render(hint_text, True, (120, 120, 120))
             hint_x = w // 2 - hint_surf.get_width() // 2
             self.screen.blit(hint_surf, (hint_x, h - 40))
+    
+    def _apply_battle_speed(self) -> None:
+        """Apply the selected battle speed to config and save it."""
+        config = get_config()
+        config.battle_speed = self.battle_speed_levels[self.battle_speed_index]
+        save_config()
 

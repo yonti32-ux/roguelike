@@ -99,16 +99,21 @@ def _draw_battle_skill_hotbar(
     Draw a visible skill hotbar showing skill slots with key bindings,
     cooldowns, and resource costs.
     """
-    slot_width = 100
-    slot_height = 60
-    slot_spacing = 8
+    # Increased size for better visibility
+    slot_width = 140
+    slot_height = 85
+    slot_spacing = 12
     hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
     
-    # Background panel
-    panel_h = slot_height + 20
-    panel_surf = pygame.Surface((hotbar_w + 20, panel_h), pygame.SRCALPHA)
-    panel_surf.fill((0, 0, 0, 180))
-    surface.blit(panel_surf, (x - 10, y - 10))
+    # Larger, more prominent background panel with border
+    panel_h = slot_height + 30
+    panel_w = hotbar_w + 40
+    panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    # Dark background with stronger opacity
+    panel_surf.fill((10, 10, 20, 240))
+    # Bright border to make it stand out
+    pygame.draw.rect(panel_surf, (100, 150, 255, 255), (0, 0, panel_w, panel_h), width=3)
+    surface.blit(panel_surf, (x - 20, y - 15))
     
     slot_x = x
     slot_actions = [
@@ -155,33 +160,48 @@ def _draw_battle_skill_hotbar(
             has_resources = (stamina_cost <= current_stamina and mana_cost <= current_mana)
             can_use = can_use and has_resources
             
-            bg_color = (40, 50, 40) if can_use else (30, 30, 30)
+            # More vibrant colors for better visibility
+            if can_use:
+                bg_color = (50, 70, 50)
+                border_color = (100, 200, 100)
+            else:
+                bg_color = (40, 40, 40)
+                border_color = (80, 80, 80)
         else:
-            bg_color = (20, 20, 20)
+            bg_color = (25, 25, 25)
+            border_color = (60, 60, 60)
             can_use = False
         
         pygame.draw.rect(surface, bg_color, slot_rect)
-        pygame.draw.rect(surface, (100, 100, 120), slot_rect, 2)
+        pygame.draw.rect(surface, border_color, slot_rect, 3)
         
         if skill:
-            # Skill name (truncated if too long)
+            # Skill name (truncated if too long) - larger font
             skill_name = getattr(skill, "name", skill_id)
-            if len(skill_name) > 10:
-                skill_name = skill_name[:8] + ".."
-            name_surf = font.render(skill_name, True, (220, 220, 220) if can_use else (120, 120, 120))
-            surface.blit(name_surf, (slot_x + 4, y + 4))
+            if len(skill_name) > 12:
+                skill_name = skill_name[:10] + ".."
+            # Use a slightly larger font for skill names
+            name_font = pygame.font.Font(None, int(font.get_height() * 1.1))
+            name_surf = name_font.render(skill_name, True, (240, 240, 240) if can_use else (140, 140, 140))
+            surface.blit(name_surf, (slot_x + 6, y + 6))
             
-            # Key binding
+            # Key binding - larger and more prominent
             if key_label:
-                key_surf = font.render(key_label, True, (200, 200, 255))
-                surface.blit(key_surf, (slot_x + slot_width - key_surf.get_width() - 4, y + 4))
+                key_font = pygame.font.Font(None, int(font.get_height() * 1.2))
+                key_surf = key_font.render(key_label, True, (150, 200, 255))
+                # Draw key binding with background
+                key_bg = pygame.Rect(slot_x + slot_width - key_surf.get_width() - 10, y + 6, key_surf.get_width() + 8, key_surf.get_height() + 4)
+                pygame.draw.rect(surface, (30, 50, 80), key_bg)
+                pygame.draw.rect(surface, (100, 150, 200), key_bg, 2)
+                surface.blit(key_surf, (slot_x + slot_width - key_surf.get_width() - 6, y + 8))
             
-            # Cooldown
+            # Cooldown - larger text
             if cooldown > 0:
-                cd_surf = font.render(f"CD: {cooldown}", True, (255, 150, 150))
-                surface.blit(cd_surf, (slot_x + 4, y + 20))
+                cd_font = pygame.font.Font(None, int(font.get_height() * 1.1))
+                cd_surf = cd_font.render(f"CD: {cooldown}", True, (255, 150, 150))
+                surface.blit(cd_surf, (slot_x + 6, y + 28))
             
-            # Resource costs
+            # Resource costs - larger and clearer
             cost_parts = []
             cost_colors = []
             if stamina_cost > 0:
@@ -197,15 +217,18 @@ def _draw_battle_skill_hotbar(
                 cost_text = " ".join(cost_parts)
                 # Use first cost color, or default if none
                 final_color = cost_colors[0] if cost_colors else (200, 200, 200)
-                cost_surf = font.render(cost_text, True, final_color)
-                surface.blit(cost_surf, (slot_x + 4, y + 36))
+                cost_font = pygame.font.Font(None, int(font.get_height() * 1.0))
+                cost_surf = cost_font.render(cost_text, True, final_color)
+                surface.blit(cost_surf, (slot_x + 6, y + 50))
         else:
             # Empty slot
             if key_label:
-                key_surf = font.render(key_label, True, (100, 100, 100))
-                surface.blit(key_surf, (slot_x + slot_width - key_surf.get_width() - 4, y + 4))
-            empty_surf = font.render("Empty", True, (80, 80, 80))
-            surface.blit(empty_surf, (slot_x + 4, y + 20))
+                key_font = pygame.font.Font(None, int(font.get_height() * 1.2))
+                key_surf = key_font.render(key_label, True, (100, 100, 100))
+                surface.blit(key_surf, (slot_x + slot_width - key_surf.get_width() - 6, y + 6))
+            empty_font = pygame.font.Font(None, int(font.get_height() * 1.0))
+            empty_surf = empty_font.render("Empty", True, (100, 100, 100))
+            surface.blit(empty_surf, (slot_x + 6, y + 30))
         
         slot_x += slot_width + slot_spacing
 

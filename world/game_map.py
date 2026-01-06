@@ -163,7 +163,11 @@ class GameMap:
         """
         Recompute FOV from (center_tx, center_ty).
         Fills self.visible and updates self.explored.
+        
+        Once a tile is explored, it stays in self.explored permanently,
+        allowing it to remain visible (dimmed) even when out of FOV.
         """
+        # Clear only visible tiles (not explored - those persist)
         self.visible.clear()
 
         if not self.in_bounds(center_tx, center_ty):
@@ -175,6 +179,7 @@ class GameMap:
         self.visible.add((center_tx, center_ty))
         self.explored.add((center_tx, center_ty))
 
+        # Check all tiles in radius
         for ty in range(center_ty - radius, center_ty + radius + 1):
             for tx in range(center_tx - radius, center_tx + radius + 1):
                 if not self.in_bounds(tx, ty):
@@ -186,7 +191,9 @@ class GameMap:
                 if (tx, ty) == (center_tx, center_ty):
                     continue
                 if self._line_of_sight(center_tx, center_ty, tx, ty):
+                    # Add to visible (current FOV)
                     self.visible.add((tx, ty))
+                    # Add to explored (permanent - stays even when out of FOV)
                     self.explored.add((tx, ty))
 
     # ------------------------------------------------------------------
@@ -204,7 +211,7 @@ class GameMap:
         Draw all tiles with fog-of-war, taking camera & zoom into account.
 
         - Never seen              -> black
-        - Explored, not visible   -> darkened
+        - Explored, not visible   -> slightly dimmed but clearly visible (stays "lit")
         - Visible now             -> full color
         """
         screen_w, screen_h = surface.get_size()
@@ -236,16 +243,18 @@ class GameMap:
                 rect = pygame.Rect(sx, sy, tile_screen_size, tile_screen_size)
 
                 if coord not in self.explored:
-                    # Completely unseen
+                    # Completely unseen - pure black
                     pygame.draw.rect(surface, (0, 0, 0), rect)
                     continue
 
                 base_color = tile.color
                 if coord in self.visible:
+                    # Currently visible - full brightness
                     color = base_color
                 else:
-                    # Seen before, but not in current FOV
-                    factor = 0.6  # dim but clearly different from black
+                    # Explored but not currently visible - stays "lit" but slightly dimmed
+                    # Increased from 0.6 to 0.85 for much better visibility
+                    factor = 0.85
                     color = (
                         int(base_color[0] * factor),
                         int(base_color[1] * factor),

@@ -34,6 +34,15 @@ class BattleRenderer:
         """
         self.scene = scene
         self.font = scene.font
+        # Create a larger font for damage numbers
+        try:
+            # Try to get font size from the scene font
+            font_size = scene.font.get_height()
+            # Make damage numbers 1.5x bigger
+            self.damage_font = pygame.font.Font(None, int(font_size * 1.5))
+        except:
+            # Fallback to a fixed larger size
+            self.damage_font = pygame.font.Font(None, 30)
     
     def draw_active_unit_panel(
         self,
@@ -372,9 +381,28 @@ class BattleRenderer:
 
             # Body
             pygame.draw.rect(surface, COLOR_PLAYER, rect)
-            # Highlight active unit
+            # Highlight active unit with pulsing glow
             if active is unit:
-                pygame.draw.rect(surface, (240, 240, 160), rect, width=3)
+                # Pulsing glow effect - use animation_time from scene
+                pulse = (math.sin(self.scene.animation_time * 4.0) + 1.0) / 2.0  # 0 to 1
+                glow_alpha = int(80 + pulse * 100)  # Pulse between 80 and 180 alpha
+                glow_size = 3 + int(pulse * 3)  # Pulse between 3 and 6 pixels
+                
+                # Draw outer glow
+                for i in range(glow_size):
+                    alpha = int(glow_alpha * (1.0 - i / glow_size))
+                    glow_rect = pygame.Rect(
+                        rect.x - i - 1,
+                        rect.y - i - 1,
+                        rect.width + (i + 1) * 2,
+                        rect.height + (i + 1) * 2
+                    )
+                    glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(glow_surf, (255, 255, 150, alpha), glow_surf.get_rect())
+                    surface.blit(glow_surf, (glow_rect.x, glow_rect.y))
+                
+                # Bright border
+                pygame.draw.rect(surface, (255, 255, 150), rect, width=4)
 
             # HP bar
             self.draw_hp_bar(surface, rect, unit, is_player=True)
@@ -424,9 +452,28 @@ class BattleRenderer:
 
             # Body
             pygame.draw.rect(surface, COLOR_ENEMY, rect)
-            # Highlight active unit
+            # Highlight active unit with pulsing glow
             if active is unit:
-                pygame.draw.rect(surface, (255, 200, 160), rect, width=3)
+                # Pulsing glow effect - use animation_time from scene
+                pulse = (math.sin(self.scene.animation_time * 4.0) + 1.0) / 2.0  # 0 to 1
+                glow_alpha = int(80 + pulse * 100)  # Pulse between 80 and 180 alpha
+                glow_size = 3 + int(pulse * 3)  # Pulse between 3 and 6 pixels
+                
+                # Draw outer glow
+                for i in range(glow_size):
+                    alpha = int(glow_alpha * (1.0 - i / glow_size))
+                    glow_rect = pygame.Rect(
+                        rect.x - i - 1,
+                        rect.y - i - 1,
+                        rect.width + (i + 1) * 2,
+                        rect.height + (i + 1) * 2
+                    )
+                    glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(glow_surf, (255, 180, 100, alpha), glow_surf.get_rect())
+                    surface.blit(glow_surf, (glow_rect.x, glow_rect.y))
+                
+                # Bright border
+                pygame.draw.rect(surface, (255, 200, 120), rect, width=4)
             
             # Highlight valid targets in targeting mode
             if unit in valid_targets:
@@ -493,7 +540,8 @@ class BattleRenderer:
             y = self.scene.grid_origin_y + target.gy * self.scene.cell_size - y_offset
             
             # Calculate alpha based on remaining time (fade out)
-            max_time = 1.2 if is_crit else 1.0
+            # Use longer max time for more visibility
+            max_time = 2.0 if is_crit else 1.8
             alpha = min(255, int(255 * (timer / max_time)))
             
             # Color based on crit status and damage
@@ -513,22 +561,25 @@ class BattleRenderer:
                 color = (255, 200, 200)  # Light red for small hits
                 damage_text = f"-{damage}"
             
-            # Render damage text with shadow for visibility
+            # Use larger font for damage numbers
+            damage_font = getattr(self, "damage_font", self.font)
+            
+            # Render damage text with shadow for visibility (larger shadow for bigger text)
             # Shadow
-            shadow_surf = self.font.render(damage_text, True, (0, 0, 0))
-            surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 1, y + 1))
+            shadow_surf = damage_font.render(damage_text, True, (0, 0, 0))
+            surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 2, y + 2))
             # Main text
-            text_surf = self.font.render(damage_text, True, color)
+            text_surf = damage_font.render(damage_text, True, color)
             text_x = x - text_surf.get_width() // 2
             text_y = y
             surface.blit(text_surf, (text_x, text_y))
             
-            # Draw additional crit indicator (star or sparkle)
+            # Draw additional crit indicator (star or sparkle) - bigger for larger font
             if is_crit:
-                crit_size = 8
-                pygame.draw.circle(surface, (255, 255, 200), (x, y - 15), crit_size, 2)
-                pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 15), (x + crit_size, y - 15), 2)
-                pygame.draw.line(surface, (255, 255, 200), (x, y - 15 - crit_size), (x, y - 15 + crit_size), 2)
+                crit_size = 12  # Increased from 8
+                pygame.draw.circle(surface, (255, 255, 200), (x, y - 20), crit_size, 2)
+                pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 20), (x + crit_size, y - 20), 2)
+                pygame.draw.line(surface, (255, 255, 200), (x, y - 20 - crit_size), (x, y - 20 + crit_size), 2)
 
     def draw_hit_sparks(self, surface: pygame.Surface) -> None:
         """Draw hit spark effects at impact locations."""

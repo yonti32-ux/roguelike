@@ -11,7 +11,7 @@ events/draw calls to the active screen when appropriate.
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, TYPE_CHECKING
+from typing import Optional, Protocol, TYPE_CHECKING, Dict, List, Tuple
 
 import pygame
 
@@ -107,128 +107,108 @@ class InventoryScreen:
                 game.cycle_inventory_focus(+1)
                 return
 
-        # Inventory scrolling: arrow keys / W/S for line scroll,
-        # PageUp/PageDown for paging by a full screen.
+        # Get inventory and group items by slot/category
         inventory = getattr(game, "inventory", None)
         if inventory is None:
             return
 
-        items = list(getattr(inventory, "items", []))
-        total_items = len(items)
-        page_size = getattr(game, "inventory_page_size", 20)  # More items visible in fullscreen
-        offset = getattr(game, "inventory_scroll_offset", 0)
-
-        # Normalise offset in case inventory size changed.
-        if total_items <= page_size:
-            offset = 0
-        else:
-            max_offset = max(0, total_items - page_size)
-            if offset < 0:
-                offset = 0
-            elif offset > max_offset:
-                offset = max_offset
-        game.inventory_scroll_offset = offset
-
-        # Line scroll (up / down)
+        from systems.inventory import get_item_def
+        
+        # Group items by slot
+        items_by_slot: Dict[str, List[str]] = {}
+        for item_id in inventory.items:
+            item_def = get_item_def(item_id)
+            if item_def is None:
+                slot = "misc"
+            else:
+                slot = item_def.slot or "misc"
+            if slot not in items_by_slot:
+                items_by_slot[slot] = []
+            items_by_slot[slot].append(item_id)
+        
+        # Build flat list with category markers: (item_id or None for category header, slot_name)
+        flat_list: List[tuple[Optional[str], str]] = []
+        slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
+        for slot in slot_order:
+            if slot in items_by_slot and items_by_slot[slot]:
+                flat_list.append((None, slot))  # Category header
+                for item_id in items_by_slot[slot]:
+                    flat_list.append((item_id, slot))
+        
+        # Add any remaining slots not in the preferred order
+        for slot in sorted(items_by_slot.keys()):
+            if slot not in slot_order and items_by_slot[slot]:
+                flat_list.append((None, slot))  # Category header
+                for item_id in items_by_slot[slot]:
+                    flat_list.append((item_id, slot))
+        
+        total_items = len([x for x in flat_list if x[0] is not None])  # Count only actual items
+        cursor = getattr(game, "inventory_cursor", 0)
+        page_size = getattr(game, "inventory_page_size", 20)
+        
+        # Find the actual item index (skip category headers)
+        item_indices = [i for i, (item_id, _) in enumerate(flat_list) if item_id is not None]
+        if not item_indices:
+            return
+        
+        # Clamp cursor to valid range
+        cursor = max(0, min(cursor, len(item_indices) - 1))
+        game.inventory_cursor = cursor
+        
+        # Get current item index in flat_list
+        current_flat_index = item_indices[cursor]
+        
+        # Cursor navigation (up / down)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.SCROLL_UP, event):
-                if total_items > 0:
-                    offset = max(0, offset - 1)
-                    game.inventory_scroll_offset = offset
+                if cursor > 0:
+                    game.inventory_cursor = cursor - 1
                 return
             if input_manager.event_matches_action(InputAction.SCROLL_DOWN, event):
-                if total_items > 0:
-                    max_offset = max(0, total_items - page_size)
-                    offset = min(max_offset, offset + 1)
-                    game.inventory_scroll_offset = offset
+                if cursor < len(item_indices) - 1:
+                    game.inventory_cursor = cursor + 1
                 return
         else:
             if key in (pygame.K_UP, pygame.K_w):
-                if total_items > 0:
-                    offset = max(0, offset - 1)
-                    game.inventory_scroll_offset = offset
+                if cursor > 0:
+                    game.inventory_cursor = cursor - 1
                 return
             if key in (pygame.K_DOWN, pygame.K_s):
-                if total_items > 0:
-                    max_offset = max(0, total_items - page_size)
-                    offset = min(max_offset, offset + 1)
-                    game.inventory_scroll_offset = offset
+                if cursor < len(item_indices) - 1:
+                    game.inventory_cursor = cursor + 1
                 return
 
-        # Page scroll
+        # Page scroll (move cursor by page_size)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.PAGE_UP, event):
-                if total_items > 0:
-                    offset = max(0, offset - page_size)
-                    game.inventory_scroll_offset = offset
+                game.inventory_cursor = max(0, cursor - page_size)
                 return
             if input_manager.event_matches_action(InputAction.PAGE_DOWN, event):
-                if total_items > 0:
-                    max_offset = max(0, total_items - page_size)
-                    offset = min(max_offset, offset + page_size)
-                    game.inventory_scroll_offset = offset
+                game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
                 return
         else:
             if key == pygame.K_PAGEUP:
-                if total_items > 0:
-                    offset = max(0, offset - page_size)
-                    game.inventory_scroll_offset = offset
+                game.inventory_cursor = max(0, cursor - page_size)
                 return
             if key == pygame.K_PAGEDOWN:
-                if total_items > 0:
-                    max_offset = max(0, total_items - page_size)
-                    offset = min(max_offset, offset + page_size)
-                    game.inventory_scroll_offset = offset
+                game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
                 return
 
-        # Equipping via 1–9 keys on the *current page* (unchanged)
-        index: Optional[int] = None
-        if key in (pygame.K_1, pygame.K_KP1):
-            index = 0
-        elif key in (pygame.K_2, pygame.K_KP2):
-            index = 1
-        elif key in (pygame.K_3, pygame.K_KP3):
-            index = 2
-        elif key in (pygame.K_4, pygame.K_KP4):
-            index = 3
-        elif key in (pygame.K_5, pygame.K_KP5):
-            index = 4
-        elif key in (pygame.K_6, pygame.K_KP6):
-            index = 5
-        elif key in (pygame.K_7, pygame.K_KP7):
-            index = 6
-        elif key in (pygame.K_8, pygame.K_KP8):
-            index = 7
-        elif key in (pygame.K_9, pygame.K_KP9):
-            index = 8
-
-        if index is None:
-            return
-
-        if not items:
-            return
-
-        # Recompute/clamp offset before indexing, in case inventory changed.
-        total_items = len(items)
-        page_size = getattr(game, "inventory_page_size", 10)
-        offset = getattr(game, "inventory_scroll_offset", 0)
-        if total_items <= page_size:
-            offset = 0
+        # Equip selected item with Enter/Space
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                if 0 <= cursor < len(item_indices):
+                    item_id = flat_list[item_indices[cursor]][0]
+                    if item_id:
+                        game.equip_item_for_inventory_focus(item_id)
+                return
         else:
-            max_offset = max(0, total_items - page_size)
-            if offset < 0:
-                offset = 0
-            elif offset > max_offset:
-                offset = max_offset
-        game.inventory_scroll_offset = offset
-
-        visible_items = items[offset:offset + page_size]
-        if not (0 <= index < len(visible_items)):
-            return
-
-        item_id = visible_items[index]
-        # Delegate actual equip logic (hero vs companion) to the Game helper.
-        game.equip_item_for_inventory_focus(item_id)
+            if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                if 0 <= cursor < len(item_indices):
+                    item_id = flat_list[item_indices[cursor]][0]
+                    if item_id:
+                        game.equip_item_for_inventory_focus(item_id)
+                return
 
     def draw(self, game: "Game") -> None:
         """Render the full-screen inventory view."""

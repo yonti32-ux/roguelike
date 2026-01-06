@@ -51,6 +51,39 @@ def _ensure_ai_fields(enemy: "Enemy") -> None:
         enemy.ai_patrol_pause: float = 0.0
 
 
+def _can_move_to_position(
+    entity: "Enemy",
+    new_x: float,
+    new_y: float,
+    game: "Game",
+    exclude_entity: Optional["Enemy"] = None,
+) -> bool:
+    """
+    Check if an entity can move to a position (not blocked by walls or other entities).
+    """
+    new_rect = pygame.Rect(
+        int(new_x),
+        int(new_y),
+        entity.width,
+        entity.height,
+    )
+
+    # Can't walk through walls
+    if not game.current_map.rect_can_move_to(new_rect):
+        return False
+
+    # Don't walk through other blocking entities
+    for other_entity in game.current_map.entities:
+        if other_entity is entity or other_entity is exclude_entity:
+            continue
+        if not getattr(other_entity, "blocks_movement", False):
+            continue
+        if new_rect.colliderect(other_entity.rect):
+            return False
+
+    return True
+
+
 def _move_enemy_towards(
     enemy: "Enemy",
     target_x: float,
@@ -63,7 +96,7 @@ def _move_enemy_towards(
 ) -> None:
     """
     Move enemy towards target while respecting walls, other entities,
-    and optional battle triggering.
+    and optional battle triggering. Uses sliding movement to navigate corners.
     """
     if game.current_map is None or game.player is None:
         return
@@ -80,37 +113,55 @@ def _move_enemy_towards(
     new_x = enemy.x + move_vector.x
     new_y = enemy.y + move_vector.y
 
-    new_rect = pygame.Rect(
-        int(new_x),
-        int(new_y),
-        enemy.width,
-        enemy.height,
-    )
-
-    # Can't walk through walls
-    if not game.current_map.rect_can_move_to(new_rect):
-        return
-
-    # Don't walk through other blocking entities
-    for entity in game.current_map.entities:
-        if entity is enemy:
-            continue
-        if not getattr(entity, "blocks_movement", False):
-            continue
-        if new_rect.colliderect(entity.rect):
+    # Try full diagonal movement first
+    if _can_move_to_position(enemy, new_x, new_y, game):
+        new_rect = pygame.Rect(int(new_x), int(new_y), enemy.width, enemy.height)
+        
+        # If we're allowed to, colliding with the player can trigger battle
+        if allow_battle and new_rect.colliderect(game.player.rect):
+            enemy.x = new_x
+            enemy.y = new_y
+            enemy.rect.topleft = (int(enemy.x), int(enemy.y))
+            if game.post_battle_grace <= 0.0:
+                game.start_battle(enemy)
             return
 
-    # If we're allowed to, colliding with the player can trigger battle
-    if allow_battle and new_rect.colliderect(game.player.rect):
-        enemy.x = new_rect.x
-        enemy.y = new_rect.y
-        enemy.rect.topleft = (int(enemy.x), int(enemy.y))
-        if game.post_battle_grace <= 0.0:
-            game.start_battle(enemy)
+        # Otherwise, move normally
+        enemy.move_to(new_x, new_y)
         return
 
-    # Otherwise, move normally
-    enemy.move_to(new_x, new_y)
+    # If diagonal movement is blocked, try sliding along one axis
+    # Try X-axis movement (horizontal sliding)
+    slide_x = enemy.x + move_vector.x
+    if _can_move_to_position(enemy, slide_x, enemy.y, game):
+        new_rect = pygame.Rect(int(slide_x), int(enemy.y), enemy.width, enemy.height)
+        
+        if allow_battle and new_rect.colliderect(game.player.rect):
+            enemy.x = slide_x
+            enemy.rect.topleft = (int(enemy.x), int(enemy.y))
+            if game.post_battle_grace <= 0.0:
+                game.start_battle(enemy)
+            return
+        
+        enemy.move_to(slide_x, enemy.y)
+        return
+
+    # Try Y-axis movement (vertical sliding)
+    slide_y = enemy.y + move_vector.y
+    if _can_move_to_position(enemy, enemy.x, slide_y, game):
+        new_rect = pygame.Rect(int(enemy.x), int(slide_y), enemy.width, enemy.height)
+        
+        if allow_battle and new_rect.colliderect(game.player.rect):
+            enemy.y = slide_y
+            enemy.rect.topleft = (int(enemy.x), int(enemy.y))
+            if game.post_battle_grace <= 0.0:
+                game.start_battle(enemy)
+            return
+        
+        enemy.move_to(enemy.x, slide_y)
+        return
+
+    # Completely blocked - can't move at all
 
 
 def _update_patrol(enemy: "Enemy", game: "Game", dt: float) -> None:

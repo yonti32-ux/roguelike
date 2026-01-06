@@ -79,6 +79,7 @@ from engine.battle.pathfinding import BattlePathfinding
 from engine.battle.combat import BattleCombat
 from engine.battle.terrain import BattleTerrainManager
 from engine.battle.ai import BattleAI
+from engine.config import get_config
 
 
 
@@ -170,6 +171,7 @@ class BattleScene:
         self.movement_path: List[tuple[int, int]] = []  # Current path preview
         self.movement_target: Optional[tuple[int, int]] = None  # Target cell for movement
         self.mouse_hover_cell: Optional[tuple[int, int]] = None  # Cell currently hovered by mouse
+        self.movement_key_press_count: int = 0  # Track number of movement key presses for looping
 
         # --- Combat log ---
         self.log: List[str] = []
@@ -188,6 +190,9 @@ class BattleScene:
         
         # Hit spark effects - list of {x, y, timer}
         self._hit_sparks: List[Dict] = []
+        
+        # Animation timer for pulsing effects
+        self.animation_time: float = 0.0
 
     def _init_hero_unit(self) -> BattleUnit:
         """Initialize the hero unit with skills, resources, and skill slots."""
@@ -545,7 +550,10 @@ class BattleScene:
         self.finished: bool = False
 
         # Enemy AI timer – small delay so actions are readable
-        self.enemy_timer: float = BATTLE_ENEMY_TIMER
+        # Apply battle speed multiplier (higher speed = faster timer countdown)
+        config = get_config()
+        battle_speed = getattr(config, "battle_speed", 1.0)
+        self.enemy_timer: float = BATTLE_ENEMY_TIMER / battle_speed
 
     def _init_managers(self) -> None:
         """Initialize battle system managers (renderer, pathfinding, combat, AI)."""
@@ -1225,7 +1233,10 @@ class BattleScene:
             if unit.is_alive:
                 self.turn = unit.side
                 if unit.side == "enemy":
-                    self.enemy_timer = BATTLE_ENEMY_TIMER
+                    # Apply battle speed multiplier when resetting timer
+                    config = get_config()
+                    battle_speed = getattr(config, "battle_speed", 1.0)
+                    self.enemy_timer = BATTLE_ENEMY_TIMER / battle_speed
                 else:
                     self.enemy_timer = 0.0
                 self._on_unit_turn_start(unit)
@@ -1261,6 +1272,7 @@ class BattleScene:
         self.movement_mode = True
         self.movement_target = (unit.gx, unit.gy)  # Start at current position
         self.movement_path = [(unit.gx, unit.gy)]
+        self.movement_key_press_count = 0  # Reset press counter
         self._update_movement_path(unit)
     
     def _exit_movement_mode(self) -> None:
@@ -1269,6 +1281,7 @@ class BattleScene:
         self.movement_target = None
         self.movement_path = []
         self.mouse_hover_cell = None
+        self.movement_key_press_count = 0
     
     def _update_movement_path(self, unit: BattleUnit) -> None:
         """Update the movement path preview based on current target."""
@@ -1280,7 +1293,13 @@ class BattleScene:
         if path:
             self.movement_path = path
         else:
+            # Pathfinding failed (out of bounds, obstacle, etc.) - reset to starting position
+            # but keep movement mode active so player can plan a different route
             self.movement_path = [(unit.gx, unit.gy)]
+            # Reset target back to starting position
+            self.movement_target = (unit.gx, unit.gy)
+            # Reset press counter so looping behavior restarts
+            self.movement_key_press_count = 0
     
     def _confirm_movement(self, unit: BattleUnit) -> None:
         """Confirm and execute movement along the current path."""
@@ -1510,13 +1529,13 @@ class BattleScene:
         if not self.movement_mode:
             return False
         
-        # Cancel movement mode
+        # Cancel movement mode (X key, not ESC - ESC is for pause menu)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.CANCEL, event):
                 self._exit_movement_mode()
                 return True
         else:
-            if event.key == pygame.K_ESCAPE:
+            if event.key == pygame.K_x:
                 self._exit_movement_mode()
                 return True
         
@@ -1534,37 +1553,70 @@ class BattleScene:
         if self.movement_target is not None:
             target_gx, target_gy = self.movement_target
             moved = False
+            direction = None  # Track direction for looping
             
             if input_manager is not None:
                 if input_manager.event_matches_action(InputAction.MOVE_UP, event):
                     target_gy = max(0, target_gy - 1)
                     moved = True
+                    direction = (0, -1)
                 elif input_manager.event_matches_action(InputAction.MOVE_DOWN, event):
                     target_gy = min(self.grid_height - 1, target_gy + 1)
                     moved = True
+                    direction = (0, 1)
                 elif input_manager.event_matches_action(InputAction.MOVE_LEFT, event):
                     target_gx = max(0, target_gx - 1)
                     moved = True
+                    direction = (-1, 0)
                 elif input_manager.event_matches_action(InputAction.MOVE_RIGHT, event):
                     target_gx = min(self.grid_width - 1, target_gx + 1)
                     moved = True
+                    direction = (1, 0)
             else:
                 if event.key in (pygame.K_UP, pygame.K_w):
                     target_gy = max(0, target_gy - 1)
                     moved = True
+                    direction = (0, -1)
                 elif event.key in (pygame.K_DOWN, pygame.K_s):
                     target_gy = min(self.grid_height - 1, target_gy + 1)
                     moved = True
+                    direction = (0, 1)
                 elif event.key in (pygame.K_LEFT, pygame.K_a):
                     target_gx = max(0, target_gx - 1)
                     moved = True
+                    direction = (-1, 0)
                 elif event.key in (pygame.K_RIGHT, pygame.K_d):
                     target_gx = min(self.grid_width - 1, target_gx + 1)
                     moved = True
+                    direction = (1, 0)
             
             if moved:
+                self.movement_key_press_count += 1
+                
+                # On the 4th press (and every 4th press after), loop back to first movement point and continue in same direction
+                if self.movement_key_press_count % 4 == 0 and len(self.movement_path) > 1:
+                    # Get the first movement point (second element, since first is starting position)
+                    if len(self.movement_path) >= 2:
+                        first_move = self.movement_path[1]
+                        # Continue in the same direction from the first move point
+                        loop_gx = first_move[0] + direction[0]
+                        loop_gy = first_move[1] + direction[1]
+                        # Clamp to grid bounds
+                        loop_gx = max(0, min(self.grid_width - 1, loop_gx))
+                        loop_gy = max(0, min(self.grid_height - 1, loop_gy))
+                        target_gx, target_gy = loop_gx, loop_gy
+                
                 self.movement_target = (target_gx, target_gy)
                 self._update_movement_path(unit)
+                
+                # If pathfinding failed (path only has starting position), reset target and counter
+                # but keep movement mode active so player can plan a different route
+                if len(self.movement_path) <= 1 and self.movement_target != (unit.gx, unit.gy):
+                    # Path is invalid - reset to starting position
+                    self.movement_target = (unit.gx, unit.gy)
+                    self.movement_key_press_count = 0
+                    self._update_movement_path(unit)
+                
                 return True
         
         return False
@@ -1574,13 +1626,13 @@ class BattleScene:
         if self.targeting_mode is None:
             return False
         
-        # Cancel targeting mode
+        # Cancel targeting mode (X key, not ESC - ESC is for pause menu)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.CANCEL, event):
                 self._exit_targeting_mode()
                 return True
         else:
-            if event.key == pygame.K_ESCAPE:
+            if event.key == pygame.K_x:
                 self._exit_targeting_mode()
                 return True
         
@@ -1752,12 +1804,15 @@ class BattleScene:
     def update(self, dt: float) -> None:
         if self.status != "ongoing":
             return
+        
+        # Update animation time for pulsing effects
+        self.animation_time += dt
 
         # Update floating damage numbers
         for damage_info in self._floating_damage[:]:
             damage_info["timer"] -= dt
-            # Crits float faster and higher
-            speed = 50 if damage_info.get("is_crit", False) else 40
+            # Crits float faster and higher (slightly slower for longer visibility)
+            speed = 45 if damage_info.get("is_crit", False) else 35
             damage_info["y_offset"] += dt * speed
             if damage_info["timer"] <= 0:
                 self._floating_damage.remove(damage_info)
@@ -1984,14 +2039,15 @@ class BattleScene:
                 
                 # Only show hotbar when not in targeting mode
                 if self.targeting_mode is None:
-                    # Draw hotbar on the right side, above hint line
-                    hotbar_y = hint_y - 80
-                    # Calculate hotbar width to position it on the right
+                    # Draw hotbar in a more prominent position - center-bottom, above hint line
                     skill_slots = getattr(active, "skill_slots", [])
-                    slot_width = 100
-                    slot_spacing = 8
+                    slot_width = 140  # Match the new size in hud_battle.py
+                    slot_spacing = 12
                     hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
-                    hotbar_x = screen_w - hotbar_w - 40  # Right side with margin
+                    # Center the hotbar horizontally
+                    hotbar_x = (screen_w - hotbar_w) // 2
+                    # Position it prominently above the hint line with more spacing
+                    hotbar_y = hint_y - 120
                     _draw_battle_skill_hotbar(
                         surface,
                         self.font,
@@ -2019,7 +2075,7 @@ class BattleScene:
                 
                 # Get key bindings for hints
                 confirm_key = "SPACE"
-                cancel_key = "ESC"
+                cancel_key = "X"  # X is now the cancel key (ESC is for pause menu)
                 cycle_key = "ARROWS/TAB"
                 if input_manager is not None:
                     try:
