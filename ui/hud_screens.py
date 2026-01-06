@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Dict, Any
 import pygame
 
 from settings import COLOR_BG
@@ -14,7 +14,93 @@ from systems.economy import (
 
 if TYPE_CHECKING:
     from engine.game import Game
-    from systems.inventory import Inventory
+    from systems.inventory import Inventory, ItemDef
+
+
+def _build_item_stats_summary(stats: Dict[str, float]) -> str:
+    """
+    Build a compact one-line summary from an item's stats dict.
+
+    Example: "ATK +2  DEF +1  HP +10"
+    """
+    if not stats:
+        return ""
+
+    # Preferred order for well-known stats
+    preferred_order = [
+        "attack",
+        "defense",
+        "max_hp",
+        "hp",
+        "max_stamina",
+        "max_mana",
+        "range",
+        "crit_chance",
+    ]
+
+    def _label_for(key: str) -> str:
+        mapping = {
+            "attack": "ATK",
+            "defense": "DEF",
+            "max_hp": "HP",
+            "hp": "HP",
+            "max_stamina": "STA",
+            "max_mana": "MANA",
+            "range": "RNG",
+            "crit_chance": "CRIT",
+        }
+        return mapping.get(key, key.upper())
+
+    def _fmt_value(value: float) -> str:
+        # Show integers without .0, small non-int values with one decimal.
+        if isinstance(value, int) or value.is_integer():
+            v = int(value)
+        else:
+            v = round(value, 1)
+        sign = "+" if v >= 0 else ""
+        return f"{sign}{v}"
+
+    parts: List[str] = []
+
+    # First render preferred keys in order
+    for key in preferred_order:
+        if key in stats:
+            parts.append(f"{_label_for(key)} {_fmt_value(float(stats[key]))}")
+
+    # Then add any remaining keys in alphabetical order
+    remaining_keys = sorted(k for k in stats.keys() if k not in preferred_order)
+    for key in remaining_keys:
+        parts.append(f"{_label_for(key)} {_fmt_value(float(stats[key]))}")
+
+    return "  ".join(parts)
+
+
+def _build_item_info_line(item_def: "ItemDef", include_description: bool = False) -> str:
+    """
+    Build a single compact line for item info.
+
+    By default this only returns a compact stats summary so we don't spam
+    long descriptions in lists. If include_description is True, a short
+    description snippet is appended after the stats.
+    """
+    stats_summary = _build_item_stats_summary(getattr(item_def, "stats", {}) or {})
+    if not include_description:
+        return stats_summary
+
+    desc = (getattr(item_def, "description", "") or "").strip()
+    if not desc:
+        return stats_summary
+
+    # Keep descriptions short so the UI doesn't get bloated horizontally.
+    max_desc_len = 80
+    if len(desc) > max_desc_len:
+        desc = desc[: max_desc_len - 3] + "..."
+
+    if stats_summary:
+        return f"{stats_summary}  |  {desc}"
+    if stats_summary:
+        return stats_summary
+    return desc
 
 
 def _resolve_focus_character(
@@ -158,6 +244,52 @@ def _get_character_display_info(
             equipped_map = {}
     
     return display_name, equipped_map
+
+
+def _get_all_equipped_items(game: "Game") -> dict[str, list[tuple[str, str]]]:
+    """
+    Get all equipped items from hero and all companions.
+    
+    Returns:
+        Dict mapping item_id -> list of (character_name, slot) tuples
+        Example: {"sword_1": [("Hero", "weapon"), ("Companion1", "weapon")]}
+    """
+    equipped_by: dict[str, list[tuple[str, str]]] = {}
+    
+    # Hero's equipped items
+    inv = getattr(game, "inventory", None)
+    if inv is not None:
+        hero_name = getattr(game.hero_stats, "hero_name", "Hero")
+        for slot, item_id in inv.equipped.items():
+            if item_id:
+                if item_id not in equipped_by:
+                    equipped_by[item_id] = []
+                equipped_by[item_id].append((hero_name, slot))
+    
+    # Companions' equipped items
+    party_list: List[CompanionState] = getattr(game, "party", None) or []
+    for comp in party_list:
+        if not isinstance(comp, CompanionState):
+            continue
+        comp_equipped = getattr(comp, "equipped", None) or {}
+        comp_name = getattr(comp, "name_override", None)
+        if not comp_name:
+            from systems.party import get_companion
+            try:
+                template_id = getattr(comp, "template_id", None)
+                if template_id:
+                    template = get_companion(template_id)
+                    comp_name = getattr(template, "name", "Companion")
+            except (KeyError, AttributeError):
+                comp_name = "Companion"
+        
+        for slot, item_id in comp_equipped.items():
+            if item_id:
+                if item_id not in equipped_by:
+                    equipped_by[item_id] = []
+                equipped_by[item_id].append((comp_name, slot))
+    
+    return equipped_by
 
 
 def _draw_equipment_section(
@@ -325,25 +457,47 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         
         visible_items = items[offset : offset + page_size]
         
+        # Get all equipped items from entire party (hero + companions)
+        all_equipped = _get_all_equipped_items(game)
+        
         for idx, item_id in enumerate(visible_items):
             item_def = get_item_def(item_id)
             if item_def is None:
                 continue
             
+            # Build equipped marker showing who has it equipped
             equipped_marker = ""
-            if equipped_map:
-                if equipped_map.get("weapon") == item_id:
-                    equipped_marker = " [W]"
-                elif equipped_map.get("armor") == item_id:
-                    equipped_marker = " [A]"
-                elif equipped_map.get("trinket") == item_id:
-                    equipped_marker = " [T]"
+            if item_id in all_equipped:
+                markers = []
+                for char_name, slot in all_equipped[item_id]:
+                    slot_abbrev = slot[0].upper()  # W, A, or T
+                    # Shorten character names for display
+                    if char_name == "Hero" or char_name.startswith("Hero"):
+                        char_abbrev = "H"
+                    else:
+                        # Use first letter of companion name or "C" for Companion
+                        char_abbrev = char_name[0].upper() if char_name and char_name != "Companion" else "C"
+                    markers.append(f"{slot_abbrev}-{char_abbrev}")
+                if markers:
+                    equipped_marker = " [" + ",".join(markers) + "]"
             
             hotkey = f"[{idx + 1}] " if idx < 9 else ""
             line = f"{hotkey}{item_def.name}{equipped_marker}"
-            t = ui_font.render(line, True, (220, 220, 220))
+            # Use brighter color if equipped by anyone
+            item_color = (255, 255, 200) if equipped_marker else (220, 220, 220)
+            t = ui_font.render(line, True, item_color)
             screen.blit(t, (right_x, y))
-            y += 22
+            y += 20
+
+            # One-line stats/description, slightly dimmer and indented
+            info_line = _build_item_info_line(item_def)
+            if info_line:
+                info_surf = ui_font.render(info_line, True, (170, 170, 170))
+                screen.blit(info_surf, (right_x + 24, y))
+                y += 18
+            else:
+                # Small extra spacing if no info line, to keep rows readable
+                y += 4
         
         # Scroll info
         if total_items > page_size:
@@ -355,7 +509,8 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     
     # Footer hints
     hints = [
-        "1–9: equip item | Q/E: switch character | TAB: switch screen | I/ESC: close"
+        "1–9: equip item | Q/E: switch character | Up/Down/PgUp/PgDn: scroll",
+        "TAB: switch screen | I/ESC: close"
     ]
     _draw_screen_footer(screen, ui_font, hints, w, h)
 
@@ -832,6 +987,35 @@ def draw_shop_fullscreen(game: "Game") -> None:
             screen.blit(price_surf, (left_x + w // 2 - 200, y))
             
             y += line_height
+        
+        # Right column: detailed info for currently selected item
+        if 0 <= cursor < max_items:
+            info_x = w // 2 + 40
+            info_y = 110
+
+            selected_id = active_list[cursor]
+            selected_def = get_item_def(selected_id)
+
+            if selected_def is not None:
+                info_title = ui_font.render("Item Info:", True, (220, 220, 180))
+                screen.blit(info_title, (info_x, info_y))
+                info_y += 26
+
+                # Name + rarity
+                rarity = getattr(selected_def, "rarity", "")
+                if rarity:
+                    name_line = f"{selected_def.name} [{rarity}]"
+                else:
+                    name_line = selected_def.name
+                name_surf = ui_font.render(name_line, True, (235, 235, 220))
+                screen.blit(name_surf, (info_x, info_y))
+                info_y += 24
+
+                # Stats + optional description (shown only for the selected item)
+                info_line = _build_item_info_line(selected_def, include_description=True)
+                if info_line:
+                    info_surf = ui_font.render(info_line, True, (190, 190, 190))
+                    screen.blit(info_surf, (info_x, info_y))
     
     # Footer hints
     if mode == "buy":

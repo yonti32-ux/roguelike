@@ -47,6 +47,7 @@ from systems.party import (
 )
 from systems.enemies import get_archetype  # NEW
 from systems.input import InputAction  # NEW
+from systems.inventory import get_item_def  # NEW: for weapon range
 from ui.hud_battle import (
     _draw_battle_unit_card,
     _draw_battle_skill_hotbar,
@@ -174,9 +175,11 @@ class BattleScene:
         enemies: List[Enemy],
         font: pygame.font.Font,
         companions: Optional[List[object]] = None,
+        game: Optional[object] = None,  # NEW: optional game reference for inventory access
     ) -> None:
         self.player = player
         self.font = font
+        self.game = game  # Store game reference for inventory access
 
         # Grid configuration (battlefield, not dungeon grid)
         # Wider battlefield; origin is centered dynamically in draw().
@@ -652,6 +655,65 @@ class BattleScene:
         """
         return self._enemies_in_range(unit, 1)
 
+    def _get_weapon_range(self, unit: BattleUnit) -> int:
+        """
+        Get the weapon range for a unit. Returns 1 for melee weapons (default).
+        
+        For player: checks equipped weapon in game inventory.
+        For companions: checks equipped weapon in companion state.
+        For enemies: checks weapon_range attribute or archetype.
+        """
+        # Default melee range
+        default_range = 1
+        
+        # Check if it's a player entity
+        if isinstance(unit.entity, Player) and unit.entity is self.player:
+            # Hero: get weapon from game inventory
+            if self.game is not None:
+                inventory = getattr(self.game, "inventory", None)
+                if inventory is not None:
+                    weapon_id = inventory.equipped.get("weapon")
+                    if weapon_id:
+                        weapon_def = get_item_def(weapon_id)
+                        if weapon_def:
+                            range_val = weapon_def.stats.get("range")
+                            if range_val is not None:
+                                return int(range_val)
+        
+        # Check if it's a companion (companions are also Player entities but different instances)
+        # Since only one companion is used in battle, check the first companion in party
+        if self.game is not None and unit.side == "player" and unit.entity is not self.player:
+            party = getattr(self.game, "party", None) or []
+            if party:
+                # Check first companion's equipment (only one companion is used in battle)
+                comp_state = party[0]
+                if hasattr(comp_state, "equipped"):
+                    comp_weapon_id = comp_state.equipped.get("weapon")
+                    if comp_weapon_id:
+                        weapon_def = get_item_def(comp_weapon_id)
+                        if weapon_def:
+                            range_val = weapon_def.stats.get("range")
+                            if range_val is not None:
+                                return int(range_val)
+        
+        # For enemies, check weapon_range attribute or archetype
+        if isinstance(unit.entity, Enemy):
+            # Check direct attribute first
+            if hasattr(unit.entity, "weapon_range"):
+                return int(getattr(unit.entity, "weapon_range", default_range))
+            
+            # Check archetype for weapon info
+            arch_id = getattr(unit.entity, "archetype_id", None)
+            if arch_id:
+                try:
+                    arch = get_archetype(arch_id)
+                    if hasattr(arch, "weapon_range"):
+                        return int(getattr(arch, "weapon_range", default_range))
+                except KeyError:
+                    pass
+        
+        return default_range
+
     def _nearest_target(self, unit: BattleUnit, target_side: Side) -> Optional[BattleUnit]:
         candidates = self.player_units if target_side == "player" else self.enemy_units
         candidates = [u for u in candidates if u.is_alive]
@@ -965,13 +1027,41 @@ class BattleScene:
             self._next_turn()
             return
 
-        adj_enemies = self._adjacent_enemies(unit)
-        if not adj_enemies:
-            self._log("No enemy in range!")
+        # Get weapon range (defaults to 1 for melee)
+        weapon_range = self._get_weapon_range(unit)
+        
+        # Find enemies in weapon range
+        enemies_in_range = self._enemies_in_range(unit, weapon_range)
+        if not enemies_in_range:
+            if weapon_range > 1:
+                self._log(f"No enemy in range! (weapon range: {weapon_range})")
+            else:
+                self._log("No enemy in range!")
             return
 
-        target_unit = adj_enemies[0]
-        damage = self._apply_damage(unit, target_unit, unit.attack_power)
+        # Choose nearest target (prefer closer targets for ranged weapons)
+        target_unit = min(
+            enemies_in_range,
+            key=lambda u: abs(u.gx - unit.gx) + abs(u.gy - unit.gy)
+        )
+        
+        # Calculate distance for damage falloff (ranged weapons)
+        distance = abs(target_unit.gx - unit.gx) + abs(target_unit.gy - unit.gy)
+        base_damage = unit.attack_power
+        
+        # Apply damage falloff for ranged attacks at longer distances
+        # At max range, deal 85% damage (slight penalty for accuracy)
+        if weapon_range > 1 and distance > 1:
+            # Linear falloff: 100% at range 1, 85% at max range
+            falloff_factor = 1.0 - (0.15 * (distance - 1) / (weapon_range - 1))
+            base_damage = int(base_damage * falloff_factor)
+            base_damage = max(1, base_damage)  # Always deal at least 1 damage
+        
+        damage = self._apply_damage(unit, target_unit, base_damage)
+        
+        # Different attack messages for ranged vs melee
+        is_ranged = weapon_range > 1
+        attack_verb = "shoots" if is_ranged else "hits"
 
         if not target_unit.is_alive:
             if not any(
@@ -986,9 +1076,9 @@ class BattleScene:
                     self._log(f"{unit.name} destroys the last of your party!")
                 return
             else:
-                self._log(f"{unit.name} slays {target_unit.name} ({damage} dmg).")
+                self._log(f"{unit.name} {attack_verb} and slays {target_unit.name} ({damage} dmg).")
         else:
-            self._log(f"{unit.name} hits {target_unit.name} for {damage} dmg.")
+            self._log(f"{unit.name} {attack_verb} {target_unit.name} for {damage} dmg.")
 
         self._next_turn()
 
@@ -1140,6 +1230,10 @@ class BattleScene:
             self._next_turn()
             return
 
+        # Get weapon range for this unit
+        weapon_range = self._get_weapon_range(unit)
+        is_ranged = weapon_range > 1
+        
         # First, see if any offensive skills have a target in range.
         offensive_skills = [
             s
@@ -1147,8 +1241,6 @@ class BattleScene:
             if s.target_mode == "adjacent_enemy" and s.base_power > 0.0
         ]
         random.shuffle(offensive_skills)
-
-        any_adjacent = bool(self._enemies_in_range(unit, 1))
 
         for skill in offensive_skills:
             max_range = getattr(skill, "range_tiles", 1)
@@ -1162,12 +1254,14 @@ class BattleScene:
                     # _use_skill handles logging, damage, win checks, and _next_turn()
                     return
 
-        # If we are adjacent to someone but didn't use a skill, fall back to basic attack.
-        if any_adjacent:
+        # Check if we can attack with our weapon (basic attack)
+        enemies_in_weapon_range = self._enemies_in_range(unit, weapon_range)
+        if enemies_in_weapon_range:
+            # We have a target in range, attack!
             self._perform_basic_attack(unit)
             return
 
-        # Otherwise, move towards the nearest player.
+        # No target in weapon range - need to move
         target = self._nearest_target(unit, "player")
         if target is None:
             # All players are dead / gone; battle should end elsewhere, but be safe:
@@ -1175,11 +1269,53 @@ class BattleScene:
             self._log("The foes scatter.")
             return
 
-        moved = self._step_towards(unit, target)
-        if moved:
-            self._log(f"{unit.name} advances.")
+        # For ranged units, try to maintain optimal distance (not too close, not too far)
+        if is_ranged:
+            distance = abs(target.gx - unit.gx) + abs(target.gy - unit.gy)
+            # If we're too close (within 1 tile), try to step back
+            if distance <= 1:
+                # Try to move away from target
+                dx = unit.gx - target.gx
+                dy = unit.gy - target.gy
+                # Normalize to get direction away from target
+                if dx != 0 or dy != 0:
+                    step_x = 0
+                    step_y = 0
+                    if abs(dx) >= abs(dy) and dx != 0:
+                        step_x = 1 if dx > 0 else -1
+                    elif dy != 0:
+                        step_y = 1 if dy > 0 else -1
+                    
+                    if step_x != 0 or step_y != 0:
+                        if self._try_move_unit(unit, step_x, step_y):
+                            self._log(f"{unit.name} backs away.")
+                            self._next_turn()
+                            return
+            # If we're out of range, move closer
+            elif distance > weapon_range:
+                moved = self._step_towards(unit, target)
+                if moved:
+                    self._log(f"{unit.name} advances.")
+                else:
+                    self._log(f"{unit.name} hesitates.")
+                self._next_turn()
+                return
+            # We're in optimal range but no target? This shouldn't happen, but move anyway
+            else:
+                moved = self._step_towards(unit, target)
+                if moved:
+                    self._log(f"{unit.name} repositions.")
+                else:
+                    self._log(f"{unit.name} hesitates.")
+                self._next_turn()
+                return
         else:
-            self._log(f"{unit.name} hesitates.")
+            # Melee unit: always move towards target
+            moved = self._step_towards(unit, target)
+            if moved:
+                self._log(f"{unit.name} advances.")
+            else:
+                self._log(f"{unit.name} hesitates.")
 
         self._next_turn()
 

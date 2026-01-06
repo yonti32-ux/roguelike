@@ -561,12 +561,18 @@ class ExplorationController:
             game.last_message = "You have nothing to trade with."
             return
 
-        stock = get_shop_stock_for_floor(game.floor)
-        if not stock:
-            game.last_message = "No merchants are trading here right now."
-            return
+        # Reuse existing stock if this merchant was already opened on this floor,
+        # so the shop inventory doesn't fully refresh every time you step out.
+        existing_stock = list(getattr(game, "shop_stock", []))
+        if existing_stock:
+            stock = existing_stock
+        else:
+            stock = get_shop_stock_for_floor(game.floor)
+            if not stock:
+                game.last_message = "No merchants are trading here right now."
+                return
 
-        # Attach transient shop state to the Game object.
+        # Attach (or reattach) shop state to the Game object.
         game.shop_stock = stock
         game.shop_cursor = 0
         game.shop_mode = "buy"
@@ -613,11 +619,8 @@ class ExplorationController:
             game.last_message = "You can't afford that."
             return
 
-        # Deduct gold using add_gold(-price) if available
-        if hasattr(game.hero_stats, "add_gold"):
-            game.hero_stats.add_gold(-price)
-        else:
-            game.hero_stats.gold = hero_gold - price
+        # Deduct gold directly; HeroStats.add_gold is for positive amounts only.
+        game.hero_stats.gold = hero_gold - price
 
         # Grant the item
         game.inventory.add_item(item_id)

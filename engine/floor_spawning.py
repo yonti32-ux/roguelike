@@ -560,6 +560,11 @@ def spawn_merchants_for_floor(game_map: GameMap, floor_index: int) -> None:
         for tx, ty in candidate_tiles:
             if (tx, ty) in occupied_tiles:
                 continue
+            # Never spawn merchants on stairs tiles
+            if up is not None and (tx, ty) == up:
+                continue
+            if down is not None and (tx, ty) == down:
+                continue
             chosen_tx, chosen_ty = tx, ty
             break
 
@@ -593,7 +598,7 @@ def ensure_debug_merchant_on_floor_three(
     Debug / testing helper:
 
     On floor 3, if no Merchant was spawned (e.g. no 'shop' room on that
-    seed), force-spawn a single Merchant on the DOWN stairs tile.
+    seed), force-spawn a single Merchant near the DOWN stairs tile (but not ON it).
 
     This guarantees a merchant for testing without affecting other floors.
     """
@@ -605,19 +610,84 @@ def ensure_debug_merchant_on_floor_three(
         if isinstance(entity, Merchant):
             return
 
-    # Choose the down-stairs tile if possible; otherwise fall back
-    if game_map.down_stairs is not None:
-        tx, ty = game_map.down_stairs
+    # Find a walkable tile near the down stairs (but not ON the stairs)
+    up = game_map.up_stairs
+    down = game_map.down_stairs
+    
+    # Get occupied tiles
+    occupied_tiles: set[tuple[int, int]] = set()
+    for entity in getattr(game_map, "entities", []):
+        if not hasattr(entity, "rect"):
+            continue
+        cx, cy = entity.rect.center
+        tx, ty = game_map.world_to_tile(cx, cy)
+        occupied_tiles.add((tx, ty))
+    
+    # Start from down stairs position, or center if no stairs
+    if down is not None:
+        start_tx, start_ty = down
     else:
-        tx = game_map.width // 2
-        ty = game_map.height // 2
+        start_tx = game_map.width // 2
+        start_ty = game_map.height // 2
+
+    # Search for a nearby walkable tile (not on stairs, not occupied)
+    chosen_tx: Optional[int] = None
+    chosen_ty: Optional[int] = None
+    
+    # Search in expanding radius around the stairs
+    for radius in range(1, 5):
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                if abs(dx) < radius and abs(dy) < radius:
+                    continue  # Only check the perimeter of this radius
+                tx = start_tx + dx
+                ty = start_ty + dy
+                
+                if tx < 0 or tx >= game_map.width or ty < 0 or ty >= game_map.height:
+                    continue
+                if not game_map.is_walkable_tile(tx, ty):
+                    continue
+                if up is not None and (tx, ty) == up:
+                    continue
+                if down is not None and (tx, ty) == down:
+                    continue
+                if (tx, ty) in occupied_tiles:
+                    continue
+                
+                chosen_tx, chosen_ty = tx, ty
+                break
+            
+            if chosen_tx is not None:
+                break
+        if chosen_tx is not None:
+            break
+    
+    # Fallback: just find any walkable tile
+    if chosen_tx is None:
+        for ty in range(game_map.height):
+            for tx in range(game_map.width):
+                if not game_map.is_walkable_tile(tx, ty):
+                    continue
+                if up is not None and (tx, ty) == up:
+                    continue
+                if down is not None and (tx, ty) == down:
+                    continue
+                if (tx, ty) in occupied_tiles:
+                    continue
+                chosen_tx, chosen_ty = tx, ty
+                break
+            if chosen_tx is not None:
+                break
+    
+    if chosen_tx is None or chosen_ty is None:
+        return  # Can't find a valid spot
 
     merchant_w = TILE_SIZE // 2
     merchant_h = TILE_SIZE // 2
 
     mx, my = game_map.center_entity_on_tile(
-        tx,
-        ty,
+        chosen_tx,
+        chosen_ty,
         merchant_w,
         merchant_h,
     )

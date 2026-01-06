@@ -51,7 +51,8 @@
     "value": 1,
     "description": "A strip of leather and a pocket of stones.",
     "stats": {
-      "attack": 1
+      "attack": 1,
+      "range": 2
     }
   },
   {
@@ -117,7 +118,8 @@
     "value": 3,
     "description": "Warped wood and frayed string, but arrows are arrows.",
     "stats": {
-      "attack": 2
+      "attack": 2,
+      "range": 3
     }
   },
   {
@@ -227,7 +229,8 @@
     "value": 10,
     "description": "Layered horn and wood for better punch.",
     "stats": {
-      "attack": 5
+      "attack": 5,
+      "range": 3
     }
   },
   {
@@ -261,7 +264,8 @@
     "value": 12,
     "description": "Slow to reload, fast to end arguments.",
     "stats": {
-      "attack": 6
+      "attack": 6,
+      "range": 4
     }
   },
   {
@@ -340,7 +344,8 @@
     "description": "The string thrums like distant thunder when loosed.",
     "stats": {
       "attack": 7,
-      "skill_power": 0.1
+      "skill_power": 0.1,
+      "range": 4
     }
   },
   {
@@ -453,7 +458,8 @@
     "description": "Arrows fly straighter—as if the wind itself agrees.",
     "stats": {
       "attack": 9,
-      "skill_power": 0.22
+      "skill_power": 0.22,
+      "range": 5
     }
   },
   {

@@ -25,6 +25,7 @@ from systems.progression import HeroStats
 from systems import perks as perk_system
 from systems.inventory import Inventory, get_item_def
 from systems.loot import roll_battle_loot
+from systems.party import CompanionState, get_companion, recalc_companion_stats_for_level
 
 from ui.hud_exploration import (
     draw_exploration_ui,
@@ -841,6 +842,7 @@ class Game:
             encounter_enemies,
             self.ui_font,
             companions=companions_for_battle,
+            game=self,  # Pass game reference for inventory access
         )
         self.enter_battle_mode()
 
