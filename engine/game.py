@@ -92,8 +92,13 @@ class Game:
         # Store generated floors so layouts/enemies persist
         self.floors: dict[int, GameMap] = {}
 
-        # Simple UI font
-        self.ui_font = pygame.font.SysFont("consolas", 20)
+        # UI scaling - calculate based on screen size
+        screen_w, screen_h = self.screen.get_size()
+        from ui.ui_scaling import get_ui_scale, get_scaled_font
+        self.ui_scale = get_ui_scale(screen_w, screen_h)
+        
+        # Simple UI font (scaled)
+        self.ui_font = get_scaled_font("consolas", 20, self.ui_scale)
 
         # --- Last battle log (for viewing in exploration) ---
         self.last_battle_log: List[str] = []
@@ -149,16 +154,40 @@ class Game:
         self.awaiting_floor_start: bool = True
 
         # Camera & zoom (exploration view)
+        # Calculate default zoom based on screen size
+        # More aggressive zoom scaling to make maps fill the screen better
+        resolution_scale = min(screen_w / WINDOW_WIDTH, screen_h / WINDOW_HEIGHT)
+        if resolution_scale > 1.0:
+            # At higher resolutions, scale zoom more aggressively to keep game world visible
+            # Use 0.7 multiplier instead of 0.5 for more zoom
+            default_zoom = min(1.0 + (resolution_scale - 1.0) * 0.7, 3.0)  # Increased cap to 3.0x
+        else:
+            default_zoom = max(resolution_scale, 0.5)
+        
+        # Set zoom levels around the default (wider range for more zoom options)
+        self.zoom_levels = [
+            default_zoom * 0.7,   # More zoomed out option
+            default_zoom,          # Default
+            default_zoom * 1.4     # More zoomed in option
+        ]
+        self.zoom_index: int = 1  # start at default zoom
+        
         self.camera_x: float = 0.0
         self.camera_y: float = 0.0
-        self.zoom_levels = [0.75, 1.0, 1.25]
-        self.zoom_index: int = 1  # start at 1.0x
 
         # Debug flags
         self.debug_reveal_map: bool = False
 
         # Display mode
         self.fullscreen: bool = False
+
+        # Reload flag for in-game loading (set by load handler, checked by main loop)
+        self._reload_slot: Optional[int] = None
+
+        # Pause menu state
+        self.paused: bool = False
+        self._return_to_main_menu: bool = False
+        self._quit_game: bool = False
 
         # Initialize hero stats, perks, items and gold for the chosen class
         init_hero_for_class(self, hero_class_id)
@@ -649,6 +678,14 @@ class Game:
 
         # Update the game's screen reference
         self.screen = new_screen
+        
+        # Recalculate UI scale for new screen size
+        screen_w, screen_h = self.screen.get_size()
+        from ui.ui_scaling import get_ui_scale, get_scaled_font
+        self.ui_scale = get_ui_scale(screen_w, screen_h)
+        
+        # Recreate UI font with new scale
+        self.ui_font = get_scaled_font("consolas", 20, self.ui_scale)
 
         # Re-center / clamp camera to fit the new viewport
         self._center_camera_on_player()
@@ -1051,10 +1088,80 @@ class Game:
             self.battle_scene = None
 
     # ------------------------------------------------------------------
+    # Pause menu handling
+    # ------------------------------------------------------------------
+
+    def _handle_pause_menu(self) -> None:
+        """Open pause menu and handle user selection."""
+        from engine.pause_menu import PauseMenuScene, OptionsMenuScene
+        from engine.save_menu import SaveMenuScene
+        from engine.save_system import save_game, load_game
+        
+        # Draw current game state first (so it's visible behind pause overlay)
+        if self.mode == GameMode.EXPLORATION:
+            self.draw_exploration()
+        elif self.mode == GameMode.BATTLE:
+            self.draw_battle()
+        pygame.display.flip()
+        
+        self.paused = True
+        pause_menu = PauseMenuScene(self.screen)
+        choice = pause_menu.run()
+        self.paused = False
+        
+        if choice is None or choice == "resume":
+            return
+        
+        elif choice == "save":
+            # Open save menu
+            save_menu = SaveMenuScene(self.screen, mode="save")
+            selected_slot = save_menu.run()
+            if selected_slot is not None:
+                if save_game(self, slot=selected_slot):
+                    self.add_message(f"Game saved to slot {selected_slot}!")
+                else:
+                    self.add_message("Failed to save game.")
+        
+        elif choice == "load":
+            # Open load menu
+            load_menu = SaveMenuScene(self.screen, mode="load")
+            selected_slot = load_menu.run()
+            if selected_slot is not None:
+                # Set reload flag for main loop
+                self._reload_slot = selected_slot
+                self.add_message(f"Loading game from slot {selected_slot}...")
+        
+        elif choice == "options":
+            # Show options/controls screen
+            from engine.resolution_menu import ResolutionMenuScene
+            options_menu = OptionsMenuScene(self.screen)
+            sub_choice = options_menu.run()
+            
+            if sub_choice == "resolution":
+                # Open resolution menu
+                res_menu = ResolutionMenuScene(self.screen)
+                result = res_menu.run()
+                if result is not None:
+                    width, height, match_desktop = result
+                    self.add_message(f"Resolution set to {width}x{height}. Restart to apply.")
+        
+        elif choice == "main_menu":
+            # Signal to return to main menu (set a flag for main loop)
+            self._return_to_main_menu = True
+        
+        elif choice == "quit":
+            # Signal to quit (set a flag for main loop)
+            self._quit_game = True
+
+    # ------------------------------------------------------------------
     # Main loop: update
     # ------------------------------------------------------------------
 
     def update(self, dt: float) -> None:
+        # Don't update game logic when paused
+        if self.paused:
+            return
+        
         if self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
                 self.post_battle_grace = max(0.0, self.post_battle_grace - dt)
@@ -1086,6 +1193,21 @@ class Game:
         Dispatch events based on current game mode.
         Global debug / cheat keys are processed first.
         """
+        # Pause menu (ESC) - check before other handlers
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            # Don't pause if we're in a modal screen (let it handle ESC)
+            if getattr(self, "active_screen", None) is not None:
+                # Let the active screen handle ESC (it will close itself)
+                pass
+            else:
+                # Toggle pause menu
+                self._handle_pause_menu()
+                return
+        
+        # If paused, only handle resume/unpause
+        if self.paused:
+            return
+        
         # Cheats: handle global debug keys, consume the event if needed.
         if handle_cheat_key(self, event):
             return
@@ -1094,6 +1216,45 @@ class Game:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
             self.toggle_fullscreen()
             return
+        
+        # Global save/load game
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_F5:
+                # Quick save to slot 1
+                from engine.save_system import save_game
+                if save_game(self, slot=1):
+                    self.add_message("Game saved to slot 1!")
+                else:
+                    self.add_message("Failed to save game.")
+                return
+            elif event.key == pygame.K_F6:
+                # Open save menu
+                from engine.save_menu import SaveMenuScene
+                from engine.save_system import save_game
+                save_menu = SaveMenuScene(self.screen, mode="save")
+                selected_slot = save_menu.run()
+                if selected_slot is not None:
+                    if save_game(self, slot=selected_slot):
+                        self.add_message(f"Game saved to slot {selected_slot}!")
+                    else:
+                        self.add_message("Failed to save game.")
+                return
+            elif event.key == pygame.K_F7:
+                # Open load menu
+                from engine.save_menu import SaveMenuScene
+                from engine.save_system import load_game, list_saves
+                load_menu = SaveMenuScene(self.screen, mode="load")
+                selected_slot = load_menu.run()
+                if selected_slot is not None:
+                    # Check if save exists
+                    saves = list_saves()
+                    if selected_slot in saves:
+                        # Set reload flag - main loop will handle the actual reload
+                        self._reload_slot = selected_slot
+                        self.add_message(f"Loading game from slot {selected_slot}...")
+                    else:
+                        self.add_message("No save found in that slot.")
+                return
 
         # Mode-specific handling.
         if self.mode == GameMode.EXPLORATION:
@@ -1138,6 +1299,9 @@ class Game:
                 from settings import FPS
                 dt = 1.0 / FPS  # Approximate dt for cursor blink
                 self.skill_screen.update(dt)
+        
+        # Draw pause overlay if paused (pause menu handles its own drawing)
+        # The pause menu is drawn by _handle_pause_menu, so we don't need to draw it here
 
         # Flip the final composed frame to the screen.
         pygame.display.flip()

@@ -4,6 +4,9 @@ import pygame
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TITLE, FPS
 from engine.game import Game
 from engine.character_creation import CharacterCreationScene
+from engine.main_menu import MainMenuScene
+from engine.save_menu import SaveMenuScene
+from engine.save_system import load_game
 
 TELEMETRY_ENABLED = False  # flip to True when needed
 
@@ -42,7 +45,13 @@ def main() -> None:
     pygame.init()
     pygame.display.set_caption(TITLE)
 
-    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    # Load resolution settings
+    from engine.config import load_config
+    config = load_config()
+    width, height = config.get_resolution()
+    
+    # Create screen with configured resolution
+    screen = pygame.display.set_mode((width, height))
     clock = pygame.time.Clock()
 
     # Init telemetry file (relative to repo root next to main.py)
@@ -51,29 +60,102 @@ def main() -> None:
         telemetry_path = Path(__file__).resolve().parent / "telemetry" / "telemetry.jsonl"
         telemetry.init(telemetry_path)
 
-    # --- Character creation: choose class + name ---
-    creation_scene = CharacterCreationScene(screen)
-    result = creation_scene.run()
+    # --- Main Menu ---
+    main_menu = MainMenuScene(screen)
+    menu_choice = main_menu.run()
 
-    if result is None:
-        telemetry.log("quit_during_character_creation")
+    if menu_choice is None:
+        telemetry.log("quit_from_main_menu")
         pygame.quit()
         sys.exit()
 
-    selected_class_id, hero_name = result
-    telemetry.log("character_created", hero_class_id=selected_class_id, hero_name=hero_name)
+    # Handle menu choice
+    if menu_choice == "quit":
+        telemetry.log("quit_from_main_menu")
+        pygame.quit()
+        sys.exit()
+    
+    elif menu_choice == "options":
+        # Show options menu (resolution settings)
+        from engine.pause_menu import OptionsMenuScene
+        from engine.resolution_menu import ResolutionMenuScene
+        options_menu = OptionsMenuScene(screen)
+        sub_choice = options_menu.run()
+        
+        if sub_choice == "resolution":
+            res_menu = ResolutionMenuScene(screen)
+            result = res_menu.run()
+            if result is not None:
+                # Resolution changed, need to restart to apply
+                print("Resolution changed. Please restart the game to apply the new resolution.")
+                # Recreate screen with new resolution
+                width, height, match_desktop = result
+                screen = pygame.display.set_mode((width, height))
+                # Go back to main menu so user can continue or restart
+                main_menu = MainMenuScene(screen)
+                menu_choice = main_menu.run()
+                if menu_choice is None or menu_choice == "quit":
+                    pygame.quit()
+                    sys.exit()
+                # Continue with the new menu choice (fall through)
+        else:
+            # User cancelled options, go back to main menu
+            main_menu = MainMenuScene(screen)
+            menu_choice = main_menu.run()
+            if menu_choice is None or menu_choice == "quit":
+                pygame.quit()
+                sys.exit()
+            # Continue with the new menu choice (fall through)
+    
+    if menu_choice == "load_game":
+        # Show save selection menu
+        save_menu = SaveMenuScene(screen, mode="load")
+        selected_slot = save_menu.run()
+        
+        if selected_slot is None:
+            # User cancelled, go back to main menu
+            pygame.quit()
+            sys.exit()
+        
+        # Load the selected save
+        game = load_game(screen, slot=selected_slot)
+        
+        if game is None:
+            # Failed to load, show error and exit
+            print(f"Failed to load save slot {selected_slot}")
+            pygame.quit()
+            sys.exit()
+        
+        telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
+    
+    if menu_choice == "new_game":
+        # --- Character creation: choose class + name ---
+        creation_scene = CharacterCreationScene(screen)
+        result = creation_scene.run()
 
-    # Start game with the chosen class
-    game = Game(screen, hero_class_id=selected_class_id)
+        if result is None:
+            telemetry.log("quit_during_character_creation")
+            pygame.quit()
+            sys.exit()
 
-    # Store the chosen name on hero_stats
-    game.hero_stats.hero_name = hero_name
+        selected_class_id, hero_name = result
+        telemetry.log("character_created", hero_class_id=selected_class_id, hero_name=hero_name)
 
-    # Sync stats + name into the Player entity
-    if game.player is not None:
-        game.apply_hero_stats_to_player(full_heal=True)
+        # Start game with the chosen class
+        game = Game(screen, hero_class_id=selected_class_id)
 
-    telemetry.log("game_start", **_game_snapshot(game))
+        # Store the chosen name on hero_stats
+        game.hero_stats.hero_name = hero_name
+
+        # Sync stats + name into the Player entity
+        if game.player is not None:
+            game.apply_hero_stats_to_player(full_heal=True)
+
+        telemetry.log("game_start", **_game_snapshot(game))
+    else:
+        # Should not reach here, but handle gracefully
+        pygame.quit()
+        sys.exit()
 
     # --- Main loop ---
     running = True
@@ -115,6 +197,66 @@ def main() -> None:
                 telemetry.log("pygame_event", frame=frame, type="MOUSEBUTTONDOWN", button=event.button, pos=list(event.pos))
 
             game.handle_event(event)
+            
+            # Check for return to main menu request
+            if hasattr(game, "_return_to_main_menu") and game._return_to_main_menu:
+                # Return to main menu
+                main_menu = MainMenuScene(screen)
+                menu_choice = main_menu.run()
+                
+                if menu_choice is None or menu_choice == "quit":
+                    running = False
+                    continue
+                
+                # Handle menu choice (similar to initial menu handling)
+                if menu_choice == "load_game":
+                    save_menu = SaveMenuScene(screen, mode="load")
+                    selected_slot = save_menu.run()
+                    if selected_slot is None:
+                        running = False
+                        continue
+                    game = load_game(screen, slot=selected_slot)
+                    if game is None:
+                        print(f"Failed to load save slot {selected_slot}")
+                        running = False
+                        continue
+                    telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
+                elif menu_choice == "new_game":
+                    creation_scene = CharacterCreationScene(screen)
+                    result = creation_scene.run()
+                    if result is None:
+                        running = False
+                        continue
+                    selected_class_id, hero_name = result
+                    game = Game(screen, hero_class_id=selected_class_id)
+                    game.hero_stats.hero_name = hero_name
+                    if game.player is not None:
+                        game.apply_hero_stats_to_player(full_heal=True)
+                    telemetry.log("game_start", **_game_snapshot(game))
+                
+                game._return_to_main_menu = False
+                continue
+            
+            # Check for quit game request
+            if hasattr(game, "_quit_game") and game._quit_game:
+                running = False
+                continue
+
+        # Check for in-game reload request
+        if hasattr(game, "_reload_slot") and game._reload_slot is not None:
+            reload_slot = game._reload_slot
+            game._reload_slot = None  # Clear flag
+            
+            # Load the new game (use the imported function from top of file)
+            loaded_game = load_game(screen, slot=reload_slot)
+            if loaded_game is not None:
+                game = loaded_game
+                telemetry.log("game_reloaded_in_game", slot=reload_slot, **_game_snapshot(game))
+            else:
+                # Failed to load, show error message
+                if hasattr(game, "add_message"):
+                    game.add_message("Failed to load game.")
+                print(f"Failed to load save slot {reload_slot}")
 
         try:
             game.update(dt)

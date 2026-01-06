@@ -8,6 +8,7 @@ from systems.events import get_event_def
 from systems.party import CompanionState, get_companion, ensure_companion_stats
 from world.entities import Enemy
 from ui.hud_utils import _draw_bar, _draw_resource_bar_with_label, _draw_compact_unit_card
+from ui.ui_scaling import scale_value
 
 if TYPE_CHECKING:
     from engine.game import Game
@@ -62,49 +63,52 @@ def _draw_hero_panel(
     if def_bonus:
         def_label += f" (+{def_bonus})"
 
-    # Calculate panel height
-    panel_h = 8  # top padding
-    panel_h += 22  # name line
-    panel_h += 20  # floor/level line
+    # Get UI scale
+    ui_scale = getattr(game, "ui_scale", 1.0)
+    
+    # Calculate panel height (scaled)
+    panel_h = scale_value(8, ui_scale)  # top padding
+    panel_h += scale_value(22, ui_scale)  # name line
+    panel_h += scale_value(20, ui_scale)  # floor/level line
     if getattr(game, "debug_reveal_map", False):
-        panel_h += 20
-    panel_h += 32  # HP bar
-    panel_h += 24  # XP bar
+        panel_h += scale_value(20, ui_scale)
+    panel_h += scale_value(32, ui_scale)  # HP bar
+    panel_h += scale_value(24, ui_scale)  # XP bar
     if hero_max_stamina > 0:
-        panel_h += 34  # Stamina bar
+        panel_h += scale_value(34, ui_scale)  # Stamina bar
     if hero_max_mana > 0:
-        panel_h += 34  # Mana bar
-    panel_h += 6  # spacing before stats
-    panel_h += 22  # stats line
-    panel_h += 10  # bottom padding
+        panel_h += scale_value(34, ui_scale)  # Mana bar
+    panel_h += scale_value(6, ui_scale)  # spacing before stats
+    panel_h += scale_value(22, ui_scale)  # stats line
+    panel_h += scale_value(10, ui_scale)  # bottom padding
 
     # Create panel surface
     panel_surf = pygame.Surface((width, panel_h), pygame.SRCALPHA)
     panel_surf.fill((0, 0, 0, 120))
     
-    text_x = 10
-    y_pos = 8
+    text_x = scale_value(10, ui_scale)
+    y_pos = scale_value(8, ui_scale)
 
     # Header
     name_text = ui_font.render(f"{hero_name} ({hero_class_label})", True, (245, 245, 230))
     panel_surf.blit(name_text, (text_x, y_pos))
     gold_text = ui_font.render(f"{gold}g", True, (230, 210, 120))
-    panel_surf.blit(gold_text, (width - gold_text.get_width() - 10, y_pos))
-    y_pos += 22
+    panel_surf.blit(gold_text, (width - gold_text.get_width() - scale_value(10, ui_scale), y_pos))
+    y_pos += scale_value(22, ui_scale)
 
     floor_level_text = ui_font.render(f"Floor {game.floor} | Lv {game.hero_stats.level}", True, (220, 220, 220))
     panel_surf.blit(floor_level_text, (text_x, y_pos))
-    y_pos += 20
+    y_pos += scale_value(20, ui_scale)
 
     if getattr(game, "debug_reveal_map", False):
         dbg = ui_font.render("DEBUG: Full map reveal ON.", True, (240, 210, 120))
         panel_surf.blit(dbg, (text_x, y_pos))
-        y_pos += 20
+        y_pos += scale_value(20, ui_scale)
 
     # Resource bars
     bar_x = text_x
-    bar_w = width - 20
-    bar_h = 10
+    bar_w = width - scale_value(20, ui_scale)
+    bar_h = scale_value(10, ui_scale)
 
     y_pos = _draw_resource_bar_with_label(
         panel_surf, ui_font, bar_x, y_pos, bar_w, bar_h,
@@ -114,14 +118,14 @@ def _draw_hero_panel(
 
     xp_text = ui_font.render(f"XP {xp_cur}/{xp_needed}", True, (220, 220, 160))
     panel_surf.blit(xp_text, (bar_x, y_pos))
-    y_pos += 18
-    _draw_bar(panel_surf, bar_x, y_pos, bar_w, 6, xp_ratio, (40, 40, 60), (190, 190, 90), (255, 255, 255))
-    y_pos += 10
+    y_pos += scale_value(18, ui_scale)
+    _draw_bar(panel_surf, bar_x, y_pos, bar_w, scale_value(6, ui_scale), xp_ratio, (40, 40, 60), (190, 190, 90), (255, 255, 255))
+    y_pos += scale_value(10, ui_scale)
 
     if hero_max_stamina > 0:
         current_stamina = max(0, min(current_stamina, hero_max_stamina))
         y_pos = _draw_resource_bar_with_label(
-            panel_surf, ui_font, bar_x, y_pos, bar_w, 8,
+            panel_surf, ui_font, bar_x, y_pos, bar_w, scale_value(8, ui_scale),
             "STA", current_stamina, hero_max_stamina,
             (200, 230, 200), (30, 50, 30), (80, 200, 80), (255, 255, 255)
         )
@@ -129,17 +133,17 @@ def _draw_hero_panel(
     if hero_max_mana > 0:
         current_mana = max(0, min(current_mana, hero_max_mana))
         y_pos = _draw_resource_bar_with_label(
-            panel_surf, ui_font, bar_x, y_pos, bar_w, 8,
+            panel_surf, ui_font, bar_x, y_pos, bar_w, scale_value(8, ui_scale),
             "MANA", current_mana, hero_max_mana,
             (180, 210, 255), (20, 40, 60), (80, 120, 220), (255, 255, 255)
         )
 
     # Stats line
-    y_pos += 6
+    y_pos += scale_value(6, ui_scale)
     atk_text = ui_font.render(atk_label, True, (200, 200, 200))
     def_text = ui_font.render(def_label, True, (200, 200, 200))
     panel_surf.blit(atk_text, (text_x, y_pos))
-    def_x = width - def_text.get_width() - 10
+    def_x = width - def_text.get_width() - scale_value(10, ui_scale)
     panel_surf.blit(def_text, (def_x, y_pos))
 
     # Blit panel to surface
@@ -248,11 +252,14 @@ def draw_exploration_ui(game: "Game") -> None:
     player = game.player
 
     screen_w, screen_h = screen.get_size()
+    
+    # Get UI scale from game
+    ui_scale = getattr(game, "ui_scale", 1.0)
 
     # --- Hero panel (top-left) ---
-    panel_x = 8
-    panel_y = 8
-    panel_w = 340
+    panel_x = scale_value(8, ui_scale)
+    panel_y = scale_value(8, ui_scale)
+    panel_w = scale_value(340, ui_scale)
     hero_panel_bottom = _draw_hero_panel(screen, ui_font, game, panel_x, panel_y, panel_w)
 
     # --------------------------------------------------------------
@@ -262,20 +269,20 @@ def draw_exploration_ui(game: "Game") -> None:
     if party_list:
         party_panel_w = panel_w
         party_panel_x = panel_x
-        party_panel_y = hero_panel_bottom + 12  # More spacing to avoid cutting stats
-        card_height = 28  # Smaller cards
-        card_spacing = 3
-        party_panel_h = 6 + len(party_list) * (card_height + card_spacing)
+        party_panel_y = hero_panel_bottom + scale_value(12, ui_scale)  # More spacing to avoid cutting stats
+        card_height = scale_value(28, ui_scale)  # Smaller cards
+        card_spacing = scale_value(3, ui_scale)
+        party_panel_h = scale_value(6, ui_scale) + len(party_list) * (card_height + card_spacing)
         
         party_surf = pygame.Surface((party_panel_w, party_panel_h), pygame.SRCALPHA)
         party_surf.fill((0, 0, 0, 120))  # More transparent (was 180)
         
         # Title
         party_title = ui_font.render("Party", True, (220, 220, 180))
-        party_surf.blit(party_title, (8, 2))
+        party_surf.blit(party_title, (scale_value(8, ui_scale), scale_value(2, ui_scale)))
         
         # Draw companion cards
-        card_y = 20
+        card_y = scale_value(20, ui_scale)
         for comp in party_list:
             if isinstance(comp, CompanionState):
                 try:
@@ -290,7 +297,7 @@ def draw_exploration_ui(game: "Game") -> None:
                 is_alive = comp_hp > 0
                 
                 _draw_compact_unit_card(
-                    party_surf, ui_font, 4, card_y, party_panel_w - 8,
+                    party_surf, ui_font, scale_value(4, ui_scale), card_y, party_panel_w - scale_value(8, ui_scale),
                     comp_name, comp_hp, comp_max_hp, is_alive
                 )
                 card_y += card_height + card_spacing
@@ -302,22 +309,22 @@ def draw_exploration_ui(game: "Game") -> None:
     context_lines = _gather_context_hints(game, game_map, player)
 
     if context_lines:
-        line_h = 20
-        ctx_h = 8 + len(context_lines) * line_h
+        line_h = scale_value(20, ui_scale)
+        ctx_h = scale_value(8, ui_scale) + len(context_lines) * line_h
         ctx_w = panel_w
         ctx_x = panel_x
         # Position context panel below party panel if it exists, otherwise below hero panel
         if party_list:
             party_panel_bottom = party_panel_y + party_panel_h
-            ctx_y = party_panel_bottom + 8
+            ctx_y = party_panel_bottom + scale_value(8, ui_scale)
         else:
-            ctx_y = hero_panel_bottom + 10
+            ctx_y = hero_panel_bottom + scale_value(10, ui_scale)
 
         ctx_surf = pygame.Surface((ctx_w, ctx_h), pygame.SRCALPHA)
         ctx_surf.fill((0, 0, 0, 120))  # More transparent (was 150)
         screen.blit(ctx_surf, (ctx_x, ctx_y))
 
-        y_ui = ctx_y + 4
+        y_ui = ctx_y + scale_value(4, ui_scale)
         for text in context_lines:
             color = (180, 200, 220)
             if any(word in text for word in ("dangerous", "hostile", "enemy")):
@@ -325,21 +332,21 @@ def draw_exploration_ui(game: "Game") -> None:
             elif "wealth" in text or "chest" in text:
                 color = (220, 210, 160)
             hint_surf = ui_font.render(text, True, color)
-            screen.blit(hint_surf, (ctx_x + 8, y_ui))
+            screen.blit(hint_surf, (ctx_x + scale_value(8, ui_scale), y_ui))
             y_ui += line_h
 
     # Bottom message band
-    band_h = 52
+    band_h = scale_value(52, ui_scale)
     band_y = screen_h - band_h
     band_surf = pygame.Surface((screen_w, band_h), pygame.SRCALPHA)
     band_surf.fill((0, 0, 0, 190))
     screen.blit(band_surf, (0, band_y))
 
-    msg_y = band_y + 8
+    msg_y = band_y + scale_value(8, ui_scale)
     last_msg = getattr(game, "last_message", "")
     if last_msg:
         msg_text = ui_font.render(last_msg, True, (200, 200, 200))
-        screen.blit(msg_text, (10, msg_y))
+        screen.blit(msg_text, (scale_value(10, ui_scale), msg_y))
 
     hint_text = ui_font.render(
         "Move WASD/arrows | '.' down ',' up | E: interact | C: sheet | I: inventory | "
@@ -347,31 +354,31 @@ def draw_exploration_ui(game: "Game") -> None:
         True,
         (170, 170, 170),
     )
-    screen.blit(hint_text, (10, band_y + band_h - 24))
+    screen.blit(hint_text, (scale_value(10, ui_scale), band_y + band_h - scale_value(24, ui_scale)))
 
     # Overlays: battle log
     if getattr(game, "show_battle_log", False) and getattr(game, "last_battle_log", None):
         max_lines = 8
         lines = game.last_battle_log[-max_lines:]  # type: ignore[index]
 
-        line_height = 18
-        log_width = 520
-        log_height = 10 + len(lines) * line_height + 24
+        line_height = scale_value(18, ui_scale)
+        log_width = scale_value(520, ui_scale)
+        log_height = scale_value(10, ui_scale) + len(lines) * line_height + scale_value(24, ui_scale)
 
         overlay = pygame.Surface((log_width, log_height), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 190))
-        overlay_x = 8
-        overlay_y = 150
+        overlay_x = scale_value(8, ui_scale)
+        overlay_y = scale_value(150, ui_scale)
         screen.blit(overlay, (overlay_x, overlay_y))
 
-        y_log = overlay_y + 6
+        y_log = overlay_y + scale_value(6, ui_scale)
         for line in lines:
             txt = ui_font.render(str(line), True, (220, 220, 220))
-            screen.blit(txt, (overlay_x + 6, y_log))
+            screen.blit(txt, (overlay_x + scale_value(6, ui_scale), y_log))
             y_log += line_height
 
         close_txt = ui_font.render("Press L to hide battle log", True, (160, 160, 160))
-        screen.blit(close_txt, (overlay_x + 6, overlay_y + log_height - line_height - 4))
+        screen.blit(close_txt, (overlay_x + scale_value(6, ui_scale), overlay_y + log_height - line_height - scale_value(4, ui_scale)))
 
     # Exploration log overlay
     if getattr(game, "show_exploration_log", False):
@@ -382,19 +389,19 @@ def draw_exploration_ui(game: "Game") -> None:
         max_lines = 10
         lines = history[-max_lines:]
 
-        line_height = 18
-        padding_x = 8
-        padding_y = 6
-        title_height = 22
+        line_height = scale_value(18, ui_scale)
+        padding_x = scale_value(8, ui_scale)
+        padding_y = scale_value(6, ui_scale)
+        title_height = scale_value(22, ui_scale)
 
-        log_width = min(520, screen_w - 16)
-        log_height = padding_y * 2 + title_height + len(lines) * line_height + 20
+        log_width = min(scale_value(520, ui_scale), screen_w - scale_value(16, ui_scale))
+        log_height = padding_y * 2 + title_height + len(lines) * line_height + scale_value(20, ui_scale)
 
         overlay = pygame.Surface((log_width, log_height), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 190))
 
-        overlay_x = screen_w - log_width - 8
-        overlay_y = max(8, band_y - log_height - 8)
+        overlay_x = screen_w - log_width - scale_value(8, ui_scale)
+        overlay_y = max(scale_value(8, ui_scale), band_y - log_height - scale_value(8, ui_scale))
         screen.blit(overlay, (overlay_x, overlay_y))
 
         y_log = overlay_y + padding_y
@@ -418,6 +425,6 @@ def draw_exploration_ui(game: "Game") -> None:
         )
         screen.blit(
             close_txt,
-            (overlay_x + padding_x, overlay_y + log_height - line_height - 4),
+            (overlay_x + padding_x, overlay_y + log_height - line_height - scale_value(4, ui_scale)),
         )
 

@@ -8,6 +8,9 @@ import pygame
 if TYPE_CHECKING:
     from .game import Game
 
+# Global cheat mode flag (toggled with F9)
+_cheat_mode_enabled = False
+
 
 def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
     """
@@ -15,11 +18,31 @@ def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
 
     Returns True if the event was consumed (i.e. we performed a cheat and
     the normal input handler should NOT also process this key).
+    
+    Cheats are only active when cheat mode is enabled (toggle with F9).
     """
+    global _cheat_mode_enabled
+    
     if event.type != pygame.KEYDOWN:
         return False
 
     key = event.key
+
+    # ------------------------------------------------------------------
+    # F9: Toggle cheat mode on/off
+    # ------------------------------------------------------------------
+    if key == pygame.K_F9:
+        _cheat_mode_enabled = not _cheat_mode_enabled
+        game.last_message = (
+            "[CHEAT MODE] Enabled. Press F9 again to disable."
+            if _cheat_mode_enabled
+            else "[CHEAT MODE] Disabled."
+        )
+        return True
+
+    # All other cheats require cheat mode to be enabled
+    if not _cheat_mode_enabled:
+        return False
 
     # ------------------------------------------------------------------
     # F1: Toggle full-map reveal (ignore FOV radius)
@@ -67,10 +90,10 @@ def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
         return True
 
     # ------------------------------------------------------------------
-    # F5: Skip to next floor
+    # F8: Skip to next floor (moved from F5 to avoid conflict with save)
     #      (only if not in battle, to avoid weirdness)
     # ------------------------------------------------------------------
-    if key == pygame.K_F5:
+    if key == pygame.K_F8:
         from .game import GameMode  # local import to avoid cycles
 
         if game.mode != GameMode.BATTLE:
