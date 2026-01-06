@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 import random
-import copy
 
 from .inventory import ItemDef, get_item_def
 
@@ -83,9 +82,6 @@ def randomize_item(item_id: str, floor_index: int = 1) -> Optional[ItemDef]:
     if random.random() > RANDOMIZATION_CHANCE:
         return base_item  # Return original, no randomization
     
-    # Create a copy to modify
-    randomized = copy.deepcopy(base_item)
-    
     # Get variation range for this rarity
     rarity = base_item.rarity.lower()
     variation_range = STAT_VARIATION_RANGES.get(rarity, (0.95, 1.05))
@@ -123,18 +119,28 @@ def randomize_item(item_id: str, floor_index: int = 1) -> Optional[ItemDef]:
         
         new_stats[stat_name] = new_value
     
-    randomized.stats = new_stats
-    
-    # Optional: Add flavor prefix/suffix (10% chance for extra flavor)
+    # Create new name (with optional prefix/suffix)
+    new_name = base_item.name
     if random.random() < 0.1:
         if random.random() > 0.5:
             # Add prefix
             prefix = random.choice(RANDOM_PREFIXES)
-            randomized.name = f"{prefix} {randomized.name}"
+            new_name = f"{prefix} {base_item.name}"
         else:
             # Add suffix
             suffix = random.choice(RANDOM_SUFFIXES)
-            randomized.name = f"{randomized.name} {suffix}"
+            new_name = f"{base_item.name} {suffix}"
+    
+    # Create a new ItemDef instance (since it's frozen, we can't modify it)
+    randomized = ItemDef(
+        id=base_item.id,
+        name=new_name,
+        slot=base_item.slot,
+        description=base_item.description,
+        stats=new_stats,
+        rarity=base_item.rarity,
+        value=base_item.value,
+    )
     
     return randomized
 

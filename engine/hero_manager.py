@@ -41,7 +41,7 @@ def init_hero_for_class(game: "Game", hero_class_id: str) -> None:
     # Fresh inventory and starting items
     game.inventory = Inventory()
     for item_id in class_def.starting_items:
-        game.inventory.add_item(item_id)
+        game.inventory.add_item(item_id, randomized=False)
 
     # Auto-equip one item per slot if available
     for slot in ("weapon", "armor", "trinket"):
