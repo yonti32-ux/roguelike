@@ -639,6 +639,168 @@ def _build_core_skills() -> None:
         )
     )
 
+    # --- Additional Enemy-Only Skills ------------------------------------------
+
+    # Life Drain: Attack that heals the enemy
+    life_drain = register(
+        Skill(
+            id="life_drain",
+            name="Life Drain",
+            description="Drain life from the target, healing yourself for 50% of damage dealt.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=1.2,
+            uses_skill_power=False,
+            cooldown=4,
+            # Healing handled in battle AI
+        )
+    )
+
+    # Mark Target: Next attack on marked target deals extra damage
+    mark_target = register(
+        Skill(
+            id="mark_target",
+            name="Mark Target",
+            description="Mark the target, causing them to take 25% more damage from all sources for 3 turns.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=3,
+            make_target_status=lambda: StatusEffect(
+                name="marked",
+                duration=3,
+                incoming_mult=1.25,
+            ),
+        )
+    )
+
+    # Berserker Rage: Low HP triggers damage boost (self-buff)
+    berserker_rage = register(
+        Skill(
+            id="berserker_rage",
+            name="Berserker Rage",
+            description="Enter a rage, increasing damage dealt by 50% for 3 turns.",
+            key=None,  # AI-only
+            target_mode="self",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=5,
+            make_self_status=lambda: StatusEffect(
+                name="berserker_rage",
+                duration=3,
+                outgoing_mult=1.5,
+            ),
+        )
+    )
+
+    # Regeneration: Passive HP regen each turn
+    regeneration = register(
+        Skill(
+            id="regeneration",
+            name="Regeneration",
+            description="Begin regenerating health each turn for 4 turns.",
+            key=None,  # AI-only
+            target_mode="self",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=6,
+            make_self_status=lambda: StatusEffect(
+                name="regenerating",
+                duration=4,
+                # Regen handled in battle AI (heals 2 HP per turn)
+            ),
+        )
+    )
+
+    # Counter Attack: Retaliates when hit (status that triggers on next hit)
+    counter_attack = register(
+        Skill(
+            id="counter_attack",
+            name="Counter Stance",
+            description="Prepare to counter the next attack, dealing 1.5x damage back.",
+            key=None,  # AI-only
+            target_mode="self",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=4,
+            make_self_status=lambda: StatusEffect(
+                name="counter_stance",
+                duration=2,
+                # Counter handled in battle AI
+            ),
+        )
+    )
+
+    # Disease: Stacking DoT (like poison but stacks)
+    disease_strike = register(
+        Skill(
+            id="disease_strike",
+            name="Disease Strike",
+            description="Infect the target with a stacking disease that deals damage over time.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=0.9,
+            uses_skill_power=False,
+            cooldown=3,
+            make_target_status=lambda: StatusEffect(
+                name="diseased",
+                duration=3,
+                stacks=1,
+                flat_damage_each_turn=1,  # Stacks increase damage
+            ),
+        )
+    )
+
+    # Fear: AoE stun effect
+    fear_scream = register(
+        Skill(
+            id="fear_scream",
+            name="Fear Scream",
+            description="Scream in terror, stunning all nearby enemies for 1 turn.",
+            key=None,  # AI-only
+            target_mode="self",  # Affects all adjacent enemies
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=5,
+            # Stun applied to all adjacent enemies in battle AI
+        )
+    )
+
+    # Heal Ally: Support skill for healing other enemies
+    heal_ally = register(
+        Skill(
+            id="heal_ally",
+            name="Heal Ally",
+            description="Restore health to an injured ally.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",  # Actually targets allies, handled in AI
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=4,
+            # Healing handled in battle AI
+        )
+    )
+
+    # Buff Ally: Support skill for buffing other enemies
+    buff_ally = register(
+        Skill(
+            id="buff_ally",
+            name="Empower Ally",
+            description="Grant an ally increased damage for 3 turns.",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",  # Actually targets allies, handled in AI
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=4,
+            make_target_status=lambda: StatusEffect(
+                name="empowered",
+                duration=3,
+                outgoing_mult=1.3,
+            ),
+        )
+    )
+
     # guard / power_strike / crippling_blow / heavy_slam / poison_strike / dark_hex / feral_claws / war_cry
     # plus lunge / shield_bash / focus_blast / nimble_step variables are not used further,
     # but keeping them named makes it obvious what we're defining.

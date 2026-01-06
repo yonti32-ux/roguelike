@@ -84,27 +84,41 @@ def generate_floor(
     base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
     base_area = base_tiles_x * base_tiles_y
 
-    if floor_index <= 2:
-        # Mostly "normal" size, sometimes slightly bigger
-        scales = [1.0, 1.5]
-        weights = [0.7, 0.3]
-    elif floor_index <= 5:
-        # Mixed: normal, mid, and big floors
-        scales = [1.0, 1.5, 2.0]
+    # Progressive scaling: start smaller, get bigger as you go deeper
+    # Minimum scale ensures maps aren't too small (0.75x = ~75% of screen)
+    if floor_index == 1:
+        # First floor: smaller maps
+        scales = [0.75, 0.85, 0.95]
         weights = [0.4, 0.4, 0.2]
+    elif floor_index == 2:
+        # Second floor: slightly bigger
+        scales = [0.85, 0.95, 1.0]
+        weights = [0.3, 0.4, 0.3]
+    elif floor_index <= 4:
+        # Floors 3-4: normal to slightly bigger
+        scales = [0.95, 1.0, 1.25]
+        weights = [0.2, 0.5, 0.3]
+    elif floor_index <= 6:
+        # Floors 5-6: mixed normal and bigger
+        scales = [1.0, 1.25, 1.5]
+        weights = [0.3, 0.4, 0.3]
+    elif floor_index <= 8:
+        # Floors 7-8: mostly bigger
+        scales = [1.25, 1.5, 1.75]
+        weights = [0.2, 0.5, 0.3]
     else:
-        # Deep floors: almost always larger than one screen
-        scales = [1.5, 2.0]
-        weights = [0.5, 0.5]
+        # Deep floors (9+): large maps
+        scales = [1.5, 1.75, 2.0]
+        weights = [0.3, 0.4, 0.3]
 
     scale = random.choices(scales, weights=weights, k=1)[0]
 
     tiles_x = int(base_tiles_x * scale)
     tiles_y = int(base_tiles_y * scale)
 
-    # Safety clamp so we don't go insane in either direction
-    tiles_x = max(base_tiles_x, min(tiles_x, base_tiles_x * 2))
-    tiles_y = max(base_tiles_y, min(tiles_y, base_tiles_y * 2))
+    # Safety clamp: minimum 0.75x (not too small), maximum 2.0x
+    tiles_x = max(int(base_tiles_x * 0.75), min(tiles_x, base_tiles_x * 2))
+    tiles_y = max(int(base_tiles_y * 0.75), min(tiles_y, base_tiles_y * 2))
 
     tiles = _create_empty_map(tiles_x, tiles_y)
 

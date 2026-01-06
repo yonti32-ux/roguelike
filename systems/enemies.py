@@ -401,6 +401,216 @@ def _build_enemy_archetypes() -> None:
         )
     )
 
+    # --- New Tier 1 Enemies ----------------------------------------------------
+
+    register_archetype(
+        EnemyArchetype(
+            id="goblin_shaman",
+            name="Goblin Shaman",
+            role="Support",
+            tier=1,
+            ai_profile="caster",
+            base_hp=9,
+            hp_per_floor=1.0,
+            base_attack=3,
+            atk_per_floor=0.6,
+            base_defense=0,
+            def_per_floor=0.2,
+            base_xp=8,
+            xp_per_floor=1.2,
+            skill_ids=[
+                "heal_ally",
+                "buff_ally",
+                "dark_hex",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="skeleton_archer",
+            name="Skeleton Archer",
+            role="Skirmisher",
+            tier=1,
+            ai_profile="skirmisher",
+            base_hp=10,
+            hp_per_floor=1.0,
+            base_attack=5,
+            atk_per_floor=0.8,
+            base_defense=0,
+            def_per_floor=0.2,
+            base_xp=7,
+            xp_per_floor=1.1,
+            skill_ids=[
+                "mark_target",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="dire_rat",
+            name="Dire Rat",
+            role="Skirmisher",
+            tier=1,
+            ai_profile="skirmisher",
+            base_hp=8,
+            hp_per_floor=0.8,
+            base_attack=4,
+            atk_per_floor=0.7,
+            base_defense=0,
+            def_per_floor=0.1,
+            base_xp=5,
+            xp_per_floor=0.9,
+            skill_ids=[
+                "disease_strike",
+                "nimble_step",
+            ],
+        )
+    )
+
+    # --- New Tier 2 Enemies ----------------------------------------------------
+
+    register_archetype(
+        EnemyArchetype(
+            id="necromancer",
+            name="Necromancer",
+            role="Support",
+            tier=2,
+            ai_profile="caster",
+            base_hp=20,
+            hp_per_floor=1.9,
+            base_attack=6,
+            atk_per_floor=1.0,
+            base_defense=1,
+            def_per_floor=0.3,
+            base_xp=17,
+            xp_per_floor=2.1,
+            skill_ids=[
+                "dark_hex",
+                "heal_ally",
+                "life_drain",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="shadow_stalker",
+            name="Shadow Stalker",
+            role="Skirmisher",
+            tier=2,
+            ai_profile="skirmisher",
+            base_hp=16,
+            hp_per_floor=1.6,
+            base_attack=8,
+            atk_per_floor=1.1,
+            base_defense=0,
+            def_per_floor=0.3,
+            base_xp=16,
+            xp_per_floor=2.0,
+            skill_ids=[
+                "mark_target",
+                "poison_strike",
+                "nimble_step",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="stone_golem",
+            name="Stone Golem",
+            role="Brute",
+            tier=2,
+            ai_profile="brute",
+            base_hp=32,
+            hp_per_floor=2.5,
+            base_attack=6,
+            atk_per_floor=0.9,
+            base_defense=4,
+            def_per_floor=0.6,
+            base_xp=18,
+            xp_per_floor=2.2,
+            skill_ids=[
+                "heavy_slam",
+                "counter_attack",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="banshee",
+            name="Banshee",
+            role="Invoker",
+            tier=2,
+            ai_profile="caster",
+            base_hp=19,
+            hp_per_floor=1.8,
+            base_attack=7,
+            atk_per_floor=1.2,
+            base_defense=0,
+            def_per_floor=0.3,
+            base_xp=19,
+            xp_per_floor=2.3,
+            skill_ids=[
+                "fear_scream",
+                "dark_hex",
+                "berserker_rage",  # Enrages when low HP
+            ],
+        )
+    )
+
+    # --- New Tier 3 Enemies ----------------------------------------------------
+
+    register_archetype(
+        EnemyArchetype(
+            id="lich",
+            name="Lich",
+            role="Elite Support",
+            tier=3,
+            ai_profile="caster",
+            base_hp=35,
+            hp_per_floor=2.8,
+            base_attack=10,
+            atk_per_floor=1.4,
+            base_defense=2,
+            def_per_floor=0.6,
+            base_xp=28,
+            xp_per_floor=3.2,
+            skill_ids=[
+                "life_drain",
+                "dark_hex",
+                "heal_ally",
+                "regeneration",
+            ],
+        )
+    )
+
+    register_archetype(
+        EnemyArchetype(
+            id="dragonkin",
+            name="Dragonkin",
+            role="Elite Brute",
+            tier=3,
+            ai_profile="brute",
+            base_hp=45,
+            hp_per_floor=3.2,
+            base_attack=12,
+            atk_per_floor=1.6,
+            base_defense=3,
+            def_per_floor=0.7,
+            base_xp=30,
+            xp_per_floor=3.5,
+            skill_ids=[
+                "heavy_slam",
+                "berserker_rage",
+                "war_cry",
+            ],
+        )
+    )
+
 
 # ---------------------------------------------------------------------------
 # Pack templates
@@ -530,6 +740,151 @@ def _build_enemy_packs() -> None:
             ],
             preferred_room_tag="lair",
             weight=1.2,
+        )
+    )
+
+    # --- New Synergistic Packs -------------------------------------------------
+
+    # Tier 1: Goblin pack with shaman support
+    register_pack(
+        EnemyPackTemplate(
+            id="goblin_warband",
+            name="Goblin Warband",
+            tier=1,
+            member_arch_ids=[
+                "goblin_brute",
+                "goblin_skirmisher",
+                "goblin_shaman",
+            ],
+            preferred_room_tag="lair",
+            weight=1.3,
+        )
+    )
+
+    # Tier 1: Swarm of rats
+    register_pack(
+        EnemyPackTemplate(
+            id="rat_swarm",
+            name="Rat Swarm",
+            tier=1,
+            member_arch_ids=[
+                "dire_rat",
+                "dire_rat",
+                "dire_rat",
+            ],
+            preferred_room_tag=None,
+            weight=1.1,
+        )
+    )
+
+    # Tier 1: Skeleton archers with support
+    register_pack(
+        EnemyPackTemplate(
+            id="skeleton_ambush",
+            name="Skeleton Ambush",
+            tier=1,
+            member_arch_ids=[
+                "skeleton_archer",
+                "skeleton_archer",
+                "goblin_shaman",
+            ],
+            preferred_room_tag=None,
+            weight=1.2,
+        )
+    )
+
+    # Tier 2: Necromancer with undead minions
+    register_pack(
+        EnemyPackTemplate(
+            id="necromancer_retinue",
+            name="Necromancer's Retinue",
+            tier=2,
+            member_arch_ids=[
+                "necromancer",
+                "ghoul_ripper",
+                "ghoul_ripper",
+            ],
+            preferred_room_tag="event",
+            weight=1.4,
+        )
+    )
+
+    # Tier 2: Shadow stalkers working together
+    register_pack(
+        EnemyPackTemplate(
+            id="shadow_hunters",
+            name="Shadow Hunters",
+            tier=2,
+            member_arch_ids=[
+                "shadow_stalker",
+                "shadow_stalker",
+                "dark_adept",
+            ],
+            preferred_room_tag=None,
+            weight=1.3,
+        )
+    )
+
+    # Tier 2: Tanky golem with support
+    register_pack(
+        EnemyPackTemplate(
+            id="golem_guardians",
+            name="Golem Guardians",
+            tier=2,
+            member_arch_ids=[
+                "stone_golem",
+                "necromancer",
+            ],
+            preferred_room_tag="lair",
+            weight=1.3,
+        )
+    )
+
+    # Tier 2: Banshee with undead
+    register_pack(
+        EnemyPackTemplate(
+            id="haunted_encounter",
+            name="Haunted Encounter",
+            tier=2,
+            member_arch_ids=[
+                "banshee",
+                "ghoul_ripper",
+                "ghoul_ripper",
+            ],
+            preferred_room_tag="event",
+            weight=1.2,
+        )
+    )
+
+    # Tier 3: Lich with powerful minions
+    register_pack(
+        EnemyPackTemplate(
+            id="lich_court",
+            name="Lich's Court",
+            tier=3,
+            member_arch_ids=[
+                "lich",
+                "dread_knight",
+                "cultist_harbinger",
+            ],
+            preferred_room_tag="lair",
+            weight=1.5,
+        )
+    )
+
+    # Tier 3: Dragonkin boss encounter
+    register_pack(
+        EnemyPackTemplate(
+            id="dragonkin_warriors",
+            name="Dragonkin Warriors",
+            tier=3,
+            member_arch_ids=[
+                "dragonkin",
+                "orc_raider",
+                "orc_raider",
+            ],
+            preferred_room_tag="lair",
+            weight=1.4,
         )
     )
 

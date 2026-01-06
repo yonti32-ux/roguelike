@@ -15,11 +15,11 @@ COLOR_ENEMY = (200, 80, 80)
 TILE_SIZE = 32
 
 # Battle settings
-BATTLE_GRID_WIDTH = 11
-BATTLE_GRID_HEIGHT = 5
-BATTLE_CELL_SIZE = 80
+BATTLE_GRID_WIDTH = 15  # Increased for larger parties and tactical positioning
+BATTLE_GRID_HEIGHT = 7  # Increased for more vertical space
+BATTLE_CELL_SIZE = 70  # Slightly smaller to fit larger grid on screen
 BATTLE_ENEMY_TIMER = 0.6
-MAX_BATTLE_ENEMIES = 3
+MAX_BATTLE_ENEMIES = 6  # Increased to match larger grid
 BATTLE_AI_DEFENSIVE_HP_THRESHOLD = 0.4
 BATTLE_AI_SKILL_CHANCE = 0.4
 BATTLE_AI_DEFENSIVE_SKILL_CHANCE = 0.5
@@ -53,3 +53,12 @@ BATTLE_ENEMY_START_COL_OFFSET = 3  # Enemies start this many columns from right 
 # Critical hit settings
 BASE_CRIT_CHANCE = 0.10  # 10% base critical hit chance
 CRIT_DAMAGE_MULTIPLIER = 1.75  # Critical hits deal 1.75x damage
+
+# Battle terrain settings
+COVER_DAMAGE_REDUCTION = 0.5  # Cover reduces ranged damage by 50%
+FLANKING_DAMAGE_BONUS = 1.25  # Flanking attacks deal +25% damage
+TERRAIN_SPAWN_CHANCE = 0.3  # 30% chance each cell spawns terrain
+
+# Movement system
+BASE_MOVEMENT_POINTS = 3  # Base movement points per turn
+HAZARD_MOVEMENT_COST = 2  # Hazards cost extra movement (1 + 1 = 2 total)
