@@ -13,6 +13,10 @@ from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot, get_shop_stock_for_floor
 from systems.events import get_event_def, EventResult  # NEW
+from systems.economy import (
+    calculate_shop_buy_price,
+    calculate_shop_sell_price,
+)
 
 from systems.input import InputAction
 
@@ -421,8 +425,13 @@ class ExplorationController:
                 game.last_message = "The chest is empty."
             return
 
-        # Add item to inventory
-        game.inventory.add_item(item_id)
+        # Add item to inventory (with randomization enabled)
+        game.inventory.add_item(item_id, randomized=True)
+        # Store floor index for randomization context
+        if not hasattr(game.inventory, "_current_floor"):
+            game.inventory._current_floor = game.floor
+        else:
+            game.inventory._current_floor = game.floor
 
         item_def = get_item_def(item_id)
         item_name = item_def.name if item_def is not None else item_id
@@ -595,14 +604,9 @@ class ExplorationController:
             game.last_message = "The item seems to have vanished from reality."
             return
 
-        # Price uses the item's "value" field; default to 0 if missing.
-        price_raw = getattr(item_def, "value", None)
-        try:
-            price = int(price_raw) if price_raw is not None else 0
-        except (TypeError, ValueError):
-            price = 0
-        if price < 0:
-            price = 0
+        # Calculate price using economy system (dynamic pricing with floor scaling)
+        floor_index = getattr(game, "floor", 1)
+        price = calculate_shop_buy_price(item_def, floor_index)
 
         hero_gold = getattr(game.hero_stats, "gold", 0)
         if hero_gold < price:
@@ -659,17 +663,9 @@ class ExplorationController:
             game.last_message = "The merchant eyes it suspiciously and declines."
             return
 
-        base_value_raw = getattr(item_def, "value", None)
-        try:
-            base_value = int(base_value_raw) if base_value_raw is not None else 0
-        except (TypeError, ValueError):
-            base_value = 0
-
-        # Sell price: 50% of value, minimum 1 gold if it has any value at all.
-        if base_value <= 0:
-            sell_price = 1
-        else:
-            sell_price = max(1, base_value // 2)
+        # Calculate sell price using economy system (dynamic pricing with floor scaling)
+        floor_index = getattr(game, "floor", 1)
+        sell_price = calculate_shop_sell_price(item_def, floor_index)
 
         # Add gold
         if hasattr(game.hero_stats, "add_gold"):

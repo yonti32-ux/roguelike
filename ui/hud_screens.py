@@ -1,0 +1,848 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List
+import pygame
+
+from settings import COLOR_BG
+from systems.inventory import get_item_def
+from systems import perks as perk_system
+from systems.party import CompanionDef, CompanionState, get_companion, ensure_companion_stats
+from systems.economy import (
+    calculate_shop_buy_price,
+    calculate_shop_sell_price,
+)
+
+if TYPE_CHECKING:
+    from engine.game import Game
+    from systems.inventory import Inventory
+
+
+def _resolve_focus_character(
+    game: "Game",
+    focus_index_attr: str,
+    use_clamp: bool = False,
+) -> tuple[bool, CompanionState | None, CompanionDef | None]:
+    """
+    Resolve which character is focused (hero or companion) based on focus index.
+    
+    Args:
+        game: Game instance
+        focus_index_attr: Attribute name for focus index (e.g., "inventory_focus_index")
+        use_clamp: If True, use clamp logic (character sheet), else use modulo (inventory)
+    
+    Returns:
+        Tuple of (is_hero, companion_state, companion_template)
+    """
+    party_list: List[CompanionState] = getattr(game, "party", None) or []
+    total_slots = 1 + len(party_list)
+    
+    focus_index = int(getattr(game, focus_index_attr, 0))
+    if total_slots <= 1:
+        focus_index = 0
+    else:
+        if use_clamp:
+            focus_index = max(0, min(focus_index, total_slots - 1))
+        else:
+            focus_index = focus_index % total_slots
+    
+    focused_is_hero = focus_index == 0
+    focused_comp: CompanionState | None = None
+    focused_template: CompanionDef | None = None
+    
+    if not focused_is_hero and party_list:
+        comp_idx = focus_index - 1
+        if 0 <= comp_idx < len(party_list):
+            candidate = party_list[comp_idx]
+            if isinstance(candidate, CompanionState):
+                focused_comp = candidate
+                template_id = getattr(candidate, "template_id", None)
+                if template_id:
+                    try:
+                        focused_template = get_companion(template_id)
+                    except KeyError:
+                        focused_template = None
+                    else:
+                        if focused_template is not None:
+                            try:
+                                ensure_companion_stats(candidate, focused_template)
+                            except Exception:
+                                pass
+    
+    return focused_is_hero, focused_comp, focused_template
+
+
+def _build_stats_line(
+    game: "Game",
+    is_hero: bool,
+    comp: CompanionState | None = None,
+    include_resources: bool = True,
+) -> str:
+    """
+    Build a stats line string for display.
+    
+    Args:
+        game: Game instance
+        is_hero: True if hero, False if companion
+        comp: Companion state (required if is_hero is False)
+        include_resources: Whether to include stamina/mana
+    
+    Returns:
+        Formatted stats string
+    """
+    stats_parts: List[str] = []
+    
+    if is_hero:
+        hero_stats = getattr(game, "hero_stats", None)
+        if hero_stats is not None:
+            stats_parts.extend([
+                f"HP {hero_stats.max_hp}",
+                f"ATK {hero_stats.attack_power}",
+                f"DEF {hero_stats.defense}",
+            ])
+            if include_resources:
+                max_stamina = int(getattr(hero_stats, "max_stamina", 0))
+                max_mana = int(getattr(hero_stats, "max_mana", 0))
+                if max_stamina <= 0:
+                    max_stamina = int(getattr(game.player, "max_stamina", 0))
+                if max_mana <= 0:
+                    max_mana = int(getattr(game.player, "max_mana", 0))
+                if max_stamina > 0:
+                    stats_parts.append(f"STA {max_stamina}")
+                if max_mana > 0:
+                    stats_parts.append(f"MANA {max_mana}")
+    else:
+        if comp is not None:
+            stats_parts.extend([
+                f"HP {comp.max_hp}",
+                f"ATK {comp.attack_power}",
+                f"DEF {comp.defense}",
+            ])
+            if include_resources:
+                max_stamina = int(getattr(comp, "max_stamina", 0))
+                max_mana = int(getattr(comp, "max_mana", 0))
+                if max_stamina > 0:
+                    stats_parts.append(f"STA {max_stamina}")
+                if max_mana > 0:
+                    stats_parts.append(f"MANA {max_mana}")
+    
+    return "  ".join(stats_parts)
+
+
+def _get_character_display_info(
+    game: "Game",
+    is_hero: bool,
+    comp: CompanionState | None = None,
+    template: CompanionDef | None = None,
+) -> tuple[str, dict]:
+    """
+    Get display name and equipped items map for a character.
+    
+    Returns:
+        Tuple of (display_name, equipped_map)
+    """
+    if is_hero:
+        hero_name = getattr(game.hero_stats, "hero_name", "Adventurer")
+        display_name = hero_name
+        inv = getattr(game, "inventory", None)
+        equipped_map = inv.equipped if inv is not None else {}
+    else:
+        if comp is not None:
+            display_name = getattr(comp, "name_override", None)
+            if not display_name and template is not None:
+                display_name = template.name
+            if not display_name:
+                display_name = "Companion"
+            equipped_map = getattr(comp, "equipped", None) or {}
+        else:
+            display_name = "Companion"
+            equipped_map = {}
+    
+    return display_name, equipped_map
+
+
+def _draw_equipment_section(
+    screen: pygame.Surface,
+    ui_font: pygame.font.Font,
+    x: int,
+    y: int,
+    equipped_map: dict,
+    indent: int = 0,
+) -> int:
+    """
+    Draw equipment section showing weapon, armor, trinket.
+    
+    Returns:
+        Y position after the section
+    """
+    equipped_title = ui_font.render("Equipped:", True, (220, 220, 180))
+    screen.blit(equipped_title, (x, y))
+    y += 28
+    
+    slots = ["weapon", "armor", "trinket"]
+    for slot in slots:
+        item_def = None
+        if equipped_map:
+            item_id = equipped_map.get(slot)
+            if item_id:
+                item_def = get_item_def(item_id)
+        if item_def is None:
+            line = f"{slot.capitalize()}: (none)"
+        else:
+            line = f"{slot.capitalize()}: {item_def.name}"
+        t = ui_font.render(line, True, (220, 220, 220))
+        screen.blit(t, (x + indent, y))
+        y += 24
+    
+    return y
+
+
+def _draw_screen_header(
+    screen: pygame.Surface,
+    ui_font: pygame.font.Font,
+    title: str,
+    current_screen: str,
+    available_screens: List[str],
+    w: int,
+) -> None:
+    """Draw header with title and tab indicators."""
+    # Title
+    title_surf = ui_font.render(title, True, (240, 240, 200))
+    screen.blit(title_surf, (40, 30))
+    
+    # Tab indicators
+    tab_x = w - 400
+    tab_y = 30
+    tab_spacing = 120
+    
+    for i, screen_name in enumerate(available_screens):
+        is_current = screen_name == current_screen
+        tab_text = screen_name.capitalize()
+        if is_current:
+            tab_color = (255, 255, 200)
+            # Draw underline
+            tab_surf = ui_font.render(tab_text, True, tab_color)
+            screen.blit(tab_surf, (tab_x + i * tab_spacing, tab_y))
+            pygame.draw.line(
+                screen,
+                tab_color,
+                (tab_x + i * tab_spacing, tab_y + 22),
+                (tab_x + i * tab_spacing + tab_surf.get_width(), tab_y + 22),
+                2,
+            )
+        else:
+            tab_color = (150, 150, 150)
+            tab_surf = ui_font.render(tab_text, True, tab_color)
+            screen.blit(tab_surf, (tab_x + i * tab_spacing, tab_y))
+
+
+def _draw_screen_footer(
+    screen: pygame.Surface,
+    ui_font: pygame.font.Font,
+    hints: List[str],
+    w: int,
+    h: int,
+) -> None:
+    """Draw footer with navigation hints."""
+    footer_y = h - 50
+    for i, hint in enumerate(hints):
+        hint_surf = ui_font.render(hint, True, (160, 160, 160))
+        screen.blit(hint_surf, (40, footer_y + i * 22))
+
+
+def draw_inventory_fullscreen(game: "Game") -> None:
+    """Full-screen inventory view."""
+    screen = game.screen
+    ui_font = game.ui_font
+    w, h = screen.get_size()
+    
+    # Fill background
+    screen.fill(COLOR_BG)
+    
+    # Get available screens for tabs
+    available_screens = ["inventory", "character"]
+    if getattr(game, "show_shop", False):
+        available_screens.append("shop")
+    
+    # Draw header with tabs
+    _draw_screen_header(screen, ui_font, "Inventory", "inventory", available_screens, w)
+    
+    inv = getattr(game, "inventory", None)
+    
+    # Resolve focus character
+    focused_is_hero, focused_comp, focused_template = _resolve_focus_character(
+        game, "inventory_focus_index", use_clamp=False
+    )
+    
+    # Get display info
+    title_text, equipped_map = _get_character_display_info(
+        game, focused_is_hero, focused_comp, focused_template
+    )
+    
+    # Build stats line
+    stats_line_text = _build_stats_line(game, focused_is_hero, focused_comp, include_resources=True)
+    
+    # Left column: Character info and equipment
+    left_x = 40
+    y = 90
+    
+    # Character name
+    char_title = ui_font.render(title_text, True, (240, 240, 200))
+    screen.blit(char_title, (left_x, y))
+    y += 30
+    
+    # Stats
+    if stats_line_text:
+        stats_surf = ui_font.render(stats_line_text, True, (200, 200, 200))
+        screen.blit(stats_surf, (left_x, y))
+        y += 30
+    
+    # Equipped section
+    y = _draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=20)
+    
+    # Right column: Backpack items
+    right_x = w // 2 + 40
+    y = 90
+    
+    backpack_title = ui_font.render("Backpack:", True, (220, 220, 180))
+    screen.blit(backpack_title, (right_x, y))
+    y += 28
+    
+    if not inv or not getattr(inv, "items", None):
+        none = ui_font.render("You are not carrying anything yet.", True, (180, 180, 180))
+        screen.blit(none, (right_x, y))
+    else:
+        items = list(inv.items)
+        page_size = int(getattr(game, "inventory_page_size", 20))  # More items visible
+        offset = int(getattr(game, "inventory_scroll_offset", 0))
+        total_items = len(items)
+        
+        if total_items <= page_size:
+            offset = 0
+        else:
+            max_offset = max(0, total_items - page_size)
+            offset = max(0, min(offset, max_offset))
+        game.inventory_scroll_offset = offset
+        
+        visible_items = items[offset : offset + page_size]
+        
+        for idx, item_id in enumerate(visible_items):
+            item_def = get_item_def(item_id)
+            if item_def is None:
+                continue
+            
+            equipped_marker = ""
+            if equipped_map:
+                if equipped_map.get("weapon") == item_id:
+                    equipped_marker = " [W]"
+                elif equipped_map.get("armor") == item_id:
+                    equipped_marker = " [A]"
+                elif equipped_map.get("trinket") == item_id:
+                    equipped_marker = " [T]"
+            
+            hotkey = f"[{idx + 1}] " if idx < 9 else ""
+            line = f"{hotkey}{item_def.name}{equipped_marker}"
+            t = ui_font.render(line, True, (220, 220, 220))
+            screen.blit(t, (right_x, y))
+            y += 22
+        
+        # Scroll info
+        if total_items > page_size:
+            first_index = offset + 1
+            last_index = min(offset + page_size, total_items)
+            scroll_text = f"Items {first_index}-{last_index} of {total_items}"
+            scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
+            screen.blit(scroll_surf, (right_x, y + 10))
+    
+    # Footer hints
+    hints = [
+        "1–9: equip item | Q/E: switch character | TAB: switch screen | I/ESC: close"
+    ]
+    _draw_screen_footer(screen, ui_font, hints, w, h)
+
+
+def draw_character_sheet_fullscreen(game: "Game") -> None:
+    """Full-screen character sheet view."""
+    screen = game.screen
+    ui_font = game.ui_font
+    w, h = screen.get_size()
+    
+    # Fill background
+    screen.fill(COLOR_BG)
+    
+    # Get available screens for tabs
+    available_screens = ["inventory", "character"]
+    if getattr(game, "show_shop", False):
+        available_screens.append("shop")
+    
+    # Draw header with tabs
+    _draw_screen_header(screen, ui_font, "Character Sheet", "character", available_screens, w)
+    
+    # Resolve focus character
+    focused_is_hero, focused_comp, focused_template = _resolve_focus_character(
+        game, "character_sheet_focus_index", use_clamp=True
+    )
+    
+    # Get focus index and party list for party preview section
+    focus_index = int(getattr(game, "character_sheet_focus_index", 0))
+    party_list: List[CompanionState] = getattr(game, "party", None) or []
+    total_slots = 1 + len(party_list)
+    if total_slots <= 1:
+        focus_index = 0
+    else:
+        focus_index = max(0, min(focus_index, total_slots - 1))
+    
+    y = 90
+    
+    if focused_is_hero:
+        # Hero info - left column
+        left_x = 40
+        hero_name = getattr(
+            game.hero_stats,
+            "hero_name",
+            getattr(game.player, "name", "Adventurer"),
+        )
+        level = game.hero_stats.level
+        xp = game.hero_stats.xp
+        xp_next = game.hero_stats.xp_to_next()
+        
+        hp = getattr(game.player, "hp", 0)
+        max_hp = getattr(game.player, "max_hp", 0)
+        atk = game.hero_stats.attack_power
+        defense = game.hero_stats.defense
+        skill_power = game.hero_stats.skill_power
+        
+        class_id = getattr(game.hero_stats, "hero_class_id", "unknown")
+        class_str = class_id.capitalize()
+        
+        name_line = ui_font.render(f"{hero_name} ({class_str})", True, (230, 230, 230))
+        screen.blit(name_line, (left_x, y))
+        y += 28
+        
+        floor_line = ui_font.render(f"Floor: {game.floor}", True, (200, 200, 200))
+        screen.blit(floor_line, (left_x, y))
+        y += 26
+        
+        xp_text_str = f"Level {level}  XP {xp}/{xp_next}"
+        xp_line = ui_font.render(xp_text_str, True, (220, 220, 180))
+        screen.blit(xp_line, (left_x, y))
+        y += 26
+        
+        gold = int(getattr(game.hero_stats, "gold", 0))
+        gold_line = ui_font.render(f"Gold: {gold}", True, (230, 210, 120))
+        screen.blit(gold_line, (left_x, y))
+        y += 30
+        
+        # Stats
+        stats_title = ui_font.render("Stats:", True, (220, 220, 180))
+        screen.blit(stats_title, (left_x, y))
+        y += 26
+        
+        # Get resource pools (mana and stamina)
+        hero_max_stamina = int(getattr(game.hero_stats, "max_stamina", 0))
+        hero_max_mana = int(getattr(game.hero_stats, "max_mana", 0))
+        
+        # Fall back to player entity if meta-stats aren't wired yet
+        if hero_max_stamina <= 0:
+            hero_max_stamina = int(getattr(game.player, "max_stamina", 0))
+        if hero_max_mana <= 0:
+            hero_max_mana = int(getattr(game.player, "max_mana", 0))
+        
+        current_stamina = int(getattr(game.player, "current_stamina", hero_max_stamina))
+        current_mana = int(getattr(game.player, "current_mana", hero_max_mana))
+        
+        if hero_max_stamina > 0:
+            current_stamina = max(0, min(current_stamina, hero_max_stamina))
+        if hero_max_mana > 0:
+            current_mana = max(0, min(current_mana, hero_max_mana))
+        
+        stats_lines = [
+            f"HP: {hp}/{max_hp}",
+            f"Attack: {atk}",
+            f"Defense: {defense}",
+        ]
+        
+        # Add resource pools if they exist
+        if hero_max_stamina > 0:
+            stats_lines.append(f"Stamina: {current_stamina}/{hero_max_stamina}")
+        if hero_max_mana > 0:
+            stats_lines.append(f"Mana: {current_mana}/{hero_max_mana}")
+        
+        if skill_power != 1.0:
+            stats_lines.append(f"Skill Power: {skill_power:.2f}x")
+        
+        for line in stats_lines:
+            t = ui_font.render(line, True, (220, 220, 220))
+            screen.blit(t, (left_x + 20, y))
+            y += 24
+        
+        # Perks - middle column
+        mid_x = w // 2 - 100
+        y = 90
+        perks_title = ui_font.render("Perks:", True, (220, 220, 180))
+        screen.blit(perks_title, (mid_x, y))
+        y += 28
+        
+        perk_ids = getattr(game.hero_stats, "perks", []) or []
+        if not perk_ids:
+            no_perks = ui_font.render("None yet. Level up to choose perks!", True, (180, 180, 180))
+            screen.blit(no_perks, (mid_x, y))
+        else:
+            getter = getattr(perk_system, "get_perk", None)
+            if not callable(getter):
+                getter = getattr(perk_system, "get", None)
+            
+            for pid in perk_ids:
+                perk_def = None
+                if callable(getter):
+                    try:
+                        perk_def = getter(pid)
+                    except KeyError:
+                        perk_def = None
+                
+                if perk_def is None:
+                    pretty_name = pid.replace("_", " ").title()
+                    line = f"- {pretty_name}"
+                else:
+                    branch = getattr(perk_def, "branch_name", None)
+                    if branch:
+                        line = f"- {branch}: {perk_def.name}"
+                    else:
+                        line = f"- {perk_def.name}"
+                t = ui_font.render(line, True, (210, 210, 210))
+                screen.blit(t, (mid_x, y))
+                y += 22
+        
+        # Party preview - right column
+        right_x = w - 300
+        y = 90
+        party_title = ui_font.render("Party:", True, (220, 220, 180))
+        screen.blit(party_title, (right_x, y))
+        y += 28
+        
+        hero_selected = focus_index == 0
+        hero_marker = " [*]" if hero_selected else ""
+        hero_line = ui_font.render(
+            f"[Hero] {hero_name} ({class_str}){hero_marker}",
+            True,
+            (230, 230, 230),
+        )
+        screen.blit(hero_line, (right_x, y))
+        y += 24
+        
+        if not party_list:
+            companion_line = ui_font.render(
+                "[Companion] — no allies recruited yet",
+                True,
+                (170, 170, 190),
+            )
+            screen.blit(companion_line, (right_x, y))
+        else:
+            for idx, comp in enumerate(party_list):
+                template = None
+                comp_level = None
+                
+                if isinstance(comp, CompanionState):
+                    template_id = getattr(comp, "template_id", None)
+                    comp_level = getattr(comp, "level", None)
+                    if template_id is not None:
+                        try:
+                            template = get_companion(template_id)
+                        except KeyError:
+                            template = None
+                    
+                    if template is not None:
+                        try:
+                            ensure_companion_stats(comp, template)
+                        except Exception:
+                            pass
+                    
+                    comp_max_hp = int(getattr(comp, "max_hp", 24))
+                    comp_atk = int(getattr(comp, "attack_power", 5))
+                    comp_defense = int(getattr(comp, "defense", 0))
+                    
+                    if template is not None:
+                        name = getattr(template, "name", "Companion")
+                        role = getattr(template, "role", "Companion")
+                    else:
+                        name = getattr(comp, "name_override", None) or "Companion"
+                        role = "Companion"
+                else:
+                    name = "Companion"
+                    role = "Companion"
+                    comp_max_hp = 24
+                    comp_atk = 5
+                    comp_defense = 0
+                
+                lvl_prefix = f"Lv {comp_level} " if comp_level is not None else ""
+                is_selected = focus_index == idx + 1
+                sel_marker = " [*]" if is_selected else ""
+                
+                # Build stats line for companion preview
+                comp_stats_parts = [
+                    f"HP {comp_max_hp}",
+                    f"ATK {comp_atk}",
+                    f"DEF {comp_defense}",
+                ]
+                
+                # Add mana/stamina if available
+                comp_sta = int(getattr(comp, "max_stamina", 0))
+                comp_mana = int(getattr(comp, "max_mana", 0))
+                if comp_sta > 0:
+                    comp_stats_parts.append(f"STA {comp_sta}")
+                if comp_mana > 0:
+                    comp_stats_parts.append(f"MANA {comp_mana}")
+                
+                stats_str = ", ".join(comp_stats_parts)
+                line = (
+                    f"[Companion] {lvl_prefix}{name} ({role}){sel_marker} – {stats_str}"
+                )
+                t = ui_font.render(line, True, (210, 210, 230))
+                screen.blit(t, (right_x, y))
+                y += 22
+    else:
+        # Companion info (similar structure)
+        left_x = 40
+        comp = focused_comp
+        assert comp is not None
+        
+        if focused_template is not None:
+            base_name = getattr(focused_template, "name", "Companion")
+            role = getattr(focused_template, "role", "Companion")
+        else:
+            base_name = "Companion"
+            role = "Companion"
+        
+        name_override = getattr(comp, "name_override", None)
+        comp_name = name_override or base_name
+        
+        level = int(getattr(comp, "level", 1))
+        xp = int(getattr(comp, "xp", 0))
+        
+        xp_next_val = getattr(comp, "xp_to_next", None)
+        xp_next = None
+        if callable(xp_next_val):
+            try:
+                xp_next = int(xp_next_val())
+            except Exception:
+                xp_next = None
+        elif isinstance(xp_next_val, (int, float)):
+            xp_next = int(xp_next_val)
+        
+        max_hp = int(getattr(comp, "max_hp", 1))
+        hp = int(getattr(comp, "hp", max_hp))
+        atk = int(getattr(comp, "attack_power", 0))
+        defense = int(getattr(comp, "defense", 0))
+        skill_power = float(getattr(comp, "skill_power", 1.0))
+        
+        name_line = ui_font.render(f"{comp_name} ({role})", True, (230, 230, 230))
+        screen.blit(name_line, (left_x, y))
+        y += 28
+        
+        floor_line = ui_font.render(f"Floor: {game.floor}", True, (200, 200, 200))
+        screen.blit(floor_line, (left_x, y))
+        y += 26
+        
+        if xp_next is not None and xp_next > 0:
+            xp_text_str = f"Level {level}  XP {xp}/{xp_next}"
+        else:
+            xp_text_str = f"Level {level}  XP {xp}"
+        xp_line = ui_font.render(xp_text_str, True, (220, 220, 180))
+        screen.blit(xp_line, (left_x, y))
+        y += 30
+        
+        stats_title = ui_font.render("Stats:", True, (220, 220, 180))
+        screen.blit(stats_title, (left_x, y))
+        y += 26
+        
+        # Get resource pools for companion
+        comp_max_stamina = int(getattr(comp, "max_stamina", 0))
+        comp_max_mana = int(getattr(comp, "max_mana", 0))
+        
+        # Companions don't have current values tracked separately in exploration,
+        # so we show max/max (they'll be at full in exploration)
+        current_stamina = comp_max_stamina
+        current_mana = comp_max_mana
+        
+        stats_lines = [
+            f"HP: {hp}/{max_hp}",
+            f"Attack: {atk}",
+            f"Defense: {defense}",
+        ]
+        
+        # Add resource pools if they exist
+        if comp_max_stamina > 0:
+            stats_lines.append(f"Stamina: {current_stamina}/{comp_max_stamina}")
+        if comp_max_mana > 0:
+            stats_lines.append(f"Mana: {current_mana}/{comp_max_mana}")
+        
+        if skill_power != 1.0:
+            stats_lines.append(f"Skill Power: {skill_power:.2f}x")
+        
+        for line in stats_lines:
+            t = ui_font.render(line, True, (220, 220, 220))
+            screen.blit(t, (left_x + 20, y))
+            y += 24
+        
+        # Perks
+        mid_x = w // 2 - 100
+        y = 90
+        perks_title = ui_font.render("Perks:", True, (220, 220, 180))
+        screen.blit(perks_title, (mid_x, y))
+        y += 28
+        
+        perk_ids: List[str] = []
+        if comp is not None:
+            perk_ids = getattr(comp, "perks", []) or []
+        
+        if not perk_ids:
+            placeholder = ui_font.render("This companion has no perks yet.", True, (180, 180, 180))
+            screen.blit(placeholder, (mid_x, y))
+        else:
+            getter = getattr(perk_system, "get_perk", None)
+            if not callable(getter):
+                getter = getattr(perk_system, "get", None)
+            
+            for pid in perk_ids:
+                perk_def = None
+                if callable(getter):
+                    try:
+                        perk_def = getter(pid)
+                    except KeyError:
+                        perk_def = None
+                
+                if perk_def is None:
+                    pretty_name = pid.replace("_", " ").title()
+                    line = f"- {pretty_name}"
+                else:
+                    branch = getattr(perk_def, "branch_name", None)
+                    if branch:
+                        line = f"- {branch}: {perk_def.name}"
+                    else:
+                        line = f"- {perk_def.name}"
+                t = ui_font.render(line, True, (210, 210, 210))
+                screen.blit(t, (mid_x, y))
+                y += 22
+    
+    # Footer hints
+    hints = [
+        "Q/E: switch character | TAB: switch screen | C/ESC: close"
+    ]
+    _draw_screen_footer(screen, ui_font, hints, w, h)
+
+
+def draw_shop_fullscreen(game: "Game") -> None:
+    """Full-screen shop view."""
+    screen = game.screen
+    ui_font = game.ui_font
+    w, h = screen.get_size()
+    
+    # Fill background
+    screen.fill(COLOR_BG)
+    
+    # Get available screens for tabs
+    available_screens = ["inventory", "character", "shop"]
+    
+    # Draw header with tabs
+    _draw_screen_header(screen, ui_font, "Dungeon Merchant", "shop", available_screens, w)
+    
+    mode = getattr(game, "shop_mode", "buy")
+    mode_label = "BUY" if mode == "buy" else "SELL"
+    
+    gold_value = int(getattr(getattr(game, "hero_stats", None), "gold", 0))
+    gold_line = ui_font.render(f"Your gold: {gold_value}", True, (230, 210, 120))
+    screen.blit(gold_line, (40, 70))
+    
+    stock_buy: List[str] = list(getattr(game, "shop_stock", []))
+    inv: Inventory | None = getattr(game, "inventory", None)
+    cursor = int(getattr(game, "shop_cursor", 0))
+    
+    if mode == "buy":
+        active_list = stock_buy
+    else:
+        if inv is None:
+            active_list = []
+        else:
+            active_list = inv.get_sellable_item_ids()
+    
+    # Left column: Buy list
+    left_x = 40
+    y = 110
+    
+    buy_title = ui_font.render(f"{mode_label} Items:", True, (220, 220, 180))
+    screen.blit(buy_title, (left_x, y))
+    y += 28
+    
+    if not active_list:
+        msg_text = (
+            "The merchant has nothing left to sell."
+            if mode == "buy"
+            else "You have nothing you're willing to sell."
+        )
+        msg = ui_font.render(msg_text, True, (190, 190, 190))
+        screen.blit(msg, (left_x, y))
+    else:
+        max_items = len(active_list)
+        line_height = 26
+        if max_items > 0:
+            cursor = max(0, min(cursor, max_items - 1))
+        
+        # Show more items in fullscreen
+        visible_start = max(0, cursor - 10)
+        visible_end = min(max_items, cursor + 15)
+        visible_items = active_list[visible_start:visible_end]
+        
+        # Get floor index for economy calculations
+        floor_index = getattr(game, "floor", 1)
+        
+        for i, item_id in enumerate(visible_items):
+            actual_index = visible_start + i
+            item_def = get_item_def(item_id)
+            if item_def is None:
+                name = item_id
+                price = 0
+                rarity = ""
+            else:
+                name = item_def.name
+                rarity = getattr(item_def, "rarity", "")
+                # Use economy system for dynamic pricing
+                if mode == "buy":
+                    price = calculate_shop_buy_price(item_def, floor_index)
+                else:
+                    price = calculate_shop_sell_price(item_def, floor_index)
+            
+            label = f"{actual_index + 1}) {name}"
+            if rarity:
+                label += f" [{rarity}]"
+            
+            price_str = f"{price}g" if mode == "buy" else f"{price}g (sell)"
+            
+            if actual_index == cursor:
+                # Highlight selected item
+                bg = pygame.Surface((w // 2 - 80, line_height), pygame.SRCALPHA)
+                bg.fill((60, 60, 90, 210))
+                screen.blit(bg, (left_x, y - 2))
+                label_color = (255, 255, 200)
+            else:
+                label_color = (230, 230, 230)
+            
+            label_surf = ui_font.render(label, True, label_color)
+            screen.blit(label_surf, (left_x + 20, y))
+            
+            price_surf = ui_font.render(price_str, True, (230, 210, 120))
+            screen.blit(price_surf, (left_x + w // 2 - 200, y))
+            
+            y += line_height
+    
+    # Footer hints
+    if mode == "buy":
+        hints = [
+            "Up/Down: move • Enter/Space: buy • 1–9: quick buy",
+            "Shift+TAB: switch to SELL • TAB: switch screen • I/C: jump to screen • ESC: close"
+        ]
+    else:
+        hints = [
+            "Up/Down: move • Enter/Space: sell • 1–9: quick sell",
+            "Shift+TAB: switch to BUY • TAB: switch screen • I/C: jump to screen • ESC: close"
+        ]
+    _draw_screen_footer(screen, ui_font, hints, w, h)
+

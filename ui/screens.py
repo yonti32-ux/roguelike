@@ -15,10 +15,7 @@ from typing import Optional, Protocol, TYPE_CHECKING
 
 import pygame
 
-from ui.hud import (
-    draw_inventory_overlay,
-    _draw_character_sheet,
-    draw_shop_overlay,
+from ui.hud_screens import (
     draw_inventory_fullscreen,
     draw_character_sheet_fullscreen,
     draw_shop_fullscreen,
