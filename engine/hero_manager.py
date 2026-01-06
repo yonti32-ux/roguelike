@@ -130,11 +130,22 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
 
     game.player.max_stamina = max_sta
     game.player.max_mana = max_mana
+    
+    # --- Regeneration bonuses from perks ---
+    base_stats = getattr(hs, "base", None)
+    if base_stats is not None:
+        stamina_regen_bonus = getattr(base_stats, "stamina_regen_bonus", 0)
+        mana_regen_bonus = getattr(base_stats, "mana_regen_bonus", 0)
+        setattr(game.player, "stamina_regen_bonus", stamina_regen_bonus)
+        setattr(game.player, "mana_regen_bonus", mana_regen_bonus)
     # ---- Move speed ----
     move_speed = getattr(hs, "move_speed",
                          getattr(hs, "speed",
                                  getattr(game.player, "speed", 200.0)))
     game.player.speed = move_speed
+
+    # ---- Level (for regeneration scaling) ----
+    game.player.level = hs.level
 
     # Mirror learned perks onto the Player entity so BattleScene can
     # grant skills based on perks.
@@ -215,6 +226,15 @@ def grant_xp_to_companions(
             continue
 
         recalc_companion_stats_for_level(comp_state, template)
+
+        # Auto-allocate skill points if enabled
+        from settings import AUTO_ALLOCATE_COMPANION_SKILL_POINTS
+        if AUTO_ALLOCATE_COMPANION_SKILL_POINTS:
+            from systems.party import auto_allocate_companion_skill_points
+            auto_msgs = auto_allocate_companion_skill_points(comp_state, template)
+            messages.extend(auto_msgs)
+            # Recalculate stats again in case skill ranks affect stats (future enhancement)
+            # recalc_companion_stats_for_level(comp_state, template)
 
         # Note: Perk selection is handled after all level-ups via run_perk_selection()
 

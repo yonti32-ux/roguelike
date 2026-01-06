@@ -35,8 +35,10 @@ from ui.screens import (
     InventoryScreen,
     CharacterSheetScreen,
     ShopScreen,
+    SkillScreen,
 )
 from .perk_selection_scene import PerkSelectionScene
+from ui.skill_screen import SkillScreenCore
 from .floor_spawning import spawn_all_entities_for_floor
 try:
     from telemetry.logger import telemetry
@@ -100,6 +102,10 @@ class Game:
         # --- Character sheet overlay ---
         self.show_character_sheet: bool = False
 
+        # --- Skill screen overlay ---
+        self.show_skill_screen: bool = False
+        self.skill_screen_focus_index: int = 0
+
         # Which character the sheet is currently focusing:
         # 0 = hero, 1..N = companions in self.party order.
         self.character_sheet_focus_index: int = 0
@@ -115,10 +121,12 @@ class Game:
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
 
-        # Inventory / character sheet / shop overlays as screen objects.
+        # Inventory / character sheet / shop / skill screen overlays as screen objects.
         self.inventory_screen = InventoryScreen()
         self.character_sheet_screen = CharacterSheetScreen()
         self.shop_screen = ShopScreen()
+        self.skill_screen = SkillScreenCore(self)
+        self.skill_screen_wrapper = SkillScreen()
 
         # Currently active full-screen UI overlay (if any).
         # Used for perk choices, inventory, character sheet, shop, etc.
@@ -327,7 +335,7 @@ class Game:
 
     def get_available_screens(self) -> List[str]:
         """Get list of available screen names (shop only if vendor nearby)."""
-        screens = ["inventory", "character"]
+        screens = ["inventory", "character", "skills"]
         if getattr(self, "show_shop", False):
             screens.append("shop")
         return screens
@@ -337,6 +345,7 @@ class Game:
         # Close all screen flags
         self.show_inventory = False
         self.show_character_sheet = False
+        self.show_skill_screen = False
         self.show_battle_log = False
         if hasattr(self, "show_exploration_log"):
             self.show_exploration_log = False
@@ -351,6 +360,14 @@ class Game:
             self.show_character_sheet = True
             self.character_sheet_focus_index = 0
             self.active_screen = self.character_sheet_screen
+        elif screen_name == "skills":
+            self.show_skill_screen = True
+            self.skill_screen_focus_index = 0
+            if hasattr(self.skill_screen, "focus_index"):
+                self.skill_screen.focus_index = 0
+            if hasattr(self.skill_screen, "reset_selection"):
+                self.skill_screen.reset_selection()
+            self.active_screen = self.skill_screen_wrapper
         elif screen_name == "shop" and getattr(self, "show_shop", False):
             # Shop is already open (show_shop is True), just set active screen
             self.active_screen = self.shop_screen
@@ -370,6 +387,8 @@ class Game:
             current = "inventory"
         elif self.show_character_sheet:
             current = "character"
+        elif self.show_skill_screen:
+            current = "skills"
         elif getattr(self, "show_shop", False) and getattr(self, "active_screen", None) is self.shop_screen:
             current = "shop"
         
@@ -405,6 +424,17 @@ class Game:
             if getattr(self, "active_screen", None) is getattr(self, "character_sheet_screen", None):
                 self.active_screen = None
 
+    def toggle_skill_screen(self) -> None:
+        """Toggle skill screen overlay and manage its active screen."""
+        if self.show_skill_screen:
+            # Closing the skill screen
+            self.show_skill_screen = False
+            if getattr(self, "active_screen", None) is self.skill_screen_wrapper:
+                self.active_screen = None
+        else:
+            # Opening the skill screen - use switch_to_screen for consistency
+            self.switch_to_screen("skills")
+
     def toggle_battle_log_overlay(self) -> None:
         """
         Toggle last battle log overlay ONLY if we actually have one.
@@ -433,10 +463,10 @@ class Game:
 
     def is_overlay_open(self) -> bool:
         """
-        Return True if a major overlay (inventory, character sheet) is open.
+        Return True if a major overlay (inventory, character sheet, skill screen) is open.
         Used to pause exploration updates.
         """
-        return self.show_inventory or self.show_character_sheet
+        return self.show_inventory or self.show_character_sheet or self.show_skill_screen
 
     def cycle_character_sheet_focus(self, direction: int) -> None:
         """
@@ -1100,9 +1130,14 @@ class Game:
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
 
-        # Draw an active overlay screen on top (inventory, character sheet, etc.).
+        # Draw an active overlay screen on top (inventory, character sheet, skill screen, etc.).
         if getattr(self, "active_screen", None) is not None:
             self.active_screen.draw(self)
+            # Update skill screen visual state (cursor blink, etc.)
+            if self.active_screen is self.skill_screen_wrapper:
+                from settings import FPS
+                dt = 1.0 / FPS  # Approximate dt for cursor blink
+                self.skill_screen.update(dt)
 
         # Flip the final composed frame to the screen.
         pygame.display.flip()

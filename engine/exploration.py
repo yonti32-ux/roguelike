@@ -62,7 +62,7 @@ class ExplorationController:
         # --- Blocking UI overlays ---
         # While these are open, their screens receive input via Game.handle_event,
         # so exploration has nothing to do here.
-        if getattr(game, "show_inventory", False) or getattr(game, "show_character_sheet", False):
+        if getattr(game, "show_inventory", False) or getattr(game, "show_character_sheet", False) or getattr(game, "show_skill_screen", False):
             return
 
         # --- Normal exploration input (overlays closed) ---
@@ -86,6 +86,11 @@ class ExplorationController:
             if event.key == pygame.K_c:
                 game.toggle_character_sheet_overlay()
                 return
+
+        # Toggle skill screen (T for Talents/Skills)
+        if event.key == pygame.K_t:
+            game.toggle_skill_screen()
+            return
 
         # Zoom controls (exploration view) – still raw key based for now
         if event.key == pygame.K_z:
@@ -147,7 +152,7 @@ class ExplorationController:
             return
 
         # If an overlay is open, pause movement & enemy AI
-        if game.show_character_sheet or game.show_inventory or getattr(game, "show_shop", False):
+        if game.show_character_sheet or game.show_inventory or getattr(game, "show_shop", False) or getattr(game, "show_skill_screen", False):
             return
 
         direction = pygame.Vector2(0, 0)
@@ -386,7 +391,7 @@ class ExplorationController:
         game = self.game
 
         # Ignore interaction while overlays are open
-        if game.show_inventory or game.show_character_sheet:
+        if game.show_inventory or game.show_character_sheet or getattr(game, "show_skill_screen", False):
             return
 
         if game.current_map is None or game.player is None or game.inventory is None:
@@ -710,7 +715,7 @@ class ExplorationController:
         game = self.game
 
         # Ignore interaction while overlays are open
-        if game.show_inventory or game.show_character_sheet:
+        if game.show_inventory or game.show_character_sheet or getattr(game, "show_skill_screen", False):
             return
 
         # 1) Chest takes priority (so loot remains intuitive)

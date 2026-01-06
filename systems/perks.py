@@ -120,6 +120,58 @@ def _apply_fleet_footwork_2(hero_stats: object) -> None:
     hero_stats.base.max_hp += 5
 
 
+# --- Regeneration perk effects --------------------------------------------
+
+def _apply_stamina_regen_1(hero_stats: object) -> None:
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+def _apply_stamina_regen_2(hero_stats: object) -> None:
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+def _apply_mana_regen_1(hero_stats: object) -> None:
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_mana_regen_2(hero_stats: object) -> None:
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_vitality_flow(hero_stats: object) -> None:
+    # Both stamina and mana regen
+    hero_stats.base.stamina_regen_bonus += 1
+    hero_stats.base.mana_regen_bonus += 1
+
+
+# --- Other new perk effects -----------------------------------------------
+
+def _apply_quick_reflexes(hero_stats: object) -> None:
+    hero_stats.base.dodge_chance += 0.05
+
+
+def _apply_precision_strike(hero_stats: object) -> None:
+    hero_stats.base.crit_chance += 0.05
+
+
+def _apply_iron_will(hero_stats: object) -> None:
+    hero_stats.base.status_resist += 0.10
+
+
+def _apply_swift_strike(hero_stats: object) -> None:
+    hero_stats.base.speed += 0.1
+
+
+def _apply_arcane_attunement(hero_stats: object) -> None:
+    hero_stats.base.max_mana += 5
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_endurance_training(hero_stats: object) -> None:
+    hero_stats.base.max_stamina += 5
+    hero_stats.base.stamina_regen_bonus += 1
+
+
 # --- Perk trees -------------------------------------------------------------
 
 # ----------------- Vitality tree -----------------
@@ -301,6 +353,192 @@ register(Perk(
     apply_fn=_apply_fleet_footwork_2,
 ))
 
+# ----------------- Warrior-specific perks ---------------------------------
+
+# Cleave unlock
+register(Perk(
+    id="warrior_cleave",
+    name="Weapon Mastery",
+    description="Unlocks the Cleave skill - strike multiple enemies at once.",
+    unlock_level=4,
+    branch="blade",
+    requires=["weapon_training_2"],
+    grant_skills=["cleave"],
+    tags=["offense", "skills", "warrior"],
+))
+
+# Taunt unlock
+register(Perk(
+    id="warrior_taunt",
+    name="Intimidating Presence",
+    description="Unlocks the Taunt skill - force enemies to focus on you.",
+    unlock_level=3,
+    branch="ward",
+    requires=["iron_guard_1"],
+    grant_skills=["taunt"],
+    tags=["defense", "control", "skills", "warrior"],
+))
+
+# Charge unlock
+register(Perk(
+    id="warrior_charge",
+    name="Battle Charge",
+    description="Unlocks the Charge skill - rush forward and strike.",
+    unlock_level=5,
+    branch="blade",
+    requires=["weapon_training_2"],
+    grant_skills=["charge"],
+    tags=["offense", "mobility", "skills", "warrior"],
+))
+
+# Shield Wall unlock
+register(Perk(
+    id="warrior_shield_wall",
+    name="Defensive Stance",
+    description="Unlocks the Shield Wall skill - boost your defense.",
+    unlock_level=4,
+    branch="ward",
+    requires=["iron_guard_1"],
+    grant_skills=["shield_wall"],
+    tags=["defense", "skills", "warrior"],
+))
+
+# Second Wind unlock (Warrior)
+register(Perk(
+    id="warrior_second_wind",
+    name="Resilience",
+    description="Unlocks the Second Wind skill - restore HP and stamina.",
+    unlock_level=6,
+    branch="vitality",
+    requires=["toughness_2"],
+    grant_skills=["second_wind"],
+    tags=["defense", "survivability", "skills", "warrior"],
+))
+
+# ----------------- Rogue-specific perks ---------------------------------
+
+# Backstab unlock
+register(Perk(
+    id="rogue_backstab",
+    name="Assassin Training",
+    description="Unlocks the Backstab skill - devastating precision strike.",
+    unlock_level=4,
+    branch="blade",
+    requires=["fleet_footwork_1"],
+    grant_skills=["backstab"],
+    tags=["offense", "skills", "rogue"],
+))
+
+# Shadow Strike unlock
+register(Perk(
+    id="rogue_shadow_strike",
+    name="Shadow Mastery",
+    description="Unlocks the Shadow Strike skill - strike from the shadows.",
+    unlock_level=5,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["shadow_strike"],
+    tags=["offense", "mobility", "skills", "rogue"],
+))
+
+# Poison Blade unlock
+register(Perk(
+    id="rogue_poison_blade",
+    name="Poison Mastery",
+    description="Unlocks the Poison Blade skill - apply deadly toxins.",
+    unlock_level=4,
+    branch="blade",
+    requires=["fleet_footwork_1"],
+    grant_skills=["poison_blade"],
+    tags=["offense", "skills", "rogue"],
+))
+
+# Evade unlock
+register(Perk(
+    id="rogue_evade",
+    name="Evasive Reflexes",
+    description="Unlocks the Evade skill - dodge the next attack.",
+    unlock_level=3,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["evade"],
+    tags=["defense", "mobility", "skills", "rogue"],
+))
+
+# Second Wind unlock (Rogue)
+register(Perk(
+    id="rogue_second_wind",
+    name="Quick Recovery",
+    description="Unlocks the Second Wind skill - restore HP and stamina.",
+    unlock_level=5,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["second_wind"],
+    tags=["defense", "survivability", "skills", "rogue"],
+))
+
+# ----------------- Mage-specific perks ---------------------------------
+
+# Fireball unlock
+register(Perk(
+    id="mage_fireball",
+    name="Pyromancy",
+    description="Unlocks the Fireball skill - hurl explosive fire magic.",
+    unlock_level=4,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["fireball"],
+    tags=["offense", "skills", "mage"],
+))
+
+# Lightning Bolt unlock
+register(Perk(
+    id="mage_lightning",
+    name="Electromancy",
+    description="Unlocks the Lightning Bolt skill - chain lightning attack.",
+    unlock_level=5,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["lightning_bolt"],
+    tags=["offense", "skills", "mage"],
+))
+
+# Slow unlock
+register(Perk(
+    id="mage_slow",
+    name="Temporal Magic",
+    description="Unlocks the Slow skill - reduce enemy speed.",
+    unlock_level=3,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["slow"],
+    tags=["control", "skills", "mage"],
+))
+
+# Magic Shield unlock
+register(Perk(
+    id="mage_shield",
+    name="Arcane Protection",
+    description="Unlocks the Magic Shield skill - absorb incoming damage.",
+    unlock_level=4,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["magic_shield"],
+    tags=["defense", "skills", "mage"],
+))
+
+# Arcane Missile unlock
+register(Perk(
+    id="mage_missile",
+    name="Arcane Mastery",
+    description="Unlocks the Arcane Missile skill - quick magical projectile.",
+    unlock_level=3,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["arcane_missile"],
+    tags=["offense", "skills", "mage"],
+))
+
 
 # --- Helper functions used by the game --------------------------------------
 
@@ -467,6 +705,10 @@ class _DummyBaseStats:
         self.attack: int = 0
         self.defense: int = 0
         self.skill_power: float = 0.0
+        self.max_mana: int = 0
+        self.max_stamina: int = 0
+        self.stamina_regen_bonus: int = 0
+        self.mana_regen_bonus: int = 0
 
 
 class _DummyHeroLike:
@@ -506,4 +748,8 @@ def total_stat_modifiers_for_perks(perk_ids: Iterable[str]) -> Dict[str, float]:
         "attack": int(base.attack),
         "defense": int(base.defense),
         "skill_power": float(base.skill_power),
+        "max_mana": int(getattr(base, "max_mana", 0)),
+        "max_stamina": int(getattr(base, "max_stamina", 0)),
+        "stamina_regen_bonus": int(getattr(base, "stamina_regen_bonus", 0)),
+        "mana_regen_bonus": int(getattr(base, "mana_regen_bonus", 0)),
     }

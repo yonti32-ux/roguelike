@@ -19,6 +19,7 @@ from ui.hud_screens import (
     draw_inventory_fullscreen,
     draw_character_sheet_fullscreen,
     draw_shop_fullscreen,
+    draw_skill_screen_fullscreen,
 )
 from systems.input import InputAction
 
@@ -490,3 +491,154 @@ class ShopScreen(BaseScreen):
     def draw(self, game: "Game") -> None:
         """Render the full-screen shop view."""
         draw_shop_fullscreen(game)
+
+
+class SkillScreen(BaseScreen):
+    """
+    Screen wrapper for the skill allocation overlay.
+    
+    Delegates drawing to hud.draw_skill_screen_fullscreen, and owns the input:
+      - closing (T / ESC)
+      - cycling focused character (Q / E)
+      - skill tree navigation and upgrades
+    """
+
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        if event.type != pygame.KEYDOWN:
+            # Handle mouse events for skill tree interaction
+            skill_screen_core = getattr(game, "skill_screen", None)
+            if skill_screen_core is not None:
+                # Mouse click support
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Left click
+                        mx, my = event.pos
+                        clicked_skill_id = skill_screen_core.get_node_at_screen_pos(
+                            mx, my, game.screen.get_width(), game.screen.get_height()
+                        )
+                        if clicked_skill_id:
+                            skill_screen_core.selected_skill_id = clicked_skill_id
+                    elif event.button == 4:  # Mouse wheel up
+                        skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
+                    elif event.button == 5:  # Mouse wheel down
+                        skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+            return
+
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+        skill_screen_core = getattr(game, "skill_screen", None)
+
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+
+        # Close skill screen (T or ESC)
+        should_close = False
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CANCEL, event):
+                should_close = True
+        else:
+            if key in (pygame.K_ESCAPE, pygame.K_t):
+                should_close = True
+
+        if should_close:
+            game.toggle_skill_screen()
+            if not getattr(game, "show_skill_screen", False) and getattr(game, "active_screen", None) is self:
+                game.active_screen = None
+            return
+
+        if skill_screen_core is None:
+            return
+
+        # Switch character with Q/E
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.FOCUS_PREV, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index - 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+            if input_manager.event_matches_action(InputAction.FOCUS_NEXT, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index + 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+        else:
+            if key == pygame.K_q:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index - 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+            elif key == pygame.K_e:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index + 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+
+        # Panning with arrow keys
+        pan_speed = 20.0
+        if key == pygame.K_LEFT or key == pygame.K_a:
+            skill_screen_core.camera_x -= pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_RIGHT or key == pygame.K_d:
+            skill_screen_core.camera_x += pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_UP or key == pygame.K_w:
+            skill_screen_core.camera_y -= pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_DOWN or key == pygame.K_s:
+            skill_screen_core.camera_y += pan_speed / skill_screen_core.zoom
+
+        # Zoom with +/- or mouse wheel
+        if key == pygame.K_PLUS or key == pygame.K_EQUALS:
+            skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
+        elif key == pygame.K_MINUS:
+            skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+
+        # Upgrade selected skill with Enter/Space
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                if skill_screen_core.selected_skill_id:
+                    if skill_screen_core.can_upgrade_skill(skill_screen_core.selected_skill_id):
+                        if skill_screen_core.upgrade_skill(skill_screen_core.selected_skill_id):
+                            # Refresh cache and update rank
+                            skill_screen_core._cached_unlocked_skills = None
+                            if skill_screen_core.tree_layout and skill_screen_core.selected_skill_id in skill_screen_core.tree_layout.nodes:
+                                skill_screen_core.tree_layout.nodes[skill_screen_core.selected_skill_id].rank = skill_screen_core.get_skill_rank(skill_screen_core.selected_skill_id)
+                            game.add_message(f"Upgraded skill!")
+        else:
+            if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                if skill_screen_core.selected_skill_id:
+                    if skill_screen_core.can_upgrade_skill(skill_screen_core.selected_skill_id):
+                        if skill_screen_core.upgrade_skill(skill_screen_core.selected_skill_id):
+                            # Refresh cache and update rank
+                            skill_screen_core._cached_unlocked_skills = None
+                            if skill_screen_core.tree_layout and skill_screen_core.selected_skill_id in skill_screen_core.tree_layout.nodes:
+                                skill_screen_core.tree_layout.nodes[skill_screen_core.selected_skill_id].rank = skill_screen_core.get_skill_rank(skill_screen_core.selected_skill_id)
+                            game.add_message(f"Upgraded skill!")
+
+    def draw(self, game: "Game") -> None:
+        """Render the full-screen skill allocation view."""
+        draw_skill_screen_fullscreen(game)

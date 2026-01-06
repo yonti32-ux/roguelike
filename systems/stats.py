@@ -14,3 +14,7 @@ class StatBlock:
     status_resist: float = 0.0
     max_mana: int = 0
     max_stamina: int = 0
+    
+    # Regeneration bonuses (added to base regen per turn)
+    stamina_regen_bonus: int = 0
+    mana_regen_bonus: int = 0

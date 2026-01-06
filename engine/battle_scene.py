@@ -2,6 +2,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Literal, List, Dict, Optional, Union
 
+import math
 import random
 import pygame
 
@@ -22,10 +23,13 @@ from settings import (
     DEFAULT_PLAYER_STAMINA,
     DEFAULT_COMPANION_STAMINA,
     DEFAULT_ENEMY_STAMINA,
+    DEFAULT_ENEMY_MANA,
     DEFAULT_COMPANION_HP_FACTOR,
     DEFAULT_COMPANION_ATTACK_FACTOR,
     DEFAULT_MIN_SKILL_POWER,
     BATTLE_ENEMY_START_COL_OFFSET,
+    BASE_CRIT_CHANCE,
+    CRIT_DAMAGE_MULTIPLIER,
 )
 from world.entities import Player, Enemy
 from systems.statuses import (
@@ -106,6 +110,22 @@ class BattleUnit:
         return getattr(self.entity, "max_stamina", 0)
 
     @property
+    def level(self) -> int:
+        """Get the level of this unit's entity."""
+        # Try to get level from entity (hero/companion have this)
+        level = getattr(self.entity, "level", None)
+        if level is not None:
+            return int(level)
+        # Fallback: estimate level from max_hp (rough approximation)
+        # This is mainly for enemies that don't have explicit level
+        max_hp = self.max_hp
+        if max_hp <= 0:
+            return 1
+        # Rough estimate: base HP ~30, +5 per level
+        estimated_level = max(1, (max_hp - 20) // 5)
+        return min(estimated_level, 20)  # Cap at 20 for safety
+
+    @property
     def is_alive(self) -> bool:
         return self.hp > 0
 
@@ -114,16 +134,52 @@ class BattleUnit:
         self.current_mana = self.max_mana
         self.current_stamina = self.max_stamina
 
-    def regenerate_stamina(self, amount: int = 1) -> None:
+    def calculate_regen_amount(self, base_regen: int = 1, regen_bonus: int = 0) -> int:
+        """
+        Calculate regeneration amount based on level and perks.
+        
+        Formula: base_regen + (level // 5) + regen_bonus
+        - Level 1-4: base_regen + regen_bonus
+        - Level 5-9: base_regen + 1 + regen_bonus
+        - Level 10-14: base_regen + 2 + regen_bonus
+        - Level 15-19: base_regen + 3 + regen_bonus
+        - Level 20+: base_regen + 4 + regen_bonus
+        
+        regen_bonus comes from perks (stamina_regen_bonus or mana_regen_bonus).
+        """
+        level = self.level
+        level_bonus = level // 5  # +1 every 5 levels
+        return base_regen + level_bonus + regen_bonus
+
+    def regenerate_stamina(self, amount: Optional[int] = None) -> None:
         """
         Regenerate stamina (used at turn start).
         
         Args:
-            amount: Amount to regenerate (default 1 per turn)
+            amount: Amount to regenerate (if None, calculates based on level and perks)
         """
         max_sta = self.max_stamina
         if max_sta > 0:
+            if amount is None:
+                # Get stamina regen bonus from entity (set by perks)
+                regen_bonus = getattr(self.entity, "stamina_regen_bonus", 0)
+                amount = self.calculate_regen_amount(base_regen=1, regen_bonus=regen_bonus)
             self.current_stamina = min(max_sta, self.current_stamina + amount)
+
+    def regenerate_mana(self, amount: Optional[int] = None) -> None:
+        """
+        Regenerate mana (used at turn start).
+        
+        Args:
+            amount: Amount to regenerate (if None, calculates based on level and perks)
+        """
+        max_mana = self.max_mana
+        if max_mana > 0:
+            if amount is None:
+                # Get mana regen bonus from entity (set by perks)
+                regen_bonus = getattr(self.entity, "mana_regen_bonus", 0)
+                amount = self.calculate_regen_amount(base_regen=1, regen_bonus=regen_bonus)
+            self.current_mana = min(max_mana, self.current_mana + amount)
 
     def has_resources_for_skill(self, skill: Skill) -> tuple[bool, Optional[str]]:
         """
@@ -472,10 +528,23 @@ class BattleScene:
                 gy=gy,
                 name=enemy_name,
             )
-            # Simple default resource pools for enemies so stamina-based
-            # skills can work without extra data wiring.
+            # Resource pools for enemies based on archetype
+            # Casters get mana, others get stamina
             enemy_max_mana = 0
             enemy_max_stamina = DEFAULT_ENEMY_STAMINA
+            
+            # Give casters mana based on their archetype
+            if arch_id is not None:
+                try:
+                    arch = get_archetype(arch_id)
+                    # Check if archetype has caster skills (dark_hex, etc.)
+                    caster_skills = ["dark_hex", "fireball", "lightning_bolt", "slow", "magic_shield"]
+                    if any(skill_id in arch.skill_ids for skill_id in caster_skills):
+                        enemy_max_mana = DEFAULT_ENEMY_MANA
+                        enemy_max_stamina = 8  # Casters have less stamina
+                except KeyError:
+                    pass
+            
             setattr(enemy, "max_mana", enemy_max_mana)
             setattr(enemy, "max_stamina", enemy_max_stamina)
             # Initialize resource pools from entity max values
@@ -529,6 +598,18 @@ class BattleScene:
 
         # Enemy AI timer – small delay so actions are readable
         self.enemy_timer: float = BATTLE_ENEMY_TIMER
+
+        # Targeting state (for player-controlled units)
+        # When not None, contains: {"action_type": "attack"|"skill", "skill": Optional[Skill], "targets": List[BattleUnit], "target_index": int}
+        self.targeting_mode: Optional[Dict] = None
+
+        # Floating damage numbers - list of {target, damage, timer, y_offset, is_crit}
+        self._floating_damage: List[Dict] = []
+        
+        # Hit spark effects - list of {x, y, timer}
+        self._hit_sparks: List[Dict] = []
+
+        # Initialize cooldowns / statuses for first unit
 
         # Initialize cooldowns / statuses for first unit
         if self.turn_order:
@@ -610,8 +691,10 @@ class BattleScene:
             if unit.cooldowns[k] > 0:
                 unit.cooldowns[k] -= 1
 
-        # Simple stamina regeneration each turn so skills recover over time.
-        unit.regenerate_stamina(amount=1)
+        # Regenerate resources each turn (scales with level)
+        # Higher level characters regain more stamina/mana per turn
+        unit.regenerate_stamina()  # Amount calculated based on level
+        unit.regenerate_mana()  # Amount calculated based on level
 
     # ----- Grid / movement helpers -----
 
@@ -756,19 +839,61 @@ class BattleScene:
 
     # ----- Damage helpers -----
 
+    def _roll_critical_hit(self) -> bool:
+        """Roll for a critical hit based on base crit chance."""
+        return random.random() < BASE_CRIT_CHANCE
+
+    def _calculate_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int, is_crit: bool = False) -> int:
+        """
+        Calculate damage that would be dealt without actually applying it.
+        Useful for previews.
+        """
+        damage = int(base_damage * self._outgoing_multiplier(attacker))
+        damage = int(damage * self._incoming_multiplier(target))
+        
+        # Apply critical hit multiplier
+        if is_crit:
+            damage = int(damage * CRIT_DAMAGE_MULTIPLIER)
+
+        defense = int(getattr(target.entity, "defense", 0))
+        damage = max(1, damage - max(0, defense))
+        
+        return damage
+
     def _apply_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int) -> int:
         """
         Apply damage from attacker to target, respecting statuses and defenses.
         Returns the actual damage dealt.
         """
-        damage = int(base_damage * self._outgoing_multiplier(attacker))
-        damage = int(damage * self._incoming_multiplier(target))
-
-        defense = int(getattr(target.entity, "defense", 0))
-        damage = max(1, damage - max(0, defense))
+        # Roll for critical hit
+        is_crit = self._roll_critical_hit()
+        damage = self._calculate_damage(attacker, target, base_damage, is_crit=is_crit)
+        
+        # Add hit spark effect at target position
+        target_x = self.grid_origin_x + target.gx * self.cell_size + self.cell_size // 2
+        target_y = self.grid_origin_y + target.gy * self.cell_size + self.cell_size // 2
+        self._hit_sparks.append({
+            "x": target_x,
+            "y": target_y,
+            "timer": 0.3,  # Short spark animation
+            "is_crit": is_crit,
+        })
 
         current_hp = getattr(target.entity, "hp", 0)
+        was_alive = current_hp > 0
         setattr(target.entity, "hp", max(0, current_hp - damage))
+        is_kill = was_alive and getattr(target.entity, "hp", 0) <= 0
+        
+        # Store damage for floating number display
+        self._floating_damage.append({
+            "target": target,
+            "damage": damage,
+            "timer": 1.2 if is_crit else 1.0,  # Crits last slightly longer
+            "y_offset": 0,
+            "is_crit": is_crit,
+            "is_kill": is_kill,
+        })
+        
         return damage
 
     # ----- Skill helpers -----
@@ -883,7 +1008,7 @@ class BattleScene:
 
     def _use_skill(self, unit: BattleUnit, skill: Skill, *, for_ai: bool = False) -> bool:
         """
-        Fire a skill for a unit.
+        Fire a skill for a unit (with auto-targeting).
         Returns True if the skill actually consumed the unit's turn.
         """
         if self._is_stunned(unit):
@@ -911,6 +1036,41 @@ class BattleScene:
                     self._log(f"No enemy in range for {skill.name}!")
                 return False
             target_unit = candidates[0]
+
+        return self._use_skill_targeted(unit, skill, target_unit, for_ai=for_ai)
+
+    def _use_skill_targeted(self, unit: BattleUnit, skill: Skill, target_unit: Optional[BattleUnit], *, for_ai: bool = False) -> bool:
+        """
+        Fire a skill for a unit on a specific target.
+        Returns True if the skill actually consumed the unit's turn.
+        """
+        if self._is_stunned(unit):
+            if not for_ai:
+                self._log(f"{unit.name} is stunned and cannot act!")
+            self._next_turn()
+            return True
+
+        cd = unit.cooldowns.get(skill.id, 0)
+        if cd > 0:
+            if not for_ai:
+                self._log(f"{skill.name} is on cooldown ({cd} turns).")
+            return False
+
+        # Verify target is valid for this skill
+        if skill.target_mode == "self":
+            target_unit = unit
+        elif skill.target_mode == "adjacent_enemy":
+            if target_unit is None:
+                if not for_ai:
+                    self._log(f"No target selected for {skill.name}!")
+                return False
+            # Verify target is in range
+            max_range = getattr(skill, "range_tiles", 1)
+            distance = abs(target_unit.gx - unit.gx) + abs(target_unit.gy - unit.gy)
+            if distance > max_range:
+                if not for_ai:
+                    self._log(f"{target_unit.name} is out of range for {skill.name}!")
+                return False
 
         # Check and consume resource costs
         can_use, error_msg = unit.has_resources_for_skill(skill)
@@ -979,11 +1139,186 @@ class BattleScene:
         self._next_turn()
         return True
 
+    # ------------ Targeting system ------------
+
+    def _enter_targeting_mode(self, unit: BattleUnit, action_type: Literal["attack", "skill"], skill: Optional[Skill] = None) -> bool:
+        """
+        Enter targeting mode for the given unit and action.
+        Returns True if targeting mode was entered (valid targets found), False otherwise.
+        """
+        # For skills, check cooldown and resources first
+        if action_type == "skill" and skill is not None:
+            # Check cooldown
+            cd = unit.cooldowns.get(skill.id, 0)
+            if cd > 0:
+                self._log(f"{skill.name} is on cooldown ({cd} turns).")
+                return False
+            
+            # Check resources
+            can_use, error_msg = unit.has_resources_for_skill(skill)
+            if not can_use:
+                if error_msg:
+                    self._log(error_msg)
+                return False
+            
+            # Self-targeting skills don't need targeting mode - execute immediately
+            if skill.target_mode == "self":
+                self._use_skill(unit, skill)
+                return False
+        
+        # Determine valid targets based on action type
+        valid_targets: List[BattleUnit] = []
+        
+        if action_type == "attack":
+            weapon_range = self._get_weapon_range(unit)
+            valid_targets = self._enemies_in_range(unit, weapon_range)
+        elif action_type == "skill" and skill is not None:
+            if skill.target_mode == "adjacent_enemy":
+                max_range = getattr(skill, "range_tiles", 1)
+                valid_targets = self._enemies_in_range(unit, max_range)
+        
+        if not valid_targets:
+            # No valid targets - can't enter targeting mode
+            if action_type == "attack":
+                weapon_range = self._get_weapon_range(unit)
+                if weapon_range > 1:
+                    self._log(f"No enemy in range! (weapon range: {weapon_range})")
+                else:
+                    self._log("No enemy in range!")
+            elif skill:
+                self._log(f"No enemy in range for {skill.name}!")
+            return False
+        
+        # Enter targeting mode
+        self.targeting_mode = {
+            "action_type": action_type,
+            "skill": skill,
+            "targets": valid_targets,
+            "target_index": 0,  # Start with first target
+        }
+        return True
+
+    def _exit_targeting_mode(self) -> None:
+        """Exit targeting mode without executing an action."""
+        self.targeting_mode = None
+
+    def _get_current_target(self) -> Optional[BattleUnit]:
+        """Get the currently selected target in targeting mode."""
+        if self.targeting_mode is None:
+            return None
+        targets = self.targeting_mode.get("targets", [])
+        target_index = self.targeting_mode.get("target_index", 0)
+        if targets and 0 <= target_index < len(targets):
+            return targets[target_index]
+        return None
+
+    def _get_damage_preview(self, unit: BattleUnit, target: BattleUnit) -> tuple[Optional[int], Optional[int]]:
+        """
+        Calculate and return the damage range that would be dealt by the current action.
+        Returns (normal_damage, crit_damage) tuple, or (None, None) if no valid preview.
+        """
+        if self.targeting_mode is None:
+            return None, None
+        
+        action_type = self.targeting_mode.get("action_type")
+        skill = self.targeting_mode.get("skill")
+        base_damage = None
+        
+        if action_type == "attack":
+            weapon_range = self._get_weapon_range(unit)
+            distance = abs(target.gx - unit.gx) + abs(target.gy - unit.gy)
+            
+            if distance > weapon_range:
+                return None, None
+            
+            base_damage = unit.attack_power
+            
+            # Apply damage falloff for ranged attacks
+            if weapon_range > 1 and distance > 1:
+                falloff_factor = 1.0 - (0.15 * (distance - 1) / (weapon_range - 1))
+                base_damage = int(base_damage * falloff_factor)
+                base_damage = max(1, base_damage)
+        
+        elif action_type == "skill" and skill is not None:
+            if skill.base_power <= 0:
+                return None, None  # Non-damage skill
+            
+            max_range = getattr(skill, "range_tiles", 1)
+            distance = abs(target.gx - unit.gx) + abs(target.gy - unit.gy)
+            
+            if distance > max_range:
+                return None, None
+            
+            base = unit.attack_power
+            dmg = base * skill.base_power
+            if skill.uses_skill_power:
+                sp = float(getattr(unit.entity, "skill_power", 1.0))
+                dmg *= max(DEFAULT_MIN_SKILL_POWER, sp)
+            
+            base_damage = int(dmg)
+        
+        if base_damage is None:
+            return None, None
+        
+        normal_damage = self._calculate_damage(unit, target, base_damage, is_crit=False)
+        crit_damage = self._calculate_damage(unit, target, base_damage, is_crit=True)
+        return normal_damage, crit_damage
+
+    def _cycle_target(self, direction: int) -> None:
+        """
+        Cycle to next/previous target in targeting mode.
+        direction: 1 for next, -1 for previous.
+        """
+        if self.targeting_mode is None:
+            return
+        targets = self.targeting_mode.get("targets", [])
+        if not targets:
+            return
+        current_index = self.targeting_mode.get("target_index", 0)
+        new_index = (current_index + direction) % len(targets)
+        self.targeting_mode["target_index"] = new_index
+
+    def _execute_targeted_action(self) -> bool:
+        """
+        Execute the action that's pending in targeting mode.
+        Returns True if action was executed, False otherwise.
+        """
+        if self.targeting_mode is None:
+            return False
+        
+        unit = self._active_unit()
+        if unit.side != "player":
+            return False
+        
+        target = self._get_current_target()
+        if target is None:
+            return False
+        
+        action_type = self.targeting_mode.get("action_type")
+        skill = self.targeting_mode.get("skill")
+        
+        # Execute the action
+        executed = False
+        if action_type == "attack":
+            self._perform_basic_attack_targeted(unit, target)
+            executed = True
+        elif action_type == "skill" and skill is not None:
+            executed = self._use_skill_targeted(unit, skill, target)
+        
+        # Exit targeting mode after execution
+        if executed:
+            self._exit_targeting_mode()
+        
+        return executed
+
     # ------------ Turn helpers ------------
 
     def _next_turn(self) -> None:
         if self.status != "ongoing":
             return
+
+        # Clear targeting mode when turn changes
+        self._exit_targeting_mode()
 
         alive_units = [u for u in self.turn_order if u.is_alive]
         if not any(u.side == "enemy" for u in alive_units):
@@ -1022,6 +1357,7 @@ class BattleScene:
             self._log("You can't move there.")
 
     def _perform_basic_attack(self, unit: BattleUnit) -> None:
+        """Perform basic attack with auto-targeting (for AI and backwards compatibility)."""
         if self._is_stunned(unit):
             self._log(f"{unit.name} is stunned and cannot act!")
             self._next_turn()
@@ -1045,8 +1381,23 @@ class BattleScene:
             key=lambda u: abs(u.gx - unit.gx) + abs(u.gy - unit.gy)
         )
         
-        # Calculate distance for damage falloff (ranged weapons)
+        self._perform_basic_attack_targeted(unit, target_unit)
+
+    def _perform_basic_attack_targeted(self, unit: BattleUnit, target_unit: BattleUnit) -> None:
+        """Perform basic attack on a specific target."""
+        if self._is_stunned(unit):
+            self._log(f"{unit.name} is stunned and cannot act!")
+            self._next_turn()
+            return
+
+        # Verify target is in range
+        weapon_range = self._get_weapon_range(unit)
         distance = abs(target_unit.gx - unit.gx) + abs(target_unit.gy - unit.gy)
+        if distance > weapon_range:
+            self._log(f"{target_unit.name} is out of range!")
+            return
+        
+        # Calculate damage with falloff for ranged weapons
         base_damage = unit.attack_power
         
         # Apply damage falloff for ranged attacks at longer distances
@@ -1112,7 +1463,58 @@ class BattleScene:
             return
 
         # ------------------------------
-        # Movement (logical actions)
+        # Targeting mode navigation (if active)
+        # ------------------------------
+        if self.targeting_mode is not None:
+            # Cancel targeting mode
+            if input_manager is not None:
+                if input_manager.event_matches_action(InputAction.CANCEL, event):
+                    self._exit_targeting_mode()
+                    return
+            else:
+                if event.key == pygame.K_ESCAPE:
+                    self._exit_targeting_mode()
+                    return
+            
+            # Confirm target selection
+            if input_manager is not None:
+                if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                    self._execute_targeted_action()
+                    return
+            else:
+                if event.key in (pygame.K_SPACE, pygame.K_RETURN):
+                    self._execute_targeted_action()
+                    return
+            
+            # Cycle through targets
+            if input_manager is not None:
+                if input_manager.event_matches_action(InputAction.MOVE_UP, event) or \
+                   input_manager.event_matches_action(InputAction.MOVE_LEFT, event) or \
+                   input_manager.event_matches_action(InputAction.SCROLL_UP, event):
+                    self._cycle_target(-1)
+                    return
+                if input_manager.event_matches_action(InputAction.MOVE_DOWN, event) or \
+                   input_manager.event_matches_action(InputAction.MOVE_RIGHT, event) or \
+                   input_manager.event_matches_action(InputAction.SCROLL_DOWN, event):
+                    self._cycle_target(1)
+                    return
+            else:
+                # Fallback key handling for targeting
+                if event.key in (pygame.K_UP, pygame.K_LEFT, pygame.K_w, pygame.K_a):
+                    self._cycle_target(-1)
+                    return
+                if event.key in (pygame.K_DOWN, pygame.K_RIGHT, pygame.K_s, pygame.K_d):
+                    self._cycle_target(1)
+                    return
+                if event.key == pygame.K_TAB:
+                    self._cycle_target(1)
+                    return
+            
+            # In targeting mode, ignore other inputs
+            return
+
+        # ------------------------------
+        # Movement (logical actions) - only when not targeting
         # ------------------------------
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.MOVE_UP, event):
@@ -1144,20 +1546,23 @@ class BattleScene:
                 return
 
         # ------------------------------
-        # Basic attack
+        # Basic attack - enter targeting mode
         # ------------------------------
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.BASIC_ATTACK, event):
-                self._perform_basic_attack(unit)
+                if not self._enter_targeting_mode(unit, "attack"):
+                    # No valid targets, can't enter targeting mode
+                    pass
                 return
         else:
             if event.key == pygame.K_SPACE:
-                self._perform_basic_attack(unit)
+                if not self._enter_targeting_mode(unit, "attack"):
+                    # No valid targets, can't enter targeting mode
+                    pass
                 return
 
-
         # ------------------------------
-        # Guard (dedicated action)
+        # Guard (dedicated action) - no targeting needed
         # ------------------------------
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.GUARD, event):
@@ -1166,9 +1571,8 @@ class BattleScene:
                     self._use_skill(unit, guard_skill)
                     return
 
-
         # ------------------------------
-        # Skills (hotbar-style)
+        # Skills (hotbar-style) - enter targeting mode
         # ------------------------------
         skill = None
         if input_manager is not None:
@@ -1191,7 +1595,13 @@ class BattleScene:
             skill = self._skill_for_key(unit, event.key)
 
         if skill is not None:
-            self._use_skill(unit, skill)
+            # Self-targeting skills execute immediately, others enter targeting mode
+            if skill.target_mode == "self":
+                self._use_skill(unit, skill)
+            else:
+                if not self._enter_targeting_mode(unit, "skill", skill=skill):
+                    # No valid targets or skill on cooldown/insufficient resources
+                    pass
             return
 
     # ------------ Enemy AI ------------
@@ -1199,6 +1609,21 @@ class BattleScene:
     def update(self, dt: float) -> None:
         if self.status != "ongoing":
             return
+
+        # Update floating damage numbers
+        for damage_info in self._floating_damage[:]:
+            damage_info["timer"] -= dt
+            # Crits float faster and higher
+            speed = 50 if damage_info.get("is_crit", False) else 40
+            damage_info["y_offset"] += dt * speed
+            if damage_info["timer"] <= 0:
+                self._floating_damage.remove(damage_info)
+        
+        # Update hit sparks
+        for spark in self._hit_sparks[:]:
+            spark["timer"] -= dt
+            if spark["timer"] <= 0:
+                self._hit_sparks.remove(spark)
 
         unit = self._active_unit()
 
@@ -1443,8 +1868,14 @@ class BattleScene:
         fg_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height)
         pygame.draw.rect(surface, color, fg_rect)
 
-    def _draw_units(self, surface: pygame.Surface) -> None:
+    def _draw_units(self, surface: pygame.Surface, screen_w: int) -> None:
         active = self._active_unit() if self.status == "ongoing" else None
+        
+        # Get current target if in targeting mode
+        current_target = self._get_current_target() if self.targeting_mode is not None else None
+        valid_targets: List[BattleUnit] = []
+        if self.targeting_mode is not None:
+            valid_targets = self.targeting_mode.get("targets", [])
 
         # ---------------- Player units ----------------
         for unit in self.player_units:
@@ -1517,6 +1948,23 @@ class BattleScene:
             # Highlight active unit
             if active is unit:
                 pygame.draw.rect(surface, (255, 200, 160), rect, width=3)
+            
+            # Highlight valid targets in targeting mode
+            if unit in valid_targets:
+                if current_target is unit:
+                    # Selected target: bright yellow highlight
+                    pygame.draw.rect(surface, (255, 255, 100), rect, width=4)
+                    # Draw an additional outer glow effect
+                    outer_rect = pygame.Rect(
+                        rect.x - 3,
+                        rect.y - 3,
+                        rect.width + 6,
+                        rect.height + 6,
+                    )
+                    pygame.draw.rect(surface, (255, 255, 150, 100), outer_rect, width=2)
+                else:
+                    # Valid but not selected: lighter highlight
+                    pygame.draw.rect(surface, (200, 200, 100), rect, width=3)
 
             # HP bar
             self._draw_hp_bar(surface, rect, unit, is_player=False)
@@ -1541,6 +1989,284 @@ class BattleScene:
             name_x = rect.centerx - name_surf.get_width() // 2
             name_y = rect.bottom + 10
             surface.blit(name_surf, (name_x, name_y))
+        
+        # ---------------- Floating damage numbers ----------------
+        self._draw_floating_damage(surface)
+        
+        # ---------------- Hit sparks (drawn after units) ----------------
+        self._draw_hit_sparks(surface)
+
+    def _draw_floating_damage(self, surface: pygame.Surface) -> None:
+        """Draw floating damage numbers that rise and fade."""
+        for damage_info in self._floating_damage:
+            target = damage_info["target"]
+            damage = damage_info["damage"]
+            y_offset = damage_info["y_offset"]
+            timer = damage_info["timer"]
+            is_crit = damage_info.get("is_crit", False)
+            is_kill = damage_info.get("is_kill", False)
+            
+            if not target.is_alive and not is_kill:
+                continue
+            
+            # Calculate position above the target unit
+            x = self.grid_origin_x + target.gx * self.cell_size + self.cell_size // 2
+            y = self.grid_origin_y + target.gy * self.cell_size - y_offset
+            
+            # Calculate alpha based on remaining time (fade out)
+            max_time = 1.2 if is_crit else 1.0
+            alpha = min(255, int(255 * (timer / max_time)))
+            
+            # Color based on crit status and damage
+            if is_crit:
+                color = (255, 255, 100)  # Bright yellow for crits
+                damage_text = f"CRIT! -{damage}"
+            elif is_kill:
+                color = (255, 200, 0)  # Orange for kills
+                damage_text = f"-{damage}!"
+            elif damage >= 20:
+                color = (255, 100, 100)  # Bright red for big hits
+                damage_text = f"-{damage}"
+            elif damage >= 10:
+                color = (255, 150, 150)  # Medium red
+                damage_text = f"-{damage}"
+            else:
+                color = (255, 200, 200)  # Light red for small hits
+                damage_text = f"-{damage}"
+            
+            # Render damage text with shadow for visibility
+            # Shadow
+            shadow_surf = self.font.render(damage_text, True, (0, 0, 0))
+            surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 1, y + 1))
+            # Main text
+            text_surf = self.font.render(damage_text, True, color)
+            text_x = x - text_surf.get_width() // 2
+            text_y = y
+            surface.blit(text_surf, (text_x, text_y))
+            
+            # Draw additional crit indicator (star or sparkle)
+            if is_crit:
+                crit_size = 8
+                pygame.draw.circle(surface, (255, 255, 200), (x, y - 15), crit_size, 2)
+                pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 15), (x + crit_size, y - 15), 2)
+                pygame.draw.line(surface, (255, 255, 200), (x, y - 15 - crit_size), (x, y - 15 + crit_size), 2)
+
+    def _draw_hit_sparks(self, surface: pygame.Surface) -> None:
+        """Draw hit spark effects at impact locations."""
+        for spark in self._hit_sparks:
+            x = spark["x"]
+            y = spark["y"]
+            timer = spark["timer"]
+            is_crit = spark.get("is_crit", False)
+            
+            # Spark size based on remaining time (fade out)
+            max_time = 0.3
+            size = int(6 * (timer / max_time))
+            
+            if size <= 0:
+                continue
+            
+            # Color based on crit
+            if is_crit:
+                color = (255, 255, 150)  # Yellow spark for crits
+                # Draw multiple sparks for crit (4 sparks in a cross pattern)
+                for i in range(4):
+                    angle = (i * 90) * math.pi / 180
+                    offset = size
+                    spark_x = int(x + offset * math.cos(angle))
+                    spark_y = int(y + offset * math.sin(angle))
+                    pygame.draw.circle(surface, color, (spark_x, spark_y), size // 2)
+                # Center spark
+                pygame.draw.circle(surface, (255, 255, 200), (x, y), size)
+            else:
+                color = (255, 200, 100)  # Orange spark
+                pygame.draw.circle(surface, color, (x, y), size)
+
+    def _draw_damage_preview(self, surface: pygame.Surface, target: BattleUnit, normal_damage: int, crit_damage: Optional[int]) -> None:
+        """Draw damage preview above the selected target."""
+        x = self.grid_origin_x + target.gx * self.cell_size + self.cell_size // 2
+        y = self.grid_origin_y + target.gy * self.cell_size - 35  # Above the unit
+        
+        # Build preview text
+        if crit_damage is not None and crit_damage > normal_damage:
+            preview_text = f"{normal_damage}-{crit_damage} dmg ({int(BASE_CRIT_CHANCE * 100)}% crit)"
+        else:
+            preview_text = f"{normal_damage} dmg"
+        
+        # Create background panel
+        text_surf = self.font.render(preview_text, True, (255, 255, 255))
+        panel_w = text_surf.get_width() + 12
+        panel_h = text_surf.get_height() + 6
+        panel_x = x - panel_w // 2
+        panel_y = y - panel_h // 2
+        
+        # Semi-transparent dark background
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 200))
+        surface.blit(panel, (panel_x, panel_y))
+        
+        # Border
+        pygame.draw.rect(surface, (150, 200, 255), (panel_x, panel_y, panel_w, panel_h), 2)
+        
+        # Text
+        text_x = x - text_surf.get_width() // 2
+        text_y = y - text_surf.get_height() // 2
+        surface.blit(text_surf, (text_x, text_y))
+    
+    def _draw_enemy_info_panel(self, surface: pygame.Surface, target: BattleUnit, screen_w: int) -> None:
+        """Draw enemy stat information panel when targeting."""
+        if target.side == "player":
+            return  # Only show for enemies
+        
+        # Calculate position based on enemy cards
+        # Enemy cards are drawn starting at enemy_y = 20, with 70 height + 10 spacing each
+        card_width = 180
+        enemy_x = screen_w - card_width - 20
+        enemy_y = 20
+        card_h = 70
+        card_spacing = 10
+        
+        # Count how many enemy cards are drawn (alive enemies)
+        num_enemy_cards = sum(1 for u in self.enemy_units if u.is_alive)
+        
+        # Position panel below all enemy cards
+        panel_w = 200
+        panel_h = 100
+        panel_x = screen_w - panel_w - 20
+        panel_y = enemy_y + (num_enemy_cards * (card_h + card_spacing)) + 10  # Below all enemy cards with spacing
+        
+        # Background
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((20, 20, 30, 220))
+        surface.blit(panel, (panel_x, panel_y))
+        
+        # Border
+        pygame.draw.rect(surface, (150, 100, 100), (panel_x, panel_y, panel_w, panel_h), 2)
+        
+        # Title
+        title_surf = self.font.render("Target Info", True, (255, 200, 200))
+        surface.blit(title_surf, (panel_x + 6, panel_y + 4))
+        
+        # Stats
+        text_y = panel_y + 24
+        atk = getattr(target.entity, "attack_power", 0)
+        defense = getattr(target.entity, "defense", 0)
+        hp_ratio = target.hp / target.max_hp if target.max_hp > 0 else 0
+        
+        stats = [
+            f"HP: {target.hp}/{target.max_hp} ({int(hp_ratio * 100)}%)",
+            f"ATK: {atk}",
+            f"DEF: {defense}",
+        ]
+        
+        for stat_text in stats:
+            stat_surf = self.font.render(stat_text, True, (220, 220, 220))
+            surface.blit(stat_surf, (panel_x + 6, text_y))
+            text_y += 18
+        
+        # Status effects
+        if target.statuses:
+            status_names = [s.name.title() for s in target.statuses[:3]]  # Show first 3
+            status_text = "Status: " + ", ".join(status_names)
+            if len(target.statuses) > 3:
+                status_text += "..."
+            status_surf = self.font.render(status_text, True, (200, 200, 255))
+            surface.blit(status_surf, (panel_x + 6, text_y))
+    
+    def _draw_range_visualization(self, surface: pygame.Surface, unit: BattleUnit) -> None:
+        """Draw range visualization on the grid when targeting."""
+        if self.targeting_mode is None:
+            return
+        
+        action_type = self.targeting_mode.get("action_type")
+        skill = self.targeting_mode.get("skill")
+        
+        # Determine range
+        max_range = 1
+        if action_type == "attack":
+            max_range = self._get_weapon_range(unit)
+        elif action_type == "skill" and skill is not None:
+            max_range = getattr(skill, "range_tiles", 1)
+        
+        # Draw range tiles
+        range_color = (100, 150, 255, 80)  # Semi-transparent blue
+        unit_gx, unit_gy = unit.gx, unit.gy
+        
+        for gx in range(self.grid_width):
+            for gy in range(self.grid_height):
+                distance = abs(gx - unit_gx) + abs(gy - unit_gy)
+                if distance <= max_range and distance > 0:  # Don't highlight unit's own tile
+                    x = self.grid_origin_x + gx * self.cell_size
+                    y = self.grid_origin_y + gy * self.cell_size
+                    rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
+                    
+                    # Semi-transparent overlay
+                    overlay = pygame.Surface((self.cell_size, self.cell_size), pygame.SRCALPHA)
+                    overlay.fill(range_color)
+                    surface.blit(overlay, (x, y))
+
+    def _draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int) -> None:
+        """Draw a small indicator showing the next few units in turn order."""
+        if not self.turn_order:
+            return
+        
+        # Get next 4 units in turn order (current + next 3)
+        next_units: List[BattleUnit] = []
+        current_idx = self.turn_index
+        
+        for i in range(4):
+            idx = (current_idx + i) % len(self.turn_order)
+            unit = self.turn_order[idx]
+            if unit.is_alive:
+                next_units.append(unit)
+            if len(next_units) >= 4:
+                break
+        
+        if len(next_units) <= 1:
+            return  # Don't show if only current unit
+        
+        # Draw small icons/names for upcoming turns
+        indicator_y = 115  # Just below the active unit panel
+        indicator_w = len(next_units) * 90
+        if indicator_w < 200:
+            indicator_w = 200  # Minimum width
+        indicator_x = (screen_w - indicator_w) // 2
+        
+        # Background panel
+        panel_h = 30
+        panel = pygame.Surface((indicator_w, panel_h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 150))
+        surface.blit(panel, (indicator_x, indicator_y))
+        
+        # Draw each upcoming unit
+        x_offset = 0
+        for i, unit in enumerate(next_units):
+            if i == 0:
+                label = "NOW"
+                color = (255, 255, 150)  # Current turn
+            else:
+                label = unit.name[:6]  # Truncate long names
+                if unit.side == "player":
+                    color = COLOR_PLAYER
+                else:
+                    color = COLOR_ENEMY
+            
+            # Small icon/indicator
+            icon_size = 20
+            icon_x = indicator_x + x_offset + 5
+            icon_y = indicator_y + 5
+            
+            # Draw colored square for the unit
+            pygame.draw.rect(surface, color, (icon_x, icon_y, icon_size, icon_size))
+            pygame.draw.rect(surface, (100, 100, 100), (icon_x, icon_y, icon_size, icon_size), 1)
+            
+            # Unit name/label
+            label_surf = self.font.render(label, True, (220, 220, 220))
+            label_x = icon_x + icon_size + 4
+            label_y = icon_y + (icon_size - label_surf.get_height()) // 2
+            surface.blit(label_surf, (label_x, label_y))
+            
+            x_offset += 90
 
     # ------------ Drawing ------------
 
@@ -1554,7 +2280,7 @@ class BattleScene:
         grid_px_w = self.grid_width * self.cell_size
         grid_px_h = self.grid_height * self.cell_size
 
-        top_ui_height = 110  # space for Party/Enemy HP, Turn, Active, etc.
+        top_ui_height = 150  # space for Party/Enemy HP, Turn, Active, Turn Order, etc.
         bottom_ui_height = 110  # space for log + key hints
 
         available_h = max(0, screen_h - top_ui_height - bottom_ui_height)
@@ -1567,7 +2293,25 @@ class BattleScene:
         # 2) Grid + units
         # ------------------------------------------------------------------
         self._draw_grid(surface)
-        self._draw_units(surface)
+        self._draw_units(surface, screen_w)
+        
+        # ---------------- Targeting overlays (drawn after units) ----------------
+        # ---------------- Damage preview (when targeting) ----------------
+        if self.targeting_mode is not None:
+            current_target = self._get_current_target()
+            if current_target is not None:
+                active_unit = self._active_unit()
+                if active_unit is not None:
+                    normal_dmg, crit_dmg = self._get_damage_preview(active_unit, current_target)
+                    if normal_dmg is not None:
+                        self._draw_damage_preview(surface, current_target, normal_dmg, crit_dmg)
+                        self._draw_enemy_info_panel(surface, current_target, screen_w)
+        
+        # ---------------- Range visualization (when targeting) ----------------
+        if self.targeting_mode is not None:
+            active_unit = self._active_unit()
+            if active_unit is not None:
+                self._draw_range_visualization(surface, active_unit)
 
         # ------------------------------------------------------------------
         # 3) Top UI: party / enemy unit cards + active unit panel
@@ -1644,6 +2388,10 @@ class BattleScene:
         )
         turn_x = (screen_w - turn_text.get_width()) // 2
         surface.blit(turn_text, (turn_x, 8))
+        
+        # Turn order indicator (show next 3-4 units)
+        if self.status == "ongoing":
+            self._draw_turn_order_indicator(surface, screen_w)
 
         # ------------------------------------------------------------------
         # 4) Bottom UI: combat log + key hints
@@ -1688,19 +2436,6 @@ class BattleScene:
             if active is not None and active.side == "player":
                 name_prefix = active.name
 
-            # --- Basic attack hint (Space or whatever it's bound to) ----
-            atk_part = "SPACE atk"
-            if input_manager is not None:
-                try:
-                    atk_keys = input_manager.get_bindings(InputAction.BASIC_ATTACK)
-                except AttributeError:
-                    atk_keys = set()
-                atk_labels: List[str] = []
-                for key in sorted(atk_keys):
-                    atk_labels.append(pygame.key.name(key).upper())
-                if atk_labels:
-                    atk_part = f"{'/'.join(atk_labels)} atk"
-
             # Draw skill hotbar if it's a player unit's turn (right side, log is on left)
             if active is not None and active.side == "player":
                 # Get input manager for key bindings
@@ -1708,35 +2443,81 @@ class BattleScene:
                 if game is not None:
                     input_manager = getattr(game, "input_manager", None)
                 
-                # Draw hotbar on the right side, above hint line
-                hotbar_y = hint_y - 80
-                # Calculate hotbar width to position it on the right
-                skill_slots = getattr(active, "skill_slots", [])
-                slot_width = 100
-                slot_spacing = 8
-                hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
-                hotbar_x = screen_w - hotbar_w - 40  # Right side with margin
-                _draw_battle_skill_hotbar(
-                    surface,
-                    self.font,
-                    hotbar_x,
-                    hotbar_y,
-                    active.skills,
-                    skill_slots,
-                    getattr(active, "cooldowns", {}),
-                    getattr(active, "current_stamina", 0),
-                    getattr(active, "max_stamina", 0),
-                    getattr(active, "current_mana", 0),
-                    getattr(active, "max_mana", 0),
-                    input_manager,
-                )
+                # Only show hotbar when not in targeting mode
+                if self.targeting_mode is None:
+                    # Draw hotbar on the right side, above hint line
+                    hotbar_y = hint_y - 80
+                    # Calculate hotbar width to position it on the right
+                    skill_slots = getattr(active, "skill_slots", [])
+                    slot_width = 100
+                    slot_spacing = 8
+                    hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
+                    hotbar_x = screen_w - hotbar_w - 40  # Right side with margin
+                    _draw_battle_skill_hotbar(
+                        surface,
+                        self.font,
+                        hotbar_x,
+                        hotbar_y,
+                        active.skills,
+                        skill_slots,
+                        getattr(active, "cooldowns", {}),
+                        getattr(active, "current_stamina", 0),
+                        getattr(active, "max_stamina", 0),
+                        getattr(active, "current_mana", 0),
+                        getattr(active, "max_mana", 0),
+                        input_manager,
+                    )
             
-            # Simplified hint - skills are shown in visual hotbar, so just show movement and attack
-            hint_text = self.font.render(
-                f"{name_prefix}: move WASD/arrows | {atk_part}",
-                True,
-                (180, 180, 180),
-            )
+            # Show targeting instructions or normal hints
+            if self.targeting_mode is not None:
+                # Targeting mode hints
+                target = self._get_current_target()
+                action_type = self.targeting_mode.get("action_type", "attack")
+                skill = self.targeting_mode.get("skill")
+                
+                action_name = skill.name if skill else "Attack"
+                target_name = target.name if target else "None"
+                
+                # Get key bindings for hints
+                confirm_key = "SPACE"
+                cancel_key = "ESC"
+                cycle_key = "ARROWS/TAB"
+                if input_manager is not None:
+                    try:
+                        confirm_keys = input_manager.get_bindings(InputAction.CONFIRM)
+                        if confirm_keys:
+                            confirm_key = pygame.key.name(list(confirm_keys)[0]).upper()
+                        cancel_keys = input_manager.get_bindings(InputAction.CANCEL)
+                        if cancel_keys:
+                            cancel_key = pygame.key.name(list(cancel_keys)[0]).upper()
+                    except (AttributeError, TypeError):
+                        pass
+                
+                hint_text = self.font.render(
+                    f"Targeting: {action_name} → {target_name} | {confirm_key} confirm | {cancel_key} cancel | {cycle_key} cycle",
+                    True,
+                    (255, 255, 150),
+                )
+            else:
+                # Normal movement/action hints
+                # --- Basic attack hint (Space or whatever it's bound to) ----
+                atk_part = "SPACE atk"
+                if input_manager is not None:
+                    try:
+                        atk_keys = input_manager.get_bindings(InputAction.BASIC_ATTACK)
+                    except AttributeError:
+                        atk_keys = set()
+                    atk_labels: List[str] = []
+                    for key in sorted(atk_keys):
+                        atk_labels.append(pygame.key.name(key).upper())
+                    if atk_labels:
+                        atk_part = f"{'/'.join(atk_labels)} atk"
+                
+                hint_text = self.font.render(
+                    f"{name_prefix}: move WASD/arrows | {atk_part}",
+                    True,
+                    (180, 180, 180),
+                )
             surface.blit(hint_text, (40, hint_y))
 
 

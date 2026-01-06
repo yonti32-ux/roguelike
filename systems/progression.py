@@ -1,7 +1,7 @@
 # systems/progression.py
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict
 import copy
 
 from .stats import StatBlock
@@ -46,6 +46,13 @@ class HeroStats:
         default_factory=lambda: [None, None, None, None]
     )
 
+    # Skill progression system
+    # Available skill points to spend on upgrading skills
+    skill_points: int = 0
+    
+    # Track skill ranks: skill_id -> current_rank (0 = unranked, max 5)
+    skill_ranks: Dict[str, int] = field(default_factory=dict)
+
     # ------------------------------------------------------------------
     # XP / Level
     # ------------------------------------------------------------------
@@ -89,8 +96,19 @@ class HeroStats:
             self.base.max_hp += 5
             self.base.attack += 1
             # defense / skill_power are mostly perk- or reward-driven
+            
+            # Resource pool growth per level
+            self.base.max_stamina += 3  # +3 stamina per level
+            self.base.max_mana += 2  # +2 mana per level
+
+            # Grant skill points on level up
+            # Formula: 1 + (level // 5) points per level
+            points_gained = 1 + (self.level // 5)
+            self.skill_points += points_gained
 
             messages.append(f"Level up! You reached level {self.level}.")
+            if points_gained > 0:
+                messages.append(f"Gained {points_gained} skill point{'s' if points_gained > 1 else ''}.")
 
         return messages
 
@@ -161,6 +179,10 @@ class HeroStats:
 
         # Start with the class's default perks
         self.perks = list(class_def.starting_perks)
+
+        # Reset skill progression
+        self.skill_points = 0
+        self.skill_ranks = {}
 
         # Seed a simple default hotbar layout for a fresh hero.
         # Guard stays on its dedicated GUARD action; we prefer "power_strike"
@@ -255,3 +277,54 @@ class HeroStats:
             ordered.append(None)
 
         self.skill_slots = ordered[:4]
+
+    # ------------------------------------------------------------------
+    # Skill rank helpers
+    # ------------------------------------------------------------------
+
+    def get_skill_rank(self, skill_id: str) -> int:
+        """Get the current rank of a skill (0 if not ranked)."""
+        return self.skill_ranks.get(skill_id, 0)
+
+    def can_upgrade_skill(self, skill_id: str) -> bool:
+        """
+        Check if a skill can be upgraded.
+        
+        Requirements:
+        - Skill must exist
+        - Current rank must be less than max_rank
+        - Must have enough skill points for the next rank
+        """
+        from .skills import get, get_skill_rank_cost
+        
+        try:
+            skill = get(skill_id)
+        except KeyError:
+            return False
+        
+        current_rank = self.get_skill_rank(skill_id)
+        if current_rank >= skill.max_rank:
+            return False
+        
+        next_rank = current_rank + 1
+        cost = get_skill_rank_cost(next_rank)
+        return self.skill_points >= cost
+
+    def upgrade_skill(self, skill_id: str) -> bool:
+        """
+        Upgrade a skill by one rank.
+        
+        Returns True if upgrade was successful, False otherwise.
+        """
+        if not self.can_upgrade_skill(skill_id):
+            return False
+        
+        from .skills import get, get_skill_rank_cost
+        
+        current_rank = self.get_skill_rank(skill_id)
+        next_rank = current_rank + 1
+        cost = get_skill_rank_cost(next_rank)
+        
+        self.skill_points -= cost
+        self.skill_ranks[skill_id] = next_rank
+        return True
