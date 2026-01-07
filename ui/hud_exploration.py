@@ -352,7 +352,7 @@ def draw_exploration_ui(game: "Game") -> None:
 
     hint_text = ui_font.render(
         "Move WASD/arrows | '.' down ',' up | E: interact | C: sheet | I: inventory | "
-        "K: history | L: battle log | Z/X: zoom",
+        "K: history | L: battle log | H: tutorial | Z/X: zoom",
         True,
         (170, 170, 170),
     )
@@ -442,4 +442,9 @@ def draw_exploration_ui(game: "Game") -> None:
             close_txt,
             (overlay_x + padding_x, overlay_y + log_height - line_height - scale_value(4, ui_scale)),
         )
+
+    # Exploration tutorial overlay
+    if getattr(game, "show_exploration_tutorial", False):
+        from ui.exploration_tutorial import draw_exploration_tutorial
+        draw_exploration_tutorial(screen, ui_font, game)
 

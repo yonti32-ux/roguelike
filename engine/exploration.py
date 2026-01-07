@@ -49,6 +49,15 @@ class ExplorationController:
         """Handle input while in exploration mode."""
         game = self.game
 
+        # Handle mouse wheel for tutorial scrolling
+        if event.type == pygame.MOUSEWHEEL:
+            if getattr(game, "show_exploration_tutorial", False):
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+                # Scroll tutorial (negative y means scroll up)
+                game.exploration_tutorial_scroll_offset = max(0, game.exploration_tutorial_scroll_offset - event.y * 30)
+            return
+
         if event.type != pygame.KEYDOWN:
             return
 
@@ -124,6 +133,45 @@ class ExplorationController:
         else:
             if event.key == pygame.K_k:
                 game.toggle_exploration_log_overlay()
+                return
+
+        # Toggle exploration tutorial (H key)
+        if event.key == pygame.K_h:
+            game.show_exploration_tutorial = not getattr(game, "show_exploration_tutorial", False)
+            if getattr(game, "show_exploration_tutorial", False):
+                # Close other overlays when opening tutorial
+                game.show_exploration_log = False
+                # Initialize scroll offset if not exists
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+            return
+
+        # Handle tutorial scrolling and closing
+        if getattr(game, "show_exploration_tutorial", False):
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_h:
+                game.show_exploration_tutorial = False
+                game.exploration_tutorial_scroll_offset = 0
+                return
+            # Handle scrolling with arrow keys
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+                game.exploration_tutorial_scroll_offset = max(0, game.exploration_tutorial_scroll_offset - 20)
+                return
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+                game.exploration_tutorial_scroll_offset += 20
+                return
+            if event.key == pygame.K_PAGEUP:
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+                game.exploration_tutorial_scroll_offset = max(0, game.exploration_tutorial_scroll_offset - 200)
+                return
+            if event.key == pygame.K_PAGEDOWN:
+                if not hasattr(game, "exploration_tutorial_scroll_offset"):
+                    game.exploration_tutorial_scroll_offset = 0
+                game.exploration_tutorial_scroll_offset += 200
                 return
 
         # Interact (chest / event / merchant / etc.)

@@ -47,7 +47,7 @@ except Exception:  # telemetry must never break the game
 
 
 # How far the player can see in tiles. Feel free to tweak.
-FOV_RADIUS_TILES = 12
+FOV_RADIUS_TILES = 10
 
 
 class GameMode:
@@ -126,6 +126,16 @@ class Game:
         self.inventory_page_size: int = 20  # More items visible in fullscreen
         self.inventory_scroll_offset: int = 0
         self.inventory_cursor: int = 0  # Cursor position for item selection
+        
+        # Inventory enhancements: filtering, sorting, search
+        from ui.inventory_enhancements import FilterMode, SortMode
+        self.inventory_filter: FilterMode = FilterMode.ALL
+        self.inventory_sort: SortMode = SortMode.DEFAULT
+        self.inventory_search: str = ""
+        
+        # Tooltip system
+        from ui.tooltip import Tooltip
+        self.tooltip = Tooltip()
 
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
@@ -181,6 +191,17 @@ class Game:
 
         # Debug flags
         self.debug_reveal_map: bool = False
+        
+        # Debug console
+        try:
+            from .debug_console import DebugConsole
+            self.debug_console = DebugConsole(screen)
+            # Register with error handler
+            from .error_handler import set_debug_console
+            set_debug_console(self.debug_console)
+        except Exception:
+            # If debug console fails to initialize, continue without it
+            self.debug_console = None
 
         # Display mode
         self.fullscreen: bool = False
@@ -287,6 +308,10 @@ class Game:
             # Closing the inventory: if it owned the focus, clear active_screen.
             if getattr(self, "active_screen", None) is getattr(self, "inventory_screen", None):
                 self.active_screen = None
+            # Clear tooltip when closing inventory
+            tooltip = getattr(self, "tooltip", None)
+            if tooltip:
+                tooltip.clear()
 
     def equip_item_for_inventory_focus(self, item_id: str) -> None:
         """
@@ -1283,6 +1308,12 @@ class Game:
         if self.paused:
             return
         
+        # Update tooltip system
+        tooltip = getattr(self, "tooltip", None)
+        if tooltip:
+            mouse_pos = pygame.mouse.get_pos()
+            tooltip.update(dt, mouse_pos, tooltip.hover_target)
+        
         if self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
                 self.post_battle_grace = max(0.0, self.post_battle_grace - dt)
@@ -1338,6 +1369,12 @@ class Game:
             self.toggle_fullscreen()
             return
         
+        # Debug console toggle (F12 or ~)
+        if event.type == pygame.KEYDOWN and (event.key == pygame.K_F12 or event.key == pygame.K_BACKQUOTE):
+            if self.debug_console:
+                self.debug_console.toggle()
+            return
+        
         # Global save/load game
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F5:
@@ -1377,6 +1414,11 @@ class Game:
                         self.add_message("No save found in that slot.")
                 return
 
+        # Debug console input handling (has priority when visible)
+        if self.debug_console and self.debug_console.is_visible():
+            if self.debug_console.handle_event(event, game=self):
+                return  # Event consumed by debug console
+        
         # Mode-specific handling.
         if self.mode == GameMode.EXPLORATION:
             # If a modal screen is active (inventory, character sheet, etc.),
@@ -1423,6 +1465,11 @@ class Game:
         
         # Draw pause overlay if paused (pause menu handles its own drawing)
         # The pause menu is drawn by _handle_pause_menu, so we don't need to draw it here
+        
+        # Debug console (drawn on top of everything, needs clock from main loop)
+        # Note: Clock is passed via a temporary attribute set in main loop
+        if self.debug_console and hasattr(self, '_debug_clock'):
+            self.debug_console.draw(game=self, clock=self._debug_clock)
 
         # Flip the final composed frame to the screen.
         pygame.display.flip()
@@ -1476,6 +1523,10 @@ class Game:
         self.screen.fill(COLOR_BG)
         # Pass the Game instance so the battle scene can read input bindings
         self.battle_scene.draw(self.screen, self)
+        
+        # Debug console (drawn on top of everything)
+        if self.debug_console:
+            self.debug_console.draw(game=self, clock=None)  # Clock passed from main loop
         # Note: Don't call pygame.display.flip() here - the main draw() method handles flipping
         # after all overlays are drawn to prevent flickering
 

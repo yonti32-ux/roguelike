@@ -49,6 +49,13 @@ class InventoryScreen:
     """
 
     def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        # Handle mouse events for tooltips
+        if event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            # Check if mouse is over an item (this will be handled in draw_inventory_fullscreen)
+            game.tooltip.mouse_pos = (mx, my)
+            return
+        
         if event.type != pygame.KEYDOWN:
             return
 
@@ -194,6 +201,86 @@ class InventoryScreen:
                 game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
                 return
 
+        # Filter shortcuts (F1-F7)
+        from ui.inventory_enhancements import FilterMode
+        if key == pygame.K_F1:
+            game.inventory_filter = FilterMode.ALL
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F2:
+            game.inventory_filter = FilterMode.WEAPON
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F3:
+            game.inventory_filter = FilterMode.ARMOR
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F4:
+            game.inventory_filter = FilterMode.TRINKET
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F5:
+            game.inventory_filter = FilterMode.CONSUMABLE
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F6:
+            game.inventory_filter = FilterMode.EQUIPPED
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F7:
+            game.inventory_filter = FilterMode.UNEQUIPPED
+            game.inventory_cursor = 0
+            return
+        
+        # Sort shortcuts (Ctrl+S cycles through sort modes)
+        from ui.inventory_enhancements import SortMode
+        mods = pygame.key.get_mods()
+        if key == pygame.K_s and (mods & pygame.KMOD_CTRL):
+            # Cycle through sort modes
+            sort_modes = [
+                SortMode.DEFAULT,
+                SortMode.NAME,
+                SortMode.RARITY,
+                SortMode.ATTACK,
+                SortMode.DEFENSE,
+                SortMode.HP,
+            ]
+            current_index = sort_modes.index(game.inventory_sort) if game.inventory_sort in sort_modes else 0
+            next_index = (current_index + 1) % len(sort_modes)
+            game.inventory_sort = sort_modes[next_index]
+            game.inventory_cursor = 0
+            return
+        
+        # Search mode toggle (Ctrl+F to start typing search query)
+        if key == pygame.K_f and (mods & pygame.KMOD_CTRL):
+            # Toggle search mode - for now just clear search
+            # In a full implementation, you'd enter a text input mode
+            game.inventory_search = ""
+            game.inventory_cursor = 0
+            return
+        
+        # Clear filter/sort/search (Ctrl+R)
+        if key == pygame.K_r and (mods & pygame.KMOD_CTRL):
+            game.inventory_filter = FilterMode.ALL
+            game.inventory_sort = SortMode.DEFAULT
+            game.inventory_search = ""
+            game.inventory_cursor = 0
+            return
+        
+        # Handle text input for search (when not a special key)
+        if game.inventory_search is not None:
+            # Simple search: type to search, backspace to clear
+            if key == pygame.K_BACKSPACE:
+                game.inventory_search = game.inventory_search[:-1] if game.inventory_search else ""
+                game.inventory_cursor = 0
+                return
+            elif 32 <= key <= 126:  # Printable ASCII
+                char = chr(key)
+                if not (mods & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META)):
+                    game.inventory_search = (game.inventory_search or "") + char
+                    game.inventory_cursor = 0
+                    return
+        
         # Equip or use selected item with Enter/Space
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.CONFIRM, event):

@@ -258,11 +258,18 @@ def main() -> None:
                     game.add_message("Failed to load game.")
                 print(f"Failed to load save slot {reload_slot}")
 
+        # Pass clock to game for debug console
+        if hasattr(game, 'debug_console'):
+            game._debug_clock = clock
+        
         try:
             game.update(dt)
             game.draw()
         except Exception as e:
             telemetry.log("exception", where="main_loop", error=repr(e), frame=frame, **_game_snapshot(game))
+            # Log to debug console if available
+            if hasattr(game, 'debug_console') and game.debug_console:
+                game.debug_console.log_error(e, "main_loop")
             raise
 
         pygame.display.flip()

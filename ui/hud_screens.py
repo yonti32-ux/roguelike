@@ -456,13 +456,48 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     screen.blit(backpack_title, (right_x, y))
     y += 28
     
+    # Show filter/sort/search status
+    from ui.inventory_enhancements import FilterMode, SortMode
+    filter_mode = getattr(game, "inventory_filter", FilterMode.ALL)
+    sort_mode = getattr(game, "inventory_sort", SortMode.DEFAULT)
+    search_query = getattr(game, "inventory_search", "") or ""
+    
+    status_lines = []
+    if filter_mode != FilterMode.ALL:
+        status_lines.append(f"Filter: {filter_mode.value}")
+    if sort_mode != SortMode.DEFAULT:
+        status_lines.append(f"Sort: {sort_mode.value}")
+    if search_query:
+        status_lines.append(f"Search: {search_query}")
+    
+    if status_lines:
+        status_text = " | ".join(status_lines)
+        status_surf = ui_font.render(status_text, True, (180, 200, 220))
+        screen.blit(status_surf, (right_x, y))
+        y += 24
+    
     if not inv or not getattr(inv, "items", None):
         none = ui_font.render("You are not carrying anything yet.", True, (180, 180, 180))
         screen.blit(none, (right_x, y))
     else:
-        # Group items by slot/category
+        # Apply filtering, sorting, and search
+        from ui.inventory_enhancements import filter_items, sort_items, search_items
+        
+        all_items = list(inv.items)
+        all_equipped = _get_all_equipped_items(game)
+        
+        # Apply search first
+        filtered_items = search_items(all_items, search_query)
+        
+        # Apply filter
+        filtered_items = filter_items(filtered_items, filter_mode, inv, all_equipped)
+        
+        # Apply sorting
+        sorted_items = sort_items(filtered_items, sort_mode)
+        
+        # Group items by slot/category (for display with category headers)
         items_by_slot: Dict[str, List[str]] = {}
-        for item_id in inv.items:
+        for item_id in sorted_items:
             item_def = get_item_def(item_id)
             if item_def is None:
                 slot = "misc"
@@ -475,18 +510,29 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         # Build flat list with category markers: (item_id or None for category header, slot_name)
         flat_list: List[Tuple[Optional[str], str]] = []
         slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
-        for slot in slot_order:
-            if slot in items_by_slot and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
         
-        # Add any remaining slots not in the preferred order
-        for slot in sorted(items_by_slot.keys()):
-            if slot not in slot_order and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
+        # If sorting is not default, don't show category headers
+        show_categories = sort_mode == SortMode.DEFAULT
+        
+        if show_categories:
+            for slot in slot_order:
+                if slot in items_by_slot and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+            
+            # Add any remaining slots not in the preferred order
+            for slot in sorted(items_by_slot.keys()):
+                if slot not in slot_order and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+        else:
+            # No category headers when sorting
+            for item_id in sorted_items:
+                item_def = get_item_def(item_id)
+                slot = item_def.slot if item_def else "misc"
+                flat_list.append((item_id, slot))
         
         # Get cursor position
         cursor = int(getattr(game, "inventory_cursor", 0))
@@ -524,6 +570,9 @@ def draw_inventory_fullscreen(game: "Game") -> None:
             
             # Track last shown category to avoid duplicate headers
             last_shown_category = None
+            
+            # Track item positions for hover detection
+            item_positions: Dict[str, Tuple[int, int, int, int]] = {}  # item_id -> (x, y, width, height)
             
             # Display items with category headers
             for flat_idx, (item_id, slot) in enumerate(flat_list):
@@ -590,13 +639,30 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                             if markers:
                                 equipped_marker = " [" + ",".join(markers) + "]"
                         
+                        # Calculate item height for hover detection
+                        item_start_y = y
+                        item_height = 20  # Name line
+                        
+                        # One-line stats/description, slightly dimmer and indented.
+                        # Show extra info (description) for the currently selected item.
+                        info_line = _build_item_info_line(item_def, include_description=is_selected)
+                        if info_line:
+                            item_height += 18
+                        else:
+                            item_height += 4
+                        
+                        # Store item position for hover detection
+                        item_rect_x = right_x - 10
+                        item_rect_y = item_start_y - 2
+                        item_rect_width = w - right_x - 80
+                        item_rect_height = item_height + 4
+                        item_positions[item_id] = (item_rect_x, item_rect_y, item_rect_width, item_rect_height)
+                        
                         # Highlight selected item with background
                         if is_selected:
-                            bg_width = w - right_x - 80
-                            bg_height = 38
-                            bg = pygame.Surface((bg_width, bg_height), pygame.SRCALPHA)
+                            bg = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
                             bg.fill((60, 60, 90, 210))
-                            screen.blit(bg, (right_x - 10, y - 2))
+                            screen.blit(bg, (item_rect_x, item_rect_y))
                         
                         # Item name with selection indicator + rarity tag
                         selection_marker = "> " if is_selected else "  "
@@ -618,7 +684,6 @@ def draw_inventory_fullscreen(game: "Game") -> None:
 
                         # One-line stats/description, slightly dimmer and indented.
                         # Show extra info (description) for the currently selected item.
-                        info_line = _build_item_info_line(item_def, include_description=is_selected)
                         if info_line:
                             info_color = (200, 200, 180) if is_selected else (170, 170, 170)
                             info_surf = ui_font.render(info_line, True, info_color)
@@ -627,6 +692,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                         else:
                             # Small extra spacing if no info line, to keep rows readable
                             y += 4
+                        
             
             # Scroll info
             if len(item_indices) > max_visible_lines:
@@ -635,11 +701,44 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                 scroll_text = f"Items {first_index}-{last_index} of {len(item_indices)}"
                 scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
                 screen.blit(scroll_surf, (right_x, y + 10))
+            
+            # Check for mouse hover on items for tooltips using tracked positions
+            tooltip = getattr(game, "tooltip", None)
+            if tooltip:
+                mx, my = tooltip.mouse_pos
+                hover_item_id = None
+                hover_item_def = None
+                
+                # Check each item's actual position for hover
+                for item_id, (rect_x, rect_y, rect_width, rect_height) in item_positions.items():
+                    item_rect = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
+                    if item_rect.collidepoint(mx, my):
+                        hover_item_def = get_item_def(item_id)
+                        if hover_item_def:
+                            hover_item_id = item_id
+                            break
+                
+                # Update tooltip if hovering over an item
+                if hover_item_def:
+                    from ui.tooltip import create_item_tooltip_data
+                    tooltip_data = create_item_tooltip_data(
+                        hover_item_def, game, focused_is_hero, focused_comp
+                    )
+                    tooltip.current_tooltip = tooltip_data
+                    tooltip.hover_target = hover_item_id
+                else:
+                    tooltip.current_tooltip = None
+                    tooltip.hover_target = None
+    
+    # Draw tooltip
+    tooltip = getattr(game, "tooltip", None)
+    if tooltip:
+        tooltip.draw(screen, ui_font)
     
     # Footer hints
     hints = [
         "Up/Down: select item | Enter/Space: equip | Q/E: switch character | PgUp/PgDn: page",
-        "TAB: switch screen | I/ESC: close"
+        "F1-F7: filter | Ctrl+S: sort | Ctrl+F: search | Ctrl+R: reset | TAB: switch screen | I/ESC: close"
     ]
     _draw_screen_footer(screen, ui_font, hints, w, h)
 

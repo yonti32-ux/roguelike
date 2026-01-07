@@ -1,6 +1,7 @@
 # world/game_map.py
 
 from typing import List, Tuple, Set
+import math
 
 import pygame
 
@@ -159,9 +160,57 @@ class GameMap:
                 return False
         return True
 
+    def _cast_ray(self, x0: int, y0: int, x1: int, y1: int, radius_sq: int) -> Set[Tuple[int, int]]:
+        """
+        Cast a ray from (x0, y0) to (x1, y1) and return all visible tiles along the way.
+        Stops when hitting a wall or going out of bounds.
+        Uses a more accurate line algorithm that handles diagonals better.
+        """
+        visible = set()
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        
+        x, y = x0, y0
+        
+        while True:
+            # Check if we're still within radius
+            dist_sq = (x - x0) * (x - x0) + (y - y0) * (y - y0)
+            if dist_sq > radius_sq:
+                break
+                
+            # Check bounds
+            if not self.in_bounds(x, y):
+                break
+                
+            # Add this tile to visible
+            visible.add((x, y))
+            
+            # Stop if we hit a blocking tile (but still mark it as visible)
+            if self.blocks_sight(x, y):
+                break
+                
+            # Stop if we reached the target
+            if x == x1 and y == y1:
+                break
+                
+            # Bresenham's line algorithm
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+                
+        return visible
+
     def compute_fov(self, center_tx: int, center_ty: int, radius: int = 8) -> None:
         """
-        Recompute FOV from (center_tx, center_ty).
+        Recompute FOV from (center_tx, center_ty) using improved raycasting.
+        Casts rays to all perimeter tiles to create smooth, circular FOV without diagonal artifacts.
         Fills self.visible and updates self.explored.
         
         Once a tile is explored, it stays in self.explored permanently,
@@ -179,22 +228,20 @@ class GameMap:
         self.visible.add((center_tx, center_ty))
         self.explored.add((center_tx, center_ty))
 
-        # Check all tiles in radius
-        for ty in range(center_ty - radius, center_ty + radius + 1):
-            for tx in range(center_tx - radius, center_tx + radius + 1):
-                if not self.in_bounds(tx, ty):
-                    continue
-                dx = tx - center_tx
-                dy = ty - center_ty
-                if dx * dx + dy * dy > radius_sq:
-                    continue
-                if (tx, ty) == (center_tx, center_ty):
-                    continue
-                if self._line_of_sight(center_tx, center_ty, tx, ty):
-                    # Add to visible (current FOV)
-                    self.visible.add((tx, ty))
-                    # Add to explored (permanent - stays even when out of FOV)
-                    self.explored.add((tx, ty))
+        # Cast rays in evenly spaced directions for smooth, circular FOV
+        # Use 8 * radius rays for good coverage (more rays = smoother, but slower)
+        num_rays = max(32, radius * 8)
+        
+        for i in range(num_rays):
+            angle = 2 * math.pi * i / num_rays
+            # Calculate target point on the circle perimeter
+            target_x = center_tx + int(radius * math.cos(angle))
+            target_y = center_ty + int(radius * math.sin(angle))
+            
+            # Cast ray and add all visible tiles
+            visible_tiles = self._cast_ray(center_tx, center_ty, target_x, target_y, radius_sq)
+            self.visible.update(visible_tiles)
+            self.explored.update(visible_tiles)
 
     # ------------------------------------------------------------------
     # Rendering
@@ -262,4 +309,21 @@ class GameMap:
                     )
 
                 pygame.draw.rect(surface, color, rect)
+                
+                # Draw stairs symbols to make them more obvious
+                from world.tiles import UP_STAIRS_TILE, DOWN_STAIRS_TILE
+                if tile == UP_STAIRS_TILE and coord in self.explored:
+                    # Draw up arrow (^) on stairs up
+                    arrow_font = pygame.font.Font(None, max(12, int(tile_screen_size * 0.6)))
+                    arrow_text = arrow_font.render("^", True, (255, 255, 255))
+                    arrow_x = sx + (tile_screen_size - arrow_text.get_width()) // 2
+                    arrow_y = sy + (tile_screen_size - arrow_text.get_height()) // 2
+                    surface.blit(arrow_text, (arrow_x, arrow_y))
+                elif tile == DOWN_STAIRS_TILE and coord in self.explored:
+                    # Draw down arrow (v) on stairs down
+                    arrow_font = pygame.font.Font(None, max(12, int(tile_screen_size * 0.6)))
+                    arrow_text = arrow_font.render("v", True, (255, 255, 255))
+                    arrow_x = sx + (tile_screen_size - arrow_text.get_width()) // 2
+                    arrow_y = sy + (tile_screen_size - arrow_text.get_height()) // 2
+                    surface.blit(arrow_text, (arrow_x, arrow_y))
 
