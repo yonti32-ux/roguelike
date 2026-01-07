@@ -345,7 +345,9 @@ def draw_exploration_ui(game: "Game") -> None:
     msg_y = band_y + scale_value(8, ui_scale)
     last_msg = getattr(game, "last_message", "")
     if last_msg:
-        msg_text = ui_font.render(last_msg, True, (200, 200, 200))
+        # Allow the message log to specify a preferred color (e.g. item rarity)
+        msg_color = getattr(game, "last_message_color", None) or (200, 200, 200)
+        msg_text = ui_font.render(last_msg, True, msg_color)
         screen.blit(msg_text, (scale_value(10, ui_scale), msg_y))
 
     hint_text = ui_font.render(
@@ -383,6 +385,8 @@ def draw_exploration_ui(game: "Game") -> None:
     # Exploration log overlay
     if getattr(game, "show_exploration_log", False):
         history: List[str] = list(getattr(game, "exploration_log", []))
+        # Optional parallel color list from the message log, if available.
+        history_colors: List = list(getattr(game, "exploration_log_colors", []))
         if not history:
             history = ["(No messages yet.)"]
 
@@ -413,8 +417,19 @@ def draw_exploration_ui(game: "Game") -> None:
         screen.blit(title_surf, (overlay_x + padding_x, y_log))
         y_log += title_height
 
-        for line in lines:
-            txt = ui_font.render(str(line), True, (220, 220, 220))
+        for idx, line in enumerate(lines):
+            # Default color for log entries
+            color = (220, 220, 220)
+            # If we have a parallel color list that matches history length,
+            # pull the matching color for this visible line.
+            if history_colors and len(history_colors) == len(history):
+                history_index = len(history) - len(lines) + idx
+                if 0 <= history_index < len(history_colors):
+                    entry_color = history_colors[history_index]
+                    if entry_color is not None:
+                        color = entry_color
+
+            txt = ui_font.render(str(line), True, color)
             screen.blit(txt, (overlay_x + padding_x, y_log))
             y_log += line_height
 

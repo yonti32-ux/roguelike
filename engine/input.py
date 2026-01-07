@@ -71,7 +71,12 @@ def create_default_input_manager() -> InputManager:
     mgr.bind_key(InputAction.CONFIRM, pygame.K_KP_ENTER)
     mgr.bind_key(InputAction.CONFIRM, pygame.K_SPACE)
 
-    mgr.bind_key(InputAction.CANCEL, pygame.K_x)  # X for cancel (ESC is for pause menu)
+    # Cancel / close overlays:
+    # - X is the primary "back/cancel" key
+    # - ESC is also bound so fullscreen screens (inventory, character, skills, etc.)
+    #   can advertise and respond to ESC to close.
+    mgr.bind_key(InputAction.CANCEL, pygame.K_x)
+    mgr.bind_key(InputAction.CANCEL, pygame.K_ESCAPE)
 
     # ------------------------------------------------------------------
     # Battle-related – hotbar + basic attack

@@ -145,7 +145,50 @@ class BattleAI:
         )
     
     def step_towards(self, unit: BattleUnit, target: BattleUnit) -> bool:
-        """Move unit one step towards target. Returns True if movement succeeded."""
+        """
+        Move unit one step towards target, preferably along a proper path.
+
+        Returns True if movement succeeded.
+        """
+        # If we're already on the target, nothing to do
+        if unit.gx == target.gx and unit.gy == target.gy:
+            return False
+
+        # --- Pathfinding-based step (smarter around obstacles/terrain) ---
+        path = None
+        try:
+            # Temporarily give the unit a large movement budget so A* can
+            # find a full path to the goal, then restore it.
+            original_mp = unit.current_movement_points
+            # Upper bound: crossing the whole grid horizontally + vertically
+            max_cost = self.scene.grid_width + self.scene.grid_height
+            unit.current_movement_points = max_cost
+            path = self.scene.pathfinding.find_path(unit, target.gx, target.gy)
+            unit.current_movement_points = original_mp
+        except Exception:
+            # Fail-safe: never let a pathfinding error break the AI turn
+            path = None
+            unit.current_movement_points = getattr(unit, "current_movement_points", 0)
+
+        # If we have a path, take the next step along it
+        if path and len(path) >= 2:
+            next_gx, next_gy = path[1]
+            dx = next_gx - unit.gx
+            dy = next_gy - unit.gy
+            # Normalise to a single-tile step (path is 4‑way so this should already be 1 tile)
+            if dx > 1:
+                dx = 1
+            elif dx < -1:
+                dx = -1
+            if dy > 1:
+                dy = 1
+            elif dy < -1:
+                dy = -1
+            if dx != 0 or dy != 0:
+                if self.scene._try_move_unit(unit, dx, dy):
+                    return True
+
+        # --- Fallback: simple greedy step (old behaviour) ---
         dx = target.gx - unit.gx
         dy = target.gy - unit.gy
 
@@ -477,8 +520,6 @@ class BattleAI:
                     if step_x != 0 or step_y != 0:
                         if self.scene._try_move_unit(unit, step_x, step_y):
                             self.scene._log(f"{unit.name} backs away.")
-                            self.scene._next_turn()
-                            return
             elif distance > weapon_range:
                 # Move closer if out of range
                 moved = self.step_towards(unit, target)
@@ -486,8 +527,6 @@ class BattleAI:
                     self.scene._log(f"{unit.name} advances.")
                 else:
                     self.scene._log(f"{unit.name} hesitates.")
-                self.scene._next_turn()
-                return
             else:
                 # In optimal range, reposition slightly
                 moved = self.step_towards(unit, target)
@@ -495,8 +534,6 @@ class BattleAI:
                     self.scene._log(f"{unit.name} repositions.")
                 else:
                     self.scene._log(f"{unit.name} hesitates.")
-                self.scene._next_turn()
-                return
         else:
             # Melee units: tactical movement based on role
             if profile == "caster" or profile == "support":
@@ -518,14 +555,10 @@ class BattleAI:
                         # Move vertically
                         if self.scene._try_move_unit(unit, 0, 1) or self.scene._try_move_unit(unit, 0, -1):
                             self.scene._log(f"{unit.name} repositions.")
-                            self.scene._next_turn()
-                            return
                     else:
                         # Move horizontally
                         if self.scene._try_move_unit(unit, 1, 0) or self.scene._try_move_unit(unit, -1, 0):
                             self.scene._log(f"{unit.name} repositions.")
-                            self.scene._next_turn()
-                            return
                     # If can't reposition, just advance
                     moved = self.step_towards(unit, target)
                     if moved:
@@ -573,8 +606,6 @@ class BattleAI:
                             
                             if self.scene._try_move_unit(unit, move_dx, move_dy):
                                 self.scene._log(f"{unit.name} maneuvers for a flank.")
-                                self.scene._next_turn()
-                                return
                     
                     # If no flanking position available, normal approach
                     moved = self.step_towards(unit, target)
@@ -604,8 +635,6 @@ class BattleAI:
                                     move_dy = 1 if move_dy > 0 else -1
                                 if self.scene._try_move_unit(unit, move_dx, move_dy):
                                     self.scene._log(f"{unit.name} repositions for a flank.")
-                                    self.scene._next_turn()
-                                    return
                     
                     # Already in good position or can't flank
                     moved = self.step_towards(unit, target)
@@ -616,6 +645,23 @@ class BattleAI:
             else:
                 # Brutes: direct charge forward
                 moved = self.step_towards(unit, target)
+
+                # If we couldn't advance directly (often because an ally is blocking),
+                # try a simple sidestep to work around the obstruction.
+                if not moved:
+                    dx = target.gx - unit.gx
+                    dy = target.gy - unit.gy
+
+                    # Decide whether we're mostly approaching horizontally or vertically
+                    if abs(dx) >= abs(dy):
+                        # Target is mostly to the left/right – try stepping up or down
+                        if self.scene._try_move_unit(unit, 0, -1) or self.scene._try_move_unit(unit, 0, 1):
+                            moved = True
+                    else:
+                        # Target is mostly above/below – try stepping left or right
+                        if self.scene._try_move_unit(unit, -1, 0) or self.scene._try_move_unit(unit, 1, 0):
+                            moved = True
+
                 if moved:
                     self.scene._log(f"{unit.name} charges forward.")
                 else:

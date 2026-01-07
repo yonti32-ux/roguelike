@@ -31,22 +31,47 @@ def _items_path() -> Path:
     return data_dir / "items.json"
 
 
+def _consumables_path() -> Path:
+    # systems/ -> project root / data / consumables.json
+    here = Path(__file__).resolve()
+    data_dir = here.parent.parent / "data"
+    return data_dir / "consumables.json"
+
+
 def _load_item_definitions() -> None:
     global _ITEM_DEFS, _ITEMS_LOADED
     if _ITEMS_LOADED:
         return
 
-    path = _items_path()
-    if not path.exists():
-        # Quiet fail: project can still run without items, but nothing to load.
-        _ITEM_DEFS = {}
-        _ITEMS_LOADED = True
-        return
+    items_path = _items_path()
+    consumables_path = _consumables_path()
 
     import json
 
-    with path.open("r", encoding="utf-8") as f:
-        raw_list = json.load(f)
+    raw_list = []
+
+    # Core equipment items
+    if items_path.exists():
+        with items_path.open("r", encoding="utf-8") as f:
+            raw_list.extend(json.load(f))
+
+    # Consumables are defined in a separate file but share the same basic
+    # item schema (id, name, slot, stats...). We merge them into the same
+    # ItemDef registry so inventory / UI can treat them uniformly.
+    if consumables_path.exists():
+        with consumables_path.open("r", encoding="utf-8") as f:
+            try:
+                extra = json.load(f)
+                if isinstance(extra, list):
+                    raw_list.extend(extra)
+            except Exception:
+                # Malformed consumables file should not break the rest of items.
+                pass
+
+    if not raw_list:
+        _ITEM_DEFS = {}
+        _ITEMS_LOADED = True
+        return
 
     defs: Dict[str, ItemDef] = {}
     for entry in raw_list:

@@ -212,6 +212,35 @@ def generate_floor(
                 shop_room = random.choice(shop_candidates)
                 shop_room.tag = "shop"
 
+            # 6) Graveyard room: themed undead encounter room (mid+ floors preferred)
+            graveyard_candidates = [r for r in rooms if r.tag == "generic"]
+            if graveyard_candidates and floor_index >= 2 and random.random() < 0.8:
+                graveyard_room = random.choice(graveyard_candidates)
+                graveyard_room.tag = "graveyard"
+
+            # 7) Sanctum room: safe-ish room for boons / healing (rarer)
+            sanctum_candidates = [r for r in rooms if r.tag == "generic"]
+            if sanctum_candidates and floor_index >= 3 and random.random() < 0.5:
+                sanctum_room = random.choice(sanctum_candidates)
+                sanctum_room.tag = "sanctum"
+
+            # 8) Extra future room tags: armory, library, arena
+            # These are mostly for later content hooks; for now they just mark rooms.
+            armory_candidates = [r for r in rooms if r.tag == "generic"]
+            if armory_candidates and floor_index >= 2 and random.random() < 0.5:
+                armory_room = random.choice(armory_candidates)
+                armory_room.tag = "armory"
+
+            library_candidates = [r for r in rooms if r.tag == "generic"]
+            if library_candidates and floor_index >= 2 and random.random() < 0.5:
+                library_room = random.choice(library_candidates)
+                library_room.tag = "library"
+
+            arena_candidates = [r for r in rooms if r.tag == "generic"]
+            if arena_candidates and floor_index >= 3 and random.random() < 0.4:
+                arena_room = random.choice(arena_candidates)
+                arena_room.tag = "arena"
+
     # Decide stair tiles (still using first/last room centers)
     if rooms:
         up_tx, up_ty = rooms[0].center()

@@ -1,7 +1,7 @@
 # systems/skills.py
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal, Callable, Dict, List
+from typing import Optional, Literal, Callable, Dict, List, Tuple
 
 import pygame
 
@@ -29,6 +29,11 @@ class Skill:
                           Empty list means all classes can use it.
     - make_self_status / make_target_status: factories returning
       StatusEffect instances to apply when the skill fires.
+    - aoe_radius:  If > 0, skill has AoE effect. Radius in tiles (0 = single target).
+    - aoe_shape:   Shape of AoE: "circle" or "square" (default: "circle")
+    - aoe_affects_allies: If True, AoE affects friendly units (default: False)
+    - aoe_affects_enemies: If True, AoE affects enemy units (default: True)
+    - aoe_affects_self: If True, AoE affects the caster (default: False)
     """
     id: str
     name: str
@@ -45,6 +50,13 @@ class Skill:
 
     make_self_status: Optional[Callable[[], StatusEffect]] = None
     make_target_status: Optional[Callable[[], StatusEffect]] = None
+    
+    # AoE fields
+    aoe_radius: int = 0  # 0 = single target, >0 = AoE radius in tiles
+    aoe_shape: Literal["circle", "square"] = "circle"
+    aoe_affects_allies: bool = False
+    aoe_affects_enemies: bool = True
+    aoe_affects_self: bool = False
 
 
 SKILLS: Dict[str, Skill] = {}
@@ -81,6 +93,50 @@ def is_skill_available_for_class(skill_id: str, class_id: str) -> bool:
 
 # --- Skill rank helpers -----------------------------------------------------
 
+@dataclass
+class SkillRankEffects:
+    """
+    Defines how a skill's properties change with rank.
+    Each skill can have custom rank effects for more meaningful upgrades.
+    """
+    # Power scaling (multiplier per rank, or None to use default)
+    power_per_rank: Optional[float] = None  # e.g., 0.15 = +15% per rank
+    
+    # Cooldown reduction (turns reduced per rank, or None for default)
+    cooldown_reduction_per_rank: Optional[float] = None  # e.g., 0.5 = -0.5 turns per rank
+    
+    # Cost reduction (amount reduced per rank, or None for default)
+    cost_reduction_per_rank: Optional[float] = None  # e.g., 1.0 = -1 per rank
+    
+    # Status effect duration bonus (turns added per rank)
+    status_duration_bonus: int = 0  # e.g., 1 = +1 turn per rank
+    
+    # Status effect strength bonus (for multipliers, flat damage, etc.)
+    status_strength_bonus: float = 0.0  # e.g., 0.05 = +5% multiplier per rank
+    
+    # DoT damage bonus (flat damage per turn added per rank)
+    dot_damage_bonus: int = 0  # e.g., 1 = +1 damage per turn per rank
+    
+    # AoE radius bonus (tiles added per rank)
+    aoe_radius_bonus: int = 0  # e.g., 1 = +1 tile per rank (at rank 3+)
+    
+    # Special: rank threshold for AoE radius increase
+    aoe_radius_ranks: List[int] = field(default_factory=list)  # e.g., [3, 5] = +1 at rank 3, +1 more at rank 5
+
+
+# Registry of skill-specific rank effects
+SKILL_RANK_EFFECTS: Dict[str, SkillRankEffects] = {}
+
+
+def register_rank_effects(skill_id: str, effects: SkillRankEffects) -> None:
+    """Register rank effects for a skill."""
+    SKILL_RANK_EFFECTS[skill_id] = effects
+
+
+def get_skill_rank_effects(skill_id: str) -> Optional[SkillRankEffects]:
+    """Get rank effects for a skill, or None if using defaults."""
+    return SKILL_RANK_EFFECTS.get(skill_id)
+
 
 def get_skill_rank_cost(rank: int) -> int:
     """
@@ -97,51 +153,178 @@ def get_skill_rank_cost(rank: int) -> int:
     return rank
 
 
-def calculate_skill_power_at_rank(base_power: float, rank: int) -> float:
+def calculate_skill_power_at_rank(base_power: float, rank: int, skill_id: Optional[str] = None) -> float:
     """
     Calculate the effective power of a skill at a given rank.
     
-    Each rank increases power by 10%:
-    Rank 0 (unranked): base_power
-    Rank 1: base_power * 1.1
-    Rank 2: base_power * 1.2
-    Rank 3: base_power * 1.3
-    Rank 4: base_power * 1.4
-    Rank 5: base_power * 1.5
+    Uses skill-specific scaling if available, otherwise defaults to +10% per rank.
     """
     if rank <= 0:
         return base_power
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.power_per_rank is not None:
+            return base_power * (1.0 + effects.power_per_rank * rank)
+    
+    # Default: +10% per rank
     return base_power * (1.0 + 0.1 * rank)
 
 
-def calculate_skill_cooldown_at_rank(base_cooldown: int, rank: int) -> int:
+def calculate_skill_cooldown_at_rank(base_cooldown: int, rank: int, skill_id: Optional[str] = None) -> int:
     """
     Calculate the effective cooldown of a skill at a given rank.
     
-    Cooldown reduces by 1 turn every 2 ranks:
-    Rank 0-1: base_cooldown
-    Rank 2-3: base_cooldown - 1 (minimum 0)
-    Rank 4-5: base_cooldown - 2 (minimum 0)
+    Uses skill-specific reduction if available, otherwise defaults to -1 every 2 ranks.
     """
+    if rank <= 0:
+        return max(0, base_cooldown)
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.cooldown_reduction_per_rank is not None:
+            reduction = int(effects.cooldown_reduction_per_rank * rank)
+            return max(0, base_cooldown - reduction)
+    
+    # Default: -1 every 2 ranks
     if rank <= 1:
         return max(0, base_cooldown)
     reduction = rank // 2
     return max(0, base_cooldown - reduction)
 
 
-def calculate_skill_cost_at_rank(base_cost: int, rank: int, cost_type: str = "stamina") -> int:
+def calculate_skill_cost_at_rank(base_cost: int, rank: int, skill_id: Optional[str] = None, cost_type: str = "stamina") -> int:
     """
     Calculate the effective cost (stamina/mana) of a skill at a given rank.
     
-    Cost reduces by 1 per rank (minimum 0):
-    Rank 0: base_cost
-    Rank 1: base_cost - 1
-    Rank 2: base_cost - 2
-    etc.
+    Uses skill-specific reduction if available, otherwise defaults to -1 per rank.
     """
     if rank <= 0:
         return max(0, base_cost)
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.cost_reduction_per_rank is not None:
+            reduction = int(effects.cost_reduction_per_rank * rank)
+            return max(0, base_cost - reduction)
+    
+    # Default: -1 per rank
     return max(0, base_cost - rank)
+
+
+def calculate_skill_status_duration_at_rank(base_duration: int, rank: int, skill_id: Optional[str] = None) -> int:
+    """
+    Calculate the effective status effect duration at a given rank.
+    """
+    if rank <= 0:
+        return base_duration
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.status_duration_bonus > 0:
+            return base_duration + (effects.status_duration_bonus * rank)
+    
+    return base_duration
+
+
+def calculate_skill_status_strength_at_rank(base_strength: float, rank: int, skill_id: Optional[str] = None) -> float:
+    """
+    Calculate the effective status effect strength (multiplier) at a given rank.
+    
+    For damage reduction (values < 1.0), negative bonuses make it stronger.
+    For damage amplification (values > 1.0), positive bonuses make it stronger.
+    """
+    if rank <= 0:
+        return base_strength
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.status_strength_bonus != 0:
+            # Apply bonus: for reduction (base < 1.0), negative bonus improves it
+            # For amplification (base > 1.0), positive bonus improves it
+            return base_strength + (effects.status_strength_bonus * rank)
+    
+    return base_strength
+
+
+def calculate_skill_dot_damage_at_rank(base_dot: int, rank: int, skill_id: Optional[str] = None) -> int:
+    """
+    Calculate the effective DoT damage per turn at a given rank.
+    """
+    if rank <= 0:
+        return base_dot
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects and effects.dot_damage_bonus > 0:
+            return base_dot + (effects.dot_damage_bonus * rank)
+    
+    return base_dot
+
+
+def calculate_skill_aoe_radius_at_rank(base_radius: int, rank: int, skill_id: Optional[str] = None) -> int:
+    """
+    Calculate the effective AoE radius at a given rank.
+    """
+    if rank <= 0 or base_radius <= 0:
+        return base_radius
+    
+    if skill_id:
+        effects = get_skill_rank_effects(skill_id)
+        if effects:
+            # Check if this rank triggers a radius increase
+            bonus = 0
+            for threshold_rank in effects.aoe_radius_ranks:
+                if rank >= threshold_rank:
+                    bonus += effects.aoe_radius_bonus
+            return base_radius + bonus
+    
+    return base_radius
+
+
+def create_rank_modified_status(
+    base_status: StatusEffect,
+    rank: int,
+    skill_id: Optional[str] = None
+) -> StatusEffect:
+    """
+    Create a status effect modified by skill rank.
+    
+    Applies rank bonuses to duration, strength (multipliers), and DoT damage.
+    """
+    if rank <= 0 or skill_id is None:
+        return base_status
+    
+    effects = get_skill_rank_effects(skill_id)
+    if not effects:
+        return base_status
+    
+    # Calculate modified values
+    modified_duration = calculate_skill_status_duration_at_rank(base_status.duration, rank, skill_id)
+    modified_outgoing = base_status.outgoing_mult
+    modified_incoming = base_status.incoming_mult
+    
+    # Apply strength bonus if applicable
+    if effects.status_strength_bonus != 0:
+        if base_status.outgoing_mult != 1.0:
+            modified_outgoing = calculate_skill_status_strength_at_rank(base_status.outgoing_mult, rank, skill_id)
+        if base_status.incoming_mult != 1.0:
+            modified_incoming = calculate_skill_status_strength_at_rank(base_status.incoming_mult, rank, skill_id)
+    
+    modified_dot = calculate_skill_dot_damage_at_rank(base_status.flat_damage_each_turn, rank, skill_id)
+    
+    # Create a copy of the status with modified values
+    modified = StatusEffect(
+        name=base_status.name,
+        duration=modified_duration,
+        stacks=base_status.stacks,
+        outgoing_mult=modified_outgoing,
+        incoming_mult=modified_incoming,
+        flat_damage_each_turn=modified_dot,
+        stunned=base_status.stunned,
+    )
+    
+    return modified
 
 
 # --- Core skill definitions -------------------------------------------------
@@ -386,6 +569,10 @@ def _build_core_skills() -> None:
             cooldown=4,
             stamina_cost=5,  # Increased: AoE is powerful
             class_restrictions=["warrior"],
+            aoe_radius=1,
+            aoe_shape="square",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
         )
     )
 
@@ -530,14 +717,18 @@ def _build_core_skills() -> None:
         Skill(
             id="fireball",
             name="Fireball",
-            description="Hurl a ball of fire, dealing 1.8x damage and burning the target.",
+            description="Hurl a ball of fire that explodes, dealing 1.5x damage and burning all enemies in the area.",
             key=None,
             target_mode="adjacent_enemy",
-            base_power=1.8,
+            base_power=1.5,  # Reduced slightly since it's AoE
             uses_skill_power=True,
-            cooldown=3,
-            mana_cost=6,  # Increased: high damage + DoT
+            cooldown=4,
+            mana_cost=7,  # Increased: AoE + DoT is powerful
             class_restrictions=["mage"],
+            aoe_radius=2,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
             make_target_status=lambda: StatusEffect(
                 name="burning",
                 duration=2,
@@ -546,19 +737,23 @@ def _build_core_skills() -> None:
         )
     )
 
-    # Lightning Bolt: Chain damage
+    # Lightning Bolt: Chain damage (AoE)
     lightning_bolt = register(
         Skill(
             id="lightning_bolt",
             name="Lightning Bolt",
-            description="Strike with lightning that chains to nearby enemies (1.6x damage).",
+            description="Strike with lightning that arcs to nearby enemies (1.4x damage each).",
             key=None,
             target_mode="adjacent_enemy",
-            base_power=1.6,
+            base_power=1.4,  # Reduced slightly since it's AoE
             uses_skill_power=True,
             cooldown=4,
-            mana_cost=7,  # Increased: chain damage is powerful
+            mana_cost=7,  # Increased: AoE damage is powerful
             class_restrictions=["mage"],
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
         )
     )
 
@@ -763,7 +958,16 @@ def _build_core_skills() -> None:
             base_power=0.0,
             uses_skill_power=False,
             cooldown=5,
-            # Stun applied to all adjacent enemies in battle AI
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+            aoe_affects_self=False,
+            make_target_status=lambda: StatusEffect(
+                name="stunned",
+                duration=1,
+                stunned=True,
+            ),
         )
     )
 
@@ -801,7 +1005,406 @@ def _build_core_skills() -> None:
         )
     )
 
+    # --- New AoE Skills --------------------------------------------------------
+
+    # Warrior AoE Skills
+    whirlwind = register(
+        Skill(
+            id="whirlwind",
+            name="Whirlwind",
+            description="Spin attack hitting all adjacent enemies (1.1x damage each).",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=1.1,
+            uses_skill_power=False,
+            cooldown=3,
+            stamina_cost=5,
+            class_restrictions=["warrior"],
+            aoe_radius=1,
+            aoe_shape="square",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    ground_slam = register(
+        Skill(
+            id="ground_slam",
+            name="Ground Slam",
+            description="Slam the ground, dealing 1.3x damage to all enemies in a small area.",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=1.3,
+            uses_skill_power=False,
+            cooldown=4,
+            stamina_cost=6,
+            class_restrictions=["warrior"],
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    # Rogue AoE Skills
+    fan_of_knives = register(
+        Skill(
+            id="fan_of_knives",
+            name="Fan of Knives",
+            description="Throw knives in a wide arc, hitting multiple enemies (1.0x damage each).",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=1.0,
+            uses_skill_power=False,
+            cooldown=3,
+            stamina_cost=4,
+            class_restrictions=["rogue"],
+            aoe_radius=1,
+            aoe_shape="square",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    smoke_bomb = register(
+        Skill(
+            id="smoke_bomb",
+            name="Smoke Bomb",
+            description="Throw a smoke bomb, weakening all enemies in the area for 2 turns.",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=4,
+            stamina_cost=5,
+            class_restrictions=["rogue"],
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+            make_target_status=lambda: StatusEffect(
+                name="weakened",
+                duration=2,
+                outgoing_mult=0.7,
+            ),
+        )
+    )
+
+    # Mage AoE Skills
+    meteor_strike = register(
+        Skill(
+            id="meteor_strike",
+            name="Meteor Strike",
+            description="Call down a meteor, dealing massive 2.0x damage in a large area.",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=2.0,
+            uses_skill_power=True,
+            cooldown=6,
+            mana_cost=10,
+            class_restrictions=["mage"],
+            aoe_radius=2,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    frost_nova = register(
+        Skill(
+            id="frost_nova",
+            name="Frost Nova",
+            description="Freeze all nearby enemies, dealing 1.2x damage and stunning them for 1 turn.",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=1.2,
+            uses_skill_power=True,
+            cooldown=4,
+            mana_cost=7,
+            class_restrictions=["mage"],
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+            make_target_status=lambda: StatusEffect(
+                name="stunned",
+                duration=1,
+                stunned=True,
+            ),
+        )
+    )
+
+    blizzard = register(
+        Skill(
+            id="blizzard",
+            name="Blizzard",
+            description="Summon a blizzard that damages all enemies in a large area over time (1.0x damage + DoT).",
+            key=None,
+            target_mode="adjacent_enemy",
+            base_power=1.0,
+            uses_skill_power=True,
+            cooldown=5,
+            mana_cost=8,
+            class_restrictions=["mage"],
+            aoe_radius=2,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+            make_target_status=lambda: StatusEffect(
+                name="chilled",
+                duration=3,
+                flat_damage_each_turn=2,
+            ),
+        )
+    )
+
+    # Enemy-only AoE Skills
+    explosive_strike = register(
+        Skill(
+            id="explosive_strike",
+            name="Explosive Strike",
+            description="Strike that explodes, damaging nearby enemies (1.3x damage).",
+            key=None,  # AI-only
+            target_mode="adjacent_enemy",
+            base_power=1.3,
+            uses_skill_power=False,
+            cooldown=4,
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    roar = register(
+        Skill(
+            id="roar",
+            name="Roar",
+            description="Terrifying roar that weakens all nearby enemies for 2 turns.",
+            key=None,  # AI-only
+            target_mode="self",
+            base_power=0.0,
+            uses_skill_power=False,
+            cooldown=5,
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+            aoe_affects_self=False,
+            make_target_status=lambda: StatusEffect(
+                name="weakened",
+                duration=2,
+                outgoing_mult=0.7,
+            ),
+        )
+    )
+
     # guard / power_strike / crippling_blow / heavy_slam / poison_strike / dark_hex / feral_claws / war_cry
     # plus lunge / shield_bash / focus_blast / nimble_step variables are not used further,
     # but keeping them named makes it obvious what we're defining.
+
+
+def _register_skill_rank_effects() -> None:
+    """
+    Register custom rank effects for each skill to make upgrades meaningful and unique.
+    Each skill gets logical improvements based on what it does.
+    """
+    
+    # Guard: Defensive skill - longer duration, better damage reduction
+    register_rank_effects("guard", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank (starts at 1, becomes 2-6)
+        status_strength_bonus=-0.05,  # Better reduction: 0.5 -> 0.45 -> 0.4 -> 0.35 -> 0.3 -> 0.25
+        cost_reduction_per_rank=0.5,  # Reduce stamina cost (if it had one)
+    ))
+    
+    # Power Strike: Damage + weaken - more damage, longer weaken duration
+    register_rank_effects("power_strike", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank (better than default 10%)
+        status_duration_bonus=1,  # Weaken lasts longer: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+        cooldown_reduction_per_rank=0.5,  # -0.5 turns per rank (faster cooldown)
+    ))
+    
+    # Lunge: Quick strike - faster cooldown, more damage
+    register_rank_effects("lunge", SkillRankEffects(
+        power_per_rank=0.10,  # Standard +10% per rank
+        cooldown_reduction_per_rank=0.5,  # -0.5 turns per rank (becomes spammable)
+        cost_reduction_per_rank=0.5,  # Reduce stamina cost
+    ))
+    
+    # Shield Bash: Control skill - longer stun, more damage
+    register_rank_effects("shield_bash", SkillRankEffects(
+        power_per_rank=0.10,
+        status_duration_bonus=1,  # Stun lasts longer: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+    ))
+    
+    # Focus Blast: Skill-power scaling - much more damage
+    register_rank_effects("focus_blast", SkillRankEffects(
+        power_per_rank=0.15,  # +15% per rank (stronger scaling)
+        cooldown_reduction_per_rank=0.4,  # Slight cooldown reduction
+    ))
+    
+    # Nimble Step: Defensive - longer duration, better reduction
+    register_rank_effects("nimble_step", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank
+        status_strength_bonus=-0.05,  # Better reduction: 0.5 -> 0.45 -> 0.4 -> etc.
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Cleave: AoE - more damage, larger radius at higher ranks
+    register_rank_effects("cleave", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank
+        aoe_radius_bonus=1,  # +1 radius
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Taunt: Control - longer duration
+    register_rank_effects("taunt", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Charge: Mobility + damage - more damage, faster cooldown
+    register_rank_effects("charge", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank
+        cooldown_reduction_per_rank=0.5,  # -0.5 turns per rank
+    ))
+    
+    # Shield Wall: Defensive buff - longer duration, more defense
+    register_rank_effects("shield_wall", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank
+        # Note: Defense boost would need special handling in combat
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Backstab: High damage - massive damage scaling
+    register_rank_effects("backstab", SkillRankEffects(
+        power_per_rank=0.20,  # +20% per rank (very high damage)
+        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+    ))
+    
+    # Shadow Strike: Mobility + damage - more damage
+    register_rank_effects("shadow_strike", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Poison Blade: DoT - longer duration, more DoT damage
+    register_rank_effects("poison_blade", SkillRankEffects(
+        power_per_rank=0.08,  # Slight damage increase
+        status_duration_bonus=1,  # +1 turn per rank: 3 -> 4 -> 5 -> 6 -> 7 -> 8
+        dot_damage_bonus=1,  # +1 damage per turn per rank: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+    ))
+    
+    # Evade: Defensive - longer duration
+    register_rank_effects("evade", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Fireball: AoE + DoT - more damage, larger radius, more burn damage
+    register_rank_effects("fireball", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank
+        aoe_radius_bonus=1,  # +1 radius
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        status_duration_bonus=1,  # Burn lasts longer
+        dot_damage_bonus=1,  # +1 burn damage per turn per rank
+    ))
+    
+    # Lightning Bolt: AoE - more damage, larger radius
+    register_rank_effects("lightning_bolt", SkillRankEffects(
+        power_per_rank=0.12,  # +12% per rank
+        aoe_radius_bonus=1,  # +1 radius
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Slow: Control - longer duration
+    register_rank_effects("slow", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank: 3 -> 4 -> 5 -> 6 -> 7 -> 8
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Magic Shield: Defensive - longer duration, more absorption
+    register_rank_effects("magic_shield", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank
+        # Note: Absorption amount would need special handling
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Arcane Missile: Quick attack - more damage, faster cooldown
+    register_rank_effects("arcane_missile", SkillRankEffects(
+        power_per_rank=0.10,
+        cooldown_reduction_per_rank=0.5,  # Can become 0 cooldown at rank 2
+        cost_reduction_per_rank=0.5,  # Reduce mana cost
+    ))
+    
+    # Second Wind: Healing - restore more HP/stamina
+    register_rank_effects("second_wind", SkillRankEffects(
+        # Note: Healing percentage would need special handling
+        cooldown_reduction_per_rank=0.5,  # Faster cooldown
+    ))
+    
+    # Whirlwind: AoE - more damage, larger radius
+    register_rank_effects("whirlwind", SkillRankEffects(
+        power_per_rank=0.12,
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Ground Slam: AoE - more damage, larger radius
+    register_rank_effects("ground_slam", SkillRankEffects(
+        power_per_rank=0.12,
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Fan of Knives: AoE - more damage
+    register_rank_effects("fan_of_knives", SkillRankEffects(
+        power_per_rank=0.12,
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.5,
+    ))
+    
+    # Smoke Bomb: AoE control - longer duration, larger radius
+    register_rank_effects("smoke_bomb", SkillRankEffects(
+        status_duration_bonus=1,  # +1 turn per rank
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Meteor Strike: Massive AoE - more damage, larger radius
+    register_rank_effects("meteor_strike", SkillRankEffects(
+        power_per_rank=0.15,  # +15% per rank (very high damage)
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[2, 4],  # +1 at rank 2, +1 more at rank 4
+        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+    ))
+    
+    # Frost Nova: AoE + stun - more damage, longer stun, larger radius
+    register_rank_effects("frost_nova", SkillRankEffects(
+        power_per_rank=0.12,
+        status_duration_bonus=1,  # Stun lasts longer
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Blizzard: AoE + DoT - more damage, longer DoT, larger radius
+    register_rank_effects("blizzard", SkillRankEffects(
+        power_per_rank=0.12,
+        status_duration_bonus=1,  # Chill lasts longer
+        dot_damage_bonus=1,  # +1 damage per turn per rank
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+
+
 _build_core_skills()
+_register_skill_rank_effects()

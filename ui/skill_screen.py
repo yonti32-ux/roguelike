@@ -17,7 +17,12 @@ from systems.skills import (
     calculate_skill_power_at_rank,
     calculate_skill_cooldown_at_rank,
     calculate_skill_cost_at_rank,
+    calculate_skill_status_duration_at_rank,
+    calculate_skill_status_strength_at_rank,
+    calculate_skill_dot_damage_at_rank,
+    calculate_skill_aoe_radius_at_rank,
     get_skill_rank_cost,
+    get_skill_rank_effects,
 )
 from systems.party import get_companion, CompanionState
 from systems.classes import get_class
@@ -561,10 +566,40 @@ class SkillScreenCore:
             detail_y += 10
             
             # Current stats
-            current_power = calculate_skill_power_at_rank(skill.base_power, rank)
-            current_cooldown = calculate_skill_cooldown_at_rank(skill.cooldown, rank)
-            current_stamina = calculate_skill_cost_at_rank(skill.stamina_cost, rank)
-            current_mana = calculate_skill_cost_at_rank(skill.mana_cost, rank)
+            current_power = calculate_skill_power_at_rank(skill.base_power, rank, skill_id)
+            current_cooldown = calculate_skill_cooldown_at_rank(skill.cooldown, rank, skill_id)
+            current_stamina = calculate_skill_cost_at_rank(skill.stamina_cost, rank, skill_id)
+            current_mana = calculate_skill_cost_at_rank(skill.mana_cost, rank, skill_id)
+            current_aoe_radius = calculate_skill_aoe_radius_at_rank(skill.aoe_radius, rank, skill_id)
+            
+            # Get status effect info if applicable
+            status_duration = None
+            status_strength = None
+            dot_damage = None
+            if skill.make_target_status:
+                try:
+                    sample_status = skill.make_target_status()
+                    status_duration = calculate_skill_status_duration_at_rank(sample_status.duration, rank, skill_id)
+                    if sample_status.outgoing_mult != 1.0:
+                        status_strength = calculate_skill_status_strength_at_rank(sample_status.outgoing_mult, rank, skill_id)
+                    elif sample_status.incoming_mult != 1.0:
+                        status_strength = calculate_skill_status_strength_at_rank(sample_status.incoming_mult, rank, skill_id)
+                    if sample_status.flat_damage_each_turn > 0:
+                        dot_damage = calculate_skill_dot_damage_at_rank(sample_status.flat_damage_each_turn, rank, skill_id)
+                except:
+                    pass
+            elif skill.make_self_status:
+                try:
+                    sample_status = skill.make_self_status()
+                    status_duration = calculate_skill_status_duration_at_rank(sample_status.duration, rank, skill_id)
+                    if sample_status.outgoing_mult != 1.0:
+                        status_strength = calculate_skill_status_strength_at_rank(sample_status.outgoing_mult, rank, skill_id)
+                    elif sample_status.incoming_mult != 1.0:
+                        status_strength = calculate_skill_status_strength_at_rank(sample_status.incoming_mult, rank, skill_id)
+                    if sample_status.flat_damage_each_turn > 0:
+                        dot_damage = calculate_skill_dot_damage_at_rank(sample_status.flat_damage_each_turn, rank, skill_id)
+                except:
+                    pass
             
             stats_title = self.font_small.render("Current Stats:", True, (190, 190, 190))
             screen.blit(stats_title, (detail_x, detail_y))
@@ -579,6 +614,17 @@ class SkillScreenCore:
                 stats_lines.append(f"Stamina Cost: {current_stamina}")
             if current_mana > 0:
                 stats_lines.append(f"Mana Cost: {current_mana}")
+            if current_aoe_radius > 0:
+                stats_lines.append(f"AoE Radius: {current_aoe_radius}")
+            if status_duration is not None:
+                stats_lines.append(f"Status Duration: {status_duration} turns")
+            if status_strength is not None:
+                if status_strength < 1.0:
+                    stats_lines.append(f"Damage Reduction: {int((1.0 - status_strength) * 100)}%")
+                elif status_strength > 1.0:
+                    stats_lines.append(f"Damage Multiplier: {status_strength:.2f}x")
+            if dot_damage is not None and dot_damage > 0:
+                stats_lines.append(f"DoT Damage: {dot_damage} per turn")
             
             for stat_line in stats_lines:
                 stat_surf = self.font_small.render(stat_line, True, (180, 180, 180))
@@ -591,10 +637,40 @@ class SkillScreenCore:
                 cost = get_skill_rank_cost(next_rank)
                 can_afford = skill_points >= cost
                 
-                next_power = calculate_skill_power_at_rank(skill.base_power, next_rank)
-                next_cooldown = calculate_skill_cooldown_at_rank(skill.cooldown, next_rank)
-                next_stamina = calculate_skill_cost_at_rank(skill.stamina_cost, next_rank)
-                next_mana = calculate_skill_cost_at_rank(skill.mana_cost, next_rank)
+                next_power = calculate_skill_power_at_rank(skill.base_power, next_rank, skill_id)
+                next_cooldown = calculate_skill_cooldown_at_rank(skill.cooldown, next_rank, skill_id)
+                next_stamina = calculate_skill_cost_at_rank(skill.stamina_cost, next_rank, skill_id)
+                next_mana = calculate_skill_cost_at_rank(skill.mana_cost, next_rank, skill_id)
+                next_aoe_radius = calculate_skill_aoe_radius_at_rank(skill.aoe_radius, next_rank, skill_id)
+                
+                # Get next rank status effect info
+                next_status_duration = None
+                next_status_strength = None
+                next_dot_damage = None
+                if skill.make_target_status:
+                    try:
+                        sample_status = skill.make_target_status()
+                        next_status_duration = calculate_skill_status_duration_at_rank(sample_status.duration, next_rank, skill_id)
+                        if sample_status.outgoing_mult != 1.0:
+                            next_status_strength = calculate_skill_status_strength_at_rank(sample_status.outgoing_mult, next_rank, skill_id)
+                        elif sample_status.incoming_mult != 1.0:
+                            next_status_strength = calculate_skill_status_strength_at_rank(sample_status.incoming_mult, next_rank, skill_id)
+                        if sample_status.flat_damage_each_turn > 0:
+                            next_dot_damage = calculate_skill_dot_damage_at_rank(sample_status.flat_damage_each_turn, next_rank, skill_id)
+                    except:
+                        pass
+                elif skill.make_self_status:
+                    try:
+                        sample_status = skill.make_self_status()
+                        next_status_duration = calculate_skill_status_duration_at_rank(sample_status.duration, next_rank, skill_id)
+                        if sample_status.outgoing_mult != 1.0:
+                            next_status_strength = calculate_skill_status_strength_at_rank(sample_status.outgoing_mult, next_rank, skill_id)
+                        elif sample_status.incoming_mult != 1.0:
+                            next_status_strength = calculate_skill_status_strength_at_rank(sample_status.incoming_mult, next_rank, skill_id)
+                        if sample_status.flat_damage_each_turn > 0:
+                            next_dot_damage = calculate_skill_dot_damage_at_rank(sample_status.flat_damage_each_turn, next_rank, skill_id)
+                    except:
+                        pass
                 
                 preview_title = self.font_small.render(f"Next Rank ({next_rank}):", True, (200, 200, 180))
                 screen.blit(preview_title, (detail_x, detail_y))
@@ -610,6 +686,19 @@ class SkillScreenCore:
                     preview_lines.append(f"Stamina Cost: {next_stamina} ({current_stamina - next_stamina:+d})")
                 if next_mana != current_mana:
                     preview_lines.append(f"Mana Cost: {next_mana} ({current_mana - next_mana:+d})")
+                if next_aoe_radius != current_aoe_radius:
+                    preview_lines.append(f"AoE Radius: {next_aoe_radius} ({next_aoe_radius - current_aoe_radius:+d})")
+                if next_status_duration is not None and next_status_duration != status_duration:
+                    preview_lines.append(f"Status Duration: {next_status_duration} turns ({next_status_duration - status_duration:+d})")
+                if next_status_strength is not None and next_status_strength != status_strength:
+                    if next_status_strength < 1.0:
+                        current_reduction = int((1.0 - status_strength) * 100) if status_strength else 0
+                        next_reduction = int((1.0 - next_status_strength) * 100)
+                        preview_lines.append(f"Damage Reduction: {next_reduction}% ({next_reduction - current_reduction:+d}%)")
+                    elif next_status_strength > 1.0:
+                        preview_lines.append(f"Damage Multiplier: {next_status_strength:.2f}x ({next_status_strength - status_strength:+.2f})")
+                if next_dot_damage is not None and next_dot_damage != dot_damage:
+                    preview_lines.append(f"DoT Damage: {next_dot_damage} per turn ({next_dot_damage - dot_damage:+d})")
                 
                 for preview_line in preview_lines:
                     preview_surf = self.font_small.render(preview_line, True, (180, 220, 180))

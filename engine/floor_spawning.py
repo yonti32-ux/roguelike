@@ -12,6 +12,9 @@ from systems.enemies import (
     compute_scaled_stats,
     choose_pack_for_floor,
     get_archetype,
+    is_elite_spawn,
+    make_enemy_elite,
+    UNIQUE_ROOM_ENEMIES,
 )
 from systems.events import EVENTS
 
@@ -87,6 +90,9 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                 if tag == "start":
                     # Extra safety: don't spawn in the start room at all
                     continue
+                elif tag == "sanctum":
+                    # Sanctum rooms are intentionally enemy-free; used for boons/events.
+                    continue
                 elif tag == "lair":
                     lair_tiles.append((tx, ty))
                 else:
@@ -157,6 +163,10 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
     # Hard cap so big floors don't turn into bullet hell
     max_total_enemies = min(target_enemies + 3, 12)
 
+    # Track unique enemies so each archetype appears at most once per floor
+    spawned_unique_ids: set[str] = set()
+    max_unique_per_floor = 2
+
     def can_use_tile(tx: int, ty: int) -> bool:
         if (tx, ty) in occupied_enemy_tiles:
             return False
@@ -179,15 +189,6 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
         room = game_map.get_room_at(anchor_tx, anchor_ty) if hasattr(game_map, "get_room_at") else None
         room_tag = getattr(room, "tag", "generic") if room is not None else None
 
-        # --- Pick a pack template for this anchor ----------------------
-        try:
-            pack = choose_pack_for_floor(floor_index, room_tag=room_tag)
-            member_arch_ids = list(pack.member_arch_ids)
-        except Exception:
-            # Very defensive fallback: just pick a single archetype
-            arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
-            member_arch_ids = [arch.id]
-
         # Candidate spawn tiles: anchor + its 8 neighbors (3×3 cluster)
         candidate_tiles: List[tuple[int, int]] = []
         for dy in (-1, 0, 1):
@@ -197,6 +198,81 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                 if 0 <= tx < game_map.width and 0 <= ty < game_map.height:
                     candidate_tiles.append((tx, ty))
         random.shuffle(candidate_tiles)
+
+        # --- Chance to spawn a room-themed unique enemy instead of a pack ---
+        spawned_unique_here = False
+        if (
+            room_tag is not None
+            and room_tag in UNIQUE_ROOM_ENEMIES
+            and len(spawned_unique_ids) < max_unique_per_floor
+            and random.random() < 0.15  # 15% chance at eligible anchors
+        ):
+            # Filter uniques that haven't spawned yet
+            available_uniques = [
+                uid for uid in UNIQUE_ROOM_ENEMIES[room_tag] if uid not in spawned_unique_ids
+            ]
+            if available_uniques:
+                unique_id = random.choice(available_uniques)
+
+                # Find a nearby free tile
+                spawn_tx: Optional[int] = None
+                spawn_ty: Optional[int] = None
+                for tx, ty in candidate_tiles:
+                    if can_use_tile(tx, ty):
+                        spawn_tx, spawn_ty = tx, ty
+                        break
+
+                if spawn_tx is not None and spawn_ty is not None:
+                    try:
+                        arch = get_archetype(unique_id)
+                    except KeyError:
+                        arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
+
+                    max_hp, attack_power, defense, xp_reward = compute_scaled_stats(
+                        arch, floor_index
+                    )
+
+                    ex, ey = game_map.center_entity_on_tile(
+                        spawn_tx, spawn_ty, enemy_width, enemy_height
+                    )
+                    enemy = Enemy(
+                        x=ex,
+                        y=ey,
+                        width=enemy_width,
+                        height=enemy_height,
+                        speed=70.0,
+                    )
+
+                    setattr(enemy, "max_hp", max_hp)
+                    setattr(enemy, "hp", max_hp)
+                    setattr(enemy, "attack_power", attack_power)
+                    setattr(enemy, "defense", defense)
+                    setattr(enemy, "xp_reward", xp_reward)
+                    setattr(enemy, "enemy_type", arch.name)
+                    setattr(enemy, "archetype_id", arch.id)
+                    setattr(enemy, "ai_profile", arch.ai_profile)
+                    setattr(enemy, "is_unique", True)
+
+                    # Uniques are always elite to feel special
+                    make_enemy_elite(enemy, floor_index)
+
+                    game_map.entities.append(enemy)
+                    occupied_enemy_tiles.add((spawn_tx, spawn_ty))
+                    spawned_total += 1
+                    spawned_unique_ids.add(unique_id)
+                    spawned_unique_here = True
+
+        if spawned_unique_here or spawned_total >= max_total_enemies:
+            continue
+
+        # --- Otherwise, spawn a normal pack at this anchor ------------------
+        try:
+            pack = choose_pack_for_floor(floor_index, room_tag=room_tag)
+            member_arch_ids = list(pack.member_arch_ids)
+        except Exception:
+            # Very defensive fallback: just pick a single archetype
+            arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
+            member_arch_ids = [arch.id]
 
         for arch_id in member_arch_ids:
             if spawned_total >= max_total_enemies:
@@ -246,6 +322,10 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
 
             # Enemies block movement in exploration
             setattr(enemy, "blocks_movement", True)
+            
+            # Elite system: randomly make this enemy elite
+            if is_elite_spawn(floor_index):
+                make_enemy_elite(enemy, floor_index)
 
             game_map.entities.append(enemy)
             occupied_enemy_tiles.add((spawn_tx, spawn_ty))
@@ -354,7 +434,20 @@ def spawn_events_for_floor(game_map: GameMap, floor_index: int) -> None:
     half_tile = TILE_SIZE // 2
 
     for tx, ty in chosen_tiles:
-        event_id = random.choice(available_event_ids)
+        # Bias event choice based on room tag, if any
+        room = game_map.get_room_at(tx, ty)
+        tag = getattr(room, "tag", "generic") if room is not None else "generic"
+
+        if tag == "sanctum" and "sanctuary_font" in available_event_ids:
+            # Strong bias towards healing/boon event in sanctum rooms
+            weighted_ids = ["sanctuary_font"] * 3 + available_event_ids
+            event_id = random.choice(weighted_ids)
+        elif tag == "graveyard" and "cursed_tomb" in available_event_ids:
+            # Graveyard rooms like cursed tombs
+            weighted_ids = ["cursed_tomb"] * 3 + available_event_ids
+            event_id = random.choice(weighted_ids)
+        else:
+            event_id = random.choice(available_event_ids)
         ex, ey = game_map.center_entity_on_tile(tx, ty, half_tile, half_tile)
         node = EventNode(
             x=ex,

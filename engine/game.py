@@ -1,6 +1,6 @@
 import random
 import math
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import pygame
 
@@ -78,6 +78,9 @@ class Game:
         # Inventory & equipment (also set in _init_hero_for_class)
         self.inventory: Inventory = Inventory()
         self.show_inventory: bool = False
+
+        # Consumable items live in the same inventory list but have slot
+        # "consumable". All gameplay effects are driven by systems.consumables.
 
         # Party / companions: runtime CompanionState objects
         self.party: List[CompanionState] = []
@@ -193,11 +196,34 @@ class Game:
         # Initialize hero stats, perks, items and gold for the chosen class
         init_hero_for_class(self, hero_class_id)
 
+        # Give the hero a small starting stock of basic consumables so the
+        # new system is visible from the first floor.
+        self._init_starting_consumables()
+
         # Exploration controller (handles map movement & interactions)
         self.exploration = ExplorationController(self)
 
         # Load initial floor
         self.load_floor(self.floor, from_direction=None)
+
+    def _init_starting_consumables(self) -> None:
+        """
+        Grant a small starter pack of consumables for a fresh run.
+
+        This is intentionally conservative; later we can move this logic
+        into hero_manager/init_hero_for_class for per-class tuning.
+        """
+        if not hasattr(self, "inventory") or self.inventory is None:
+            return
+
+        starter_ids = [
+            "small_health_potion",
+            "small_health_potion",
+            "stamina_draught",
+        ]
+        for cid in starter_ids:
+            # Consumables are not randomized.
+            self.inventory.add_item(cid, randomized=False)
 
     # ------------------------------------------------------------------
     # Mode & overlay helpers
@@ -364,6 +390,68 @@ class Game:
                 return
 
         self.last_message = f"{display_name} equips {item_def.name}."
+
+    def use_consumable_from_inventory(self, item_id: str) -> None:
+        """
+        Use a consumable item selected from the inventory overlay.
+
+        Behaviour:
+        - In exploration: applies to the hero entity.
+        - In battle: applies to the currently active player-side unit
+          and consumes that unit's turn.
+        """
+        from systems.consumables import get_consumable, apply_consumable_to_entity, apply_consumable_in_battle
+
+        # Verify we actually own this item.
+        if self.inventory is None or item_id not in self.inventory.items:
+            self.last_message = "You do not have that consumable."
+            return
+
+        consumable = get_consumable(item_id)
+        if consumable is None:
+            self.last_message = "You are not sure how to use that."
+            return
+
+        # Exploration context: apply to hero entity only.
+        if self.mode == GameMode.EXPLORATION:
+            if self.player is None:
+                self.last_message = "You have no body to use that on."
+                return
+
+            hero_max_hp = getattr(self.hero_stats, "max_hp", None)
+            msg, _ = apply_consumable_to_entity(
+                entity=self.player,
+                hero_max_hp=hero_max_hp,
+                consumable=consumable,
+            )
+            self.last_message = msg
+            # Remove one copy from backpack.
+            self.inventory.remove_one(item_id)
+            return
+
+        # Battle context: apply to the active player unit.
+        if self.mode == GameMode.BATTLE and self.battle_scene is not None:
+            unit = self.battle_scene._active_unit()
+            # Only allow player-side units to use consumables.
+            if unit.side != "player":
+                self.last_message = "Enemies fumble with the bottle, confused."
+                return
+
+            battle_msg = apply_consumable_in_battle(
+                game=self,
+                battle_scene=self.battle_scene,
+                user_unit=unit,
+                consumable=consumable,
+            )
+            # Log into both battle log and exploration-style last message.
+            self.battle_scene._log(battle_msg)
+            self.last_message = battle_msg
+
+            # Remove one copy from backpack.
+            self.inventory.remove_one(item_id)
+
+            # Using a consumable consumes the unit's turn.
+            self.battle_scene._next_turn()
 
     def get_available_screens(self) -> List[str]:
         """Get list of available screen names (shop only if vendor nearby)."""
@@ -564,14 +652,44 @@ class Game:
         """Access to the exploration message history."""
         return self.message_log.exploration_log
 
+    # Optional per-entry colors to be used by the HUD when rendering.
+    # If colors are missing or shorter than the log, the UI will fall
+    # back to its default text colors.
+    @property
+    def exploration_log_colors(self) -> List[Optional[Tuple[int, int, int]]]:
+        return getattr(self.message_log, "exploration_log_colors", [None] * len(self.message_log.exploration_log))
+
     @property
     def exploration_log_max(self) -> int:
         """Maximum size of the exploration log."""
         return self.message_log.exploration_log_max
 
+    @property
+    def last_message_color(self) -> Optional[Tuple[int, int, int]]:
+        """Color associated with the latest message, if any."""
+        return getattr(self.message_log, "last_message_color", None)
+
     def add_message(self, value: str) -> None:
         """Backwards-compatible helper for adding exploration messages."""
         self.message_log.add_message(value)
+
+    def add_message_colored(
+        self,
+        value: str,
+        color: Optional[Tuple[int, int, int]],
+    ) -> None:
+        """
+        Add a new exploration message with an optional explicit color.
+
+        Used primarily for highlighting item finds by rarity; falls back
+        to a plain message if the underlying log doesn't support colors.
+        """
+        if hasattr(self.message_log, "add_entry"):
+            # New API with color support
+            self.message_log.add_entry(value, color)
+        else:
+            # Fallback for older logs – ignore color
+            self.message_log.add_message(value)
 
     # ------------------------------------------------------------------
     # Hero stats helpers (delegated to hero_manager module)
@@ -1358,6 +1476,6 @@ class Game:
         self.screen.fill(COLOR_BG)
         # Pass the Game instance so the battle scene can read input bindings
         self.battle_scene.draw(self.screen, self)
-
-        pygame.display.flip()
+        # Note: Don't call pygame.display.flip() here - the main draw() method handles flipping
+        # after all overlays are drawn to prevent flickering
 

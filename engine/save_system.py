@@ -161,7 +161,11 @@ def _serialize_game(game) -> Dict[str, Any]:
         "y": float(game.camera_y),
         "zoom_index": int(game.zoom_index),
     }
-    
+
+    # Consumables are stored as regular inventory items with slot==\"consumable\",
+    # so they are already covered by the inventory serializer. No extra section
+    # is required here for Phase 1.
+
     return {
         "version": "1.0",  # Save format version
         "floor": current_floor_num,

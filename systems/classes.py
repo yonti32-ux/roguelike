@@ -121,7 +121,7 @@ ROGUE = register_class(
         ],
         starting_skills=[
             "guard",
-            "nimble_step",
+            "poison_blade",
         ],
         starting_items=[
             "rusty_sword",
@@ -154,7 +154,7 @@ MAGE = register_class(
         ],
         starting_skills=[
             "guard",
-            "focus_blast",
+            "fireball",
         ],
         starting_items=[
             "tattered_cloak",

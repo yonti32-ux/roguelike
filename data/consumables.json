@@ -1,0 +1,62 @@
+[
+  {
+    "id": "small_health_potion",
+    "name": "Small Health Potion",
+    "slot": "consumable",
+    "rarity": "common",
+    "value": 6,
+    "description": "A weak red draught that mends light wounds.",
+    "stats": {},
+    "effect": {
+      "type": "heal",
+      "amount": 10,
+      "percent_max": 0.10
+    }
+  },
+  {
+    "id": "standard_health_potion",
+    "name": "Health Potion",
+    "slot": "consumable",
+    "rarity": "uncommon",
+    "value": 14,
+    "description": "A sturdy tincture that restores a solid chunk of vitality.",
+    "stats": {},
+    "effect": {
+      "type": "heal",
+      "amount": 18,
+      "percent_max": 0.15
+    }
+  },
+  {
+    "id": "stamina_draught",
+    "name": "Stamina Draught",
+    "slot": "consumable",
+    "rarity": "common",
+    "value": 8,
+    "description": "A bitter drink that chases the ache from your limbs.",
+    "stats": {},
+    "effect": {
+      "type": "resource",
+      "resource": "stamina",
+      "amount": 6,
+      "percent_max": 0.10
+    }
+  },
+  {
+    "id": "focus_tonic",
+    "name": "Focus Tonic",
+    "slot": "consumable",
+    "rarity": "uncommon",
+    "value": 16,
+    "description": "Sharp herbal notes that clear the mind and refill your reserves.",
+    "stats": {},
+    "effect": {
+      "type": "resource",
+      "resource": "mana",
+      "amount": 8,
+      "percent_max": 0.15
+    }
+  }
+]
+
+

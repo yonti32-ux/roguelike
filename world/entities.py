@@ -119,6 +119,30 @@ class Enemy(Entity):
         sh = max(1, int(world_rect.height * zoom))
 
         screen_rect = pygame.Rect(sx, sy, sw, sh)
+        
+        # Elite enemies get a pulsing glow effect
+        is_elite = getattr(self, "is_elite", False)
+        if is_elite:
+            # Draw outer glow (static glow for exploration view)
+            # Create a slightly larger glow rect
+            glow_size = 3
+            glow_rect = pygame.Rect(
+                sx - glow_size,
+                sy - glow_size,
+                sw + glow_size * 2,
+                sh + glow_size * 2
+            )
+            
+            # Elite glow color (yellow/gold tint)
+            glow_color = (255, 220, 100, 100)  # Semi-transparent yellow
+            glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect())
+            surface.blit(glow_surf, (glow_rect.x, glow_rect.y))
+            
+            # Draw bright border around elite enemy
+            border_color = (255, 200, 50)  # Bright gold
+            pygame.draw.rect(surface, border_color, screen_rect, width=2)
+        
         pygame.draw.rect(surface, self.color, screen_rect)
 
     def take_damage(self, amount: int) -> None:

@@ -6,6 +6,7 @@ import random
 import pygame
 
 from settings import TILE_SIZE
+from .message_log import get_rarity_color
 from world.entities import Enemy, Chest
 from world.entities import EventNode  # NEW
 from world.entities import Merchant  # NEW merchant NPC
@@ -483,13 +484,18 @@ class ExplorationController:
 
         item_def = get_item_def(item_id)
         item_name = item_def.name if item_def is not None else item_id
+        rarity = getattr(item_def, "rarity", None) if item_def is not None else None
+        color = get_rarity_color(rarity) if rarity else None
 
         if gained_gold > 0:
-            game.last_message = (
-                f"You open the chest and find: {item_name} and {gained_gold} gold."
-            )
+            msg = f"You open the chest and find: {item_name} and {gained_gold} gold."
         else:
-            game.last_message = f"You open the chest and find: {item_name}."
+            msg = f"You open the chest and find: {item_name}."
+
+        if color is not None and hasattr(game, "add_message_colored"):
+            game.add_message_colored(msg, color)
+        else:
+            game.last_message = msg
 
         # Re-sync stats in case gear bonuses matter later (no full heal)
         if game.player is not None:

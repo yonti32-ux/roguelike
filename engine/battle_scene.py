@@ -44,7 +44,15 @@ from systems.statuses import (
     outgoing_multiplier,
     incoming_multiplier,
 )
-from systems.skills import Skill, get as get_skill
+from systems.skills import (
+    Skill,
+    get as get_skill,
+    calculate_skill_power_at_rank,
+    calculate_skill_cooldown_at_rank,
+    calculate_skill_cost_at_rank,
+    calculate_skill_aoe_radius_at_rank,
+    create_rank_modified_status,
+)
 from systems import perks as perk_system
 from systems.party import (
     CompanionDef,
@@ -455,16 +463,19 @@ class BattleScene:
             gy = start_row + i
 
             arch_id = getattr(enemy, "archetype_id", None)
+            is_elite = getattr(enemy, "is_elite", False)
             enemy_name = getattr(enemy, "enemy_type", "Enemy")
 
-            # If we know the archetype, prefer its display name
-            if arch_id is not None:
+            # If enemy is elite, use the elite name from enemy_type (which includes "Elite" prefix)
+            # Otherwise, if we know the archetype, prefer its display name
+            if not is_elite and arch_id is not None:
                 try:
                     arch = get_archetype(arch_id)
                     enemy_name = arch.name
                 except KeyError:
                     # Fallback to whatever is on the entity
                     pass
+            # If elite, enemy_name already has "Elite" prefix from make_enemy_elite()
 
             enemy_type_list.append(enemy_name)
 
@@ -829,6 +840,39 @@ class BattleScene:
     def _step_towards(self, unit: BattleUnit, target: BattleUnit) -> bool:
         """Move unit one step towards target. Delegates to AI module."""
         return self.ai.step_towards(unit, target)
+    
+    def _get_skill_rank(self, unit: BattleUnit, skill_id: str) -> int:
+        """
+        Get the skill rank for a unit's skill.
+        
+        For player/hero: checks hero_stats.skill_ranks
+        For companions: checks companion.skill_ranks
+        For enemies: returns 0 (enemies don't have skill ranks)
+        """
+        if unit.side != "player":
+            return 0  # Enemies don't have skill ranks
+        
+        if self.game is None:
+            return 0
+        
+        # Check if it's the hero
+        if unit.entity is self.player:
+            hero_stats = getattr(self.game, "hero_stats", None)
+            if hero_stats:
+                return getattr(hero_stats, "skill_ranks", {}).get(skill_id, 0)
+        
+        # Check if it's a companion
+        party = getattr(self.game, "party", None) or []
+        if party:
+            # Find matching companion
+            for comp_state in party:
+                # Try to match by checking if companion entity matches
+                # This is a bit tricky since we need to match the companion
+                # For now, check the first companion if unit is not the player
+                if unit.entity is not self.player:
+                    return getattr(comp_state, "skill_ranks", {}).get(skill_id, 0)
+        
+        return 0
 
     # ----- Damage helpers -----
 
@@ -1010,74 +1054,141 @@ class BattleScene:
                     self._log(f"{target_unit.name} is out of range for {skill.name}!")
                 return False
 
-        # Check and consume resource costs
+        # Get skill rank for rank-modified effects
+        skill_rank = self._get_skill_rank(unit, skill.id)
+        
+        # Calculate rank-modified values
+        rank_power = calculate_skill_power_at_rank(skill.base_power, skill_rank, skill.id)
+        rank_cooldown = calculate_skill_cooldown_at_rank(skill.cooldown, skill_rank, skill.id)
+        rank_stamina_cost = calculate_skill_cost_at_rank(skill.stamina_cost, skill_rank, skill.id)
+        rank_mana_cost = calculate_skill_cost_at_rank(skill.mana_cost, skill_rank, skill.id)
+        rank_aoe_radius = calculate_skill_aoe_radius_at_rank(getattr(skill, "aoe_radius", 0), skill_rank, skill.id)
+        
+        # Check and consume resource costs (using rank-modified costs)
+        # Temporarily modify skill costs for checking
+        original_stamina = skill.stamina_cost
+        original_mana = skill.mana_cost
+        skill.stamina_cost = rank_stamina_cost
+        skill.mana_cost = rank_mana_cost
+        
         can_use, error_msg = unit.has_resources_for_skill(skill)
         if not can_use:
+            # Restore original costs
+            skill.stamina_cost = original_stamina
+            skill.mana_cost = original_mana
             if not for_ai and error_msg:
                 self._log(error_msg)
             return False
         
         unit.consume_resources_for_skill(skill)
+        
+        # Restore original costs (we've already consumed resources)
+        skill.stamina_cost = original_stamina
+        skill.mana_cost = original_mana
 
-        # Apply damage if any
-        damage = 0
-        if skill.base_power > 0 and target_unit is not None and target_unit is not unit:
-            base = unit.attack_power
-            dmg = base * skill.base_power
-            if skill.uses_skill_power:
-                sp = float(getattr(unit.entity, "skill_power", 1.0))
-                dmg *= max(DEFAULT_MIN_SKILL_POWER, sp)
-            damage = self.combat.apply_damage(unit, target_unit, int(dmg))
+        # Check if skill has AoE (using rank-modified radius)
+        has_aoe = rank_aoe_radius > 0 and target_unit is not None
+        
+        # Determine affected units (using rank-modified AoE radius)
+        affected_units: List[BattleUnit] = []
+        if has_aoe:
+            # AoE skill - find all units in AoE area
+            from engine.battle.aoe import get_units_in_aoe
             
-            # Handle life drain healing
-            if skill.id == "life_drain" and damage > 0:
-                heal_amount = max(1, int(damage * 0.5))
-                current_hp = getattr(unit.entity, "hp", 0)
-                max_hp = getattr(unit.entity, "max_hp", 1)
-                new_hp = min(max_hp, current_hp + heal_amount)
-                setattr(unit.entity, "hp", new_hp)
-                if new_hp > current_hp:
-                    self._log(f"{unit.name} drains {heal_amount} HP from {target_unit.name}!")
-
-        # Apply statuses
+            all_units = list(self.player_units) + list(self.enemy_units)
+            affected_units = get_units_in_aoe(
+                target_unit.gx,
+                target_unit.gy,
+                rank_aoe_radius,  # Use rank-modified radius
+                getattr(skill, "aoe_shape", "circle"),
+                all_units,
+                affects_allies=getattr(skill, "aoe_affects_allies", False),
+                affects_enemies=getattr(skill, "aoe_affects_enemies", True),
+                affects_self=getattr(skill, "aoe_affects_self", False),
+                exclude_unit=unit,
+            )
+            # Always include the primary target if it's not the caster
+            if target_unit is not unit and target_unit not in affected_units:
+                affected_units.append(target_unit)
+        else:
+            # Single target skill
+            if target_unit is not None and target_unit is not unit:
+                affected_units = [target_unit]
+        
+        # Apply damage to all affected units (using rank-modified power)
+        total_damage = 0
+        for affected in affected_units:
+            if rank_power > 0:
+                base = unit.attack_power
+                dmg = base * rank_power  # Use rank-modified power
+                if skill.uses_skill_power:
+                    sp = float(getattr(unit.entity, "skill_power", 1.0))
+                    dmg *= max(DEFAULT_MIN_SKILL_POWER, sp)
+                damage = self.combat.apply_damage(unit, affected, int(dmg))
+                total_damage += damage
+                
+                # Handle life drain healing (only from primary target)
+                if skill.id == "life_drain" and damage > 0 and affected is target_unit:
+                    heal_amount = max(1, int(damage * 0.5))
+                    current_hp = getattr(unit.entity, "hp", 0)
+                    max_hp = getattr(unit.entity, "max_hp", 1)
+                    new_hp = min(max_hp, current_hp + heal_amount)
+                    setattr(unit.entity, "hp", new_hp)
+                    if new_hp > current_hp:
+                        self._log(f"{unit.name} drains {heal_amount} HP from {affected.name}!")
+        
+        # Apply statuses (using rank-modified status effects)
         if skill.make_self_status is not None:
-            self._add_status(unit, skill.make_self_status())
-        if skill.make_target_status is not None and target_unit is not None:
-            self._add_status(target_unit, skill.make_target_status())
+            base_status = skill.make_self_status()
+            rank_status = create_rank_modified_status(base_status, skill_rank, skill.id)
+            self._add_status(unit, rank_status)
+        
+        # Apply target status to all affected units (for AoE skills)
+        if skill.make_target_status is not None:
+            base_status = skill.make_target_status()
+            rank_status = create_rank_modified_status(base_status, skill_rank, skill.id)
+            for affected in affected_units:
+                self._add_status(affected, rank_status)
 
-        # Set cooldown
-        if skill.cooldown > 0:
-            unit.cooldowns[skill.id] = skill.cooldown
+        # Set cooldown (using rank-modified cooldown)
+        if rank_cooldown > 0:
+            unit.cooldowns[skill.id] = rank_cooldown
 
         # Messaging & win/loss checks
-        if damage > 0 and target_unit is not None and target_unit is not unit:
-            if not target_unit.is_alive:
-                if target_unit.side == "enemy":
-                    if not any(u.is_alive for u in self.enemy_units):
-                        self.status = "victory"
-                        self._log(
-                            f"{unit.name} uses {skill.name} and defeats the enemy party!"
-                        )
-                        return True
+        if total_damage > 0:
+            # Log AoE skill usage
+            if has_aoe and len(affected_units) > 1:
+                hit_count = len(affected_units)
+                self._log(
+                    f"{unit.name} uses {skill.name} (AoE) hitting {hit_count} targets for {total_damage} total damage!"
+                )
+            elif target_unit is not None and target_unit is not unit:
+                # Single target skill
+                if not target_unit.is_alive:
+                    if target_unit.side == "enemy":
+                        if not any(u.is_alive for u in self.enemy_units):
+                            self.status = "victory"
+                            self._log(
+                                f"{unit.name} uses {skill.name} and defeats the enemy party!"
+                            )
+                            return True
+                        else:
+                            self._log(
+                                f"{unit.name} uses {skill.name} and slays {target_unit.name}!"
+                            )
                     else:
-                        self._log(
-                            f"{unit.name} uses {skill.name} and slays {target_unit.name} "
-                            f"({damage} dmg)."
-                        )
+                        if not any(u.is_alive for u in self.player_units):
+                            self.status = "defeat"
+                            self._log(
+                                f"{unit.name} uses {skill.name}. You fall..."
+                            )
+                            return True
+                        else:
+                            self._log(
+                                f"{unit.name} uses {skill.name}. {target_unit.name} falls!"
+                            )
                 else:
-                    if not any(u.is_alive for u in self.player_units):
-                        self.status = "defeat"
-                        self._log(
-                            f"{unit.name} uses {skill.name} for {damage} dmg. You fall..."
-                        )
-                        return True
-                    else:
-                        self._log(
-                            f"{unit.name} uses {skill.name} and fells {target_unit.name} "
-                            f"({damage} dmg)."
-                        )
-            else:
-                self._log(f"{unit.name} uses {skill.name} on {target_unit.name} for {damage} dmg.")
+                    self._log(f"{unit.name} uses {skill.name} on {target_unit.name} ({total_damage} dmg).")
         else:
             if skill.id == "guard":
                 self._log(f"{unit.name} braces for impact.")
@@ -1341,6 +1452,12 @@ class BattleScene:
 
     def handle_event(self, game, event: pygame.event.Event) -> None:
         """Main event handler that delegates to specialized handlers."""
+        # Don't process events if a modal overlay is open (inventory, character sheet, etc.)
+        # The game's handle_event routes to active_screen instead, so we shouldn't get here,
+        # but this is a safety check to prevent conflicts.
+        if getattr(game, "active_screen", None) is not None:
+            return
+        
         # Handle mouse events first
         if self._handle_mouse_events(event):
             return
@@ -1675,6 +1792,22 @@ class BattleScene:
 
     def _handle_action_input(self, event: pygame.event.Event, unit: BattleUnit, input_manager) -> None:
         """Handle action input (movement, attack, guard, skills)."""
+        # Toggle inventory while in battle – opens the same fullscreen inventory
+        # overlay used in exploration so the player can use consumables, etc.
+        # Only toggle if no overlay is currently open (safety check)
+        game = getattr(self, "game", None)
+        if game is not None and getattr(game, "active_screen", None) is None:
+            if input_manager is not None:
+                from systems.input import InputAction
+
+                if input_manager.event_matches_action(InputAction.TOGGLE_INVENTORY, event):
+                    game.toggle_inventory_overlay()
+                    return
+            else:
+                if event.key == pygame.K_i:
+                    game.toggle_inventory_overlay()
+                    return
+
         # Exit movement mode if entering other actions
         if self.movement_mode:
             # Any non-movement action cancels movement mode

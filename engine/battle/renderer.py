@@ -450,8 +450,41 @@ class BattleRenderer:
                 self.scene.cell_size - 20,
             )
 
+            # Check if this enemy is elite
+            is_elite = False
+            if hasattr(unit, "entity") and hasattr(unit.entity, "is_elite"):
+                is_elite = getattr(unit.entity, "is_elite", False)
+            
+            # Elite enemies get a gold glow effect (always visible)
+            if is_elite:
+                # Draw pulsing elite glow
+                pulse = (math.sin(self.scene.animation_time * 3.0) + 1.0) / 2.0  # 0 to 1
+                glow_alpha = int(120 + pulse * 80)  # Pulse between 120 and 200 alpha
+                glow_size = 4 + int(pulse * 2)  # Pulse between 4 and 6 pixels
+                
+                # Draw outer glow
+                for i in range(glow_size):
+                    alpha = int(glow_alpha * (1.0 - i / glow_size))
+                    glow_rect = pygame.Rect(
+                        rect.x - i - 1,
+                        rect.y - i - 1,
+                        rect.width + (i + 1) * 2,
+                        rect.height + (i + 1) * 2
+                    )
+                    glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(glow_surf, (255, 200, 50, alpha), glow_surf.get_rect())
+                    surface.blit(glow_surf, (glow_rect.x, glow_rect.y))
+                
+                # Bright gold border for elites
+                pygame.draw.rect(surface, (255, 220, 100), rect, width=3)
+            
             # Body
-            pygame.draw.rect(surface, COLOR_ENEMY, rect)
+            enemy_color = COLOR_ENEMY
+            if is_elite and hasattr(unit.entity, "color"):
+                # Use the elite-tinted color if available
+                enemy_color = getattr(unit.entity, "color", COLOR_ENEMY)
+            pygame.draw.rect(surface, enemy_color, rect)
+            
             # Highlight active unit with pulsing glow
             if active is unit:
                 # Pulsing glow effect - use animation_time from scene
@@ -710,6 +743,7 @@ class BattleRenderer:
         
         action_type = self.scene.targeting_mode.get("action_type")
         skill = self.scene.targeting_mode.get("skill")
+        current_target = self.scene._get_current_target()
         
         # Determine range
         max_range = 1
@@ -718,7 +752,7 @@ class BattleRenderer:
         elif action_type == "skill" and skill is not None:
             max_range = getattr(skill, "range_tiles", 1)
         
-        # Draw range tiles
+        # Draw range tiles (where you can target)
         range_color = (100, 150, 255, 80)  # Semi-transparent blue
         unit_gx, unit_gy = unit.gx, unit.gy
         
@@ -734,6 +768,37 @@ class BattleRenderer:
                     overlay = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
                     overlay.fill(range_color)
                     surface.blit(overlay, (x, y))
+        
+        # Draw AoE area if skill has AoE and a target is selected
+        if action_type == "skill" and skill is not None and current_target is not None:
+            aoe_radius = getattr(skill, "aoe_radius", 0)
+            if aoe_radius > 0:
+                from engine.battle.aoe import get_tiles_in_aoe
+                
+                # Get AoE tiles centered on the selected target
+                aoe_tiles = get_tiles_in_aoe(
+                    current_target.gx,
+                    current_target.gy,
+                    aoe_radius,
+                    getattr(skill, "aoe_shape", "circle"),
+                    self.scene.grid_width,
+                    self.scene.grid_height,
+                )
+                
+                # Draw AoE area overlay (red/orange tint to indicate damage area)
+                aoe_color = (255, 150, 100, 120)  # Semi-transparent orange-red
+                for gx, gy in aoe_tiles:
+                    x = self.scene.grid_origin_x + gx * self.scene.cell_size
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size
+                    
+                    # Draw AoE overlay
+                    overlay = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    overlay.fill(aoe_color)
+                    surface.blit(overlay, (x, y))
+                    
+                    # Draw border to make it more visible
+                    rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
+                    pygame.draw.rect(surface, (255, 200, 150), rect, width=2)
 
     def draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int) -> None:
         """Draw a small indicator showing the next few units in turn order."""

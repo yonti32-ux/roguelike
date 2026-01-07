@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import random
 
 
@@ -59,6 +59,15 @@ class EnemyPackTemplate:
 
 ENEMY_ARCHETYPES: Dict[str, EnemyArchetype] = {}
 ENEMY_PACKS: Dict[str, EnemyPackTemplate] = {}
+
+# Mapping of room tags to special "unique" enemy archetype ids.
+# These are used as rare spawns in matching room types.
+UNIQUE_ROOM_ENEMIES: Dict[str, List[str]] = {
+    "graveyard": ["grave_warden"],
+    "sanctum": ["sanctum_guardian"],
+    "lair": ["pit_champion"],
+    "treasure": ["hoard_mimic"],
+}
 
 
 def register_archetype(arch: EnemyArchetype) -> EnemyArchetype:
@@ -588,6 +597,103 @@ def _build_enemy_archetypes() -> None:
         )
     )
 
+    # --- Room-themed unique enemies (rare spawns) ------------------------------
+
+    # Graveyard unique: tougher undead guardian
+    register_archetype(
+        EnemyArchetype(
+            id="grave_warden",
+            name="Grave Warden",
+            role="Elite Support",
+            tier=2,
+            ai_profile="caster",
+            base_hp=32,
+            hp_per_floor=2.2,
+            base_attack=8,
+            atk_per_floor=1.2,
+            base_defense=3,
+            def_per_floor=0.6,
+            base_xp=26,
+            xp_per_floor=2.6,
+            skill_ids=[
+                "dark_hex",
+                "fear_scream",
+                "regeneration",
+            ],
+        )
+    )
+
+    # Sanctum unique: defensive guardian
+    register_archetype(
+        EnemyArchetype(
+            id="sanctum_guardian",
+            name="Sanctum Guardian",
+            role="Elite Brute",
+            tier=2,
+            ai_profile="brute",
+            base_hp=38,
+            hp_per_floor=2.5,
+            base_attack=7,
+            atk_per_floor=1.0,
+            base_defense=4,
+            def_per_floor=0.7,
+            base_xp=24,
+            xp_per_floor=2.4,
+            skill_ids=[
+                "heavy_slam",
+                "counter_attack",
+                "war_cry",
+            ],
+        )
+    )
+
+    # Lair unique: brutal champion
+    register_archetype(
+        EnemyArchetype(
+            id="pit_champion",
+            name="Pit Champion",
+            role="Elite Brute",
+            tier=3,
+            ai_profile="brute",
+            base_hp=50,
+            hp_per_floor=3.2,
+            base_attack=13,
+            atk_per_floor=1.7,
+            base_defense=4,
+            def_per_floor=0.8,
+            base_xp=34,
+            xp_per_floor=3.4,
+            skill_ids=[
+                "heavy_slam",
+                "berserker_rage",
+                "war_cry",
+            ],
+        )
+    )
+
+    # Treasure unique: mimic-style boss
+    register_archetype(
+        EnemyArchetype(
+            id="hoard_mimic",
+            name="Hoard Mimic",
+            role="Brute",
+            tier=2,
+            ai_profile="brute",
+            base_hp=36,
+            hp_per_floor=2.3,
+            base_attack=9,
+            atk_per_floor=1.2,
+            base_defense=3,
+            def_per_floor=0.5,
+            base_xp=28,
+            xp_per_floor=2.8,
+            skill_ids=[
+                "heavy_slam",
+                "feral_claws",
+            ],
+        )
+    )
+
     register_archetype(
         EnemyArchetype(
             id="dragonkin",
@@ -725,6 +831,54 @@ def _build_enemy_packs() -> None:
             ],
             preferred_room_tag="lair",
             weight=1.5,
+        )
+    )
+
+    # --- Themed packs for new room types --------------------------------------
+
+    # Graveyard rooms: undead-heavy encounters
+    register_pack(
+        EnemyPackTemplate(
+            id="graveyard_undead_pack_t1",
+            name="Restless Dead",
+            tier=1,
+            member_arch_ids=[
+                "skeleton_archer",
+                "dire_rat",
+                "cultist_adept",
+            ],
+            preferred_room_tag="graveyard",
+            weight=1.4,
+        )
+    )
+
+    register_pack(
+        EnemyPackTemplate(
+            id="graveyard_undead_pack_t2",
+            name="Desecrated Burial",
+            tier=2,
+            member_arch_ids=[
+                "necromancer",
+                "ghoul_ripper",
+                "ghoul_ripper",
+            ],
+            preferred_room_tag="graveyard",
+            weight=1.6,
+        )
+    )
+
+    register_pack(
+        EnemyPackTemplate(
+            id="graveyard_undead_pack_t3",
+            name="Court of the Damned",
+            tier=3,
+            member_arch_ids=[
+                "lich",
+                "banshee",
+                "dread_knight",
+            ],
+            preferred_room_tag="graveyard",
+            weight=1.6,
         )
     )
 
@@ -887,6 +1041,124 @@ def _build_enemy_packs() -> None:
             weight=1.4,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Elite system - modular elite enemy variants
+# ---------------------------------------------------------------------------
+
+# Elite spawn chance per enemy (can be overridden by floor)
+BASE_ELITE_SPAWN_CHANCE = 0.15  # 15% chance for any enemy to spawn as elite
+
+# Elite stat multipliers (applied to base stats)
+ELITE_HP_MULTIPLIER = 1.5  # +50% HP
+ELITE_ATTACK_MULTIPLIER = 1.25  # +25% attack
+ELITE_DEFENSE_MULTIPLIER = 1.2  # +20% defense
+ELITE_XP_MULTIPLIER = 2.0  # +100% XP (elites are worth more)
+
+
+def is_elite_spawn(floor_index: int, base_chance: float = BASE_ELITE_SPAWN_CHANCE) -> bool:
+    """
+    Determine if an enemy should spawn as elite.
+    
+    Args:
+        floor_index: Current floor depth
+        base_chance: Base spawn chance (defaults to BASE_ELITE_SPAWN_CHANCE)
+    
+    Returns:
+        True if this enemy should be elite
+    """
+    # Elite chance scales slightly with floor depth (more elites deeper)
+    # Floors 1-2: base chance
+    # Floors 3-4: +5% chance
+    # Floors 5+: +10% chance
+    if floor_index <= 2:
+        chance = base_chance
+    elif floor_index <= 4:
+        chance = base_chance + 0.05
+    else:
+        chance = base_chance + 0.10
+    
+    return random.random() < chance
+
+
+def apply_elite_modifiers(
+    max_hp: int,
+    attack_power: int,
+    defense: int,
+    xp_reward: int,
+) -> Tuple[int, int, int, int]:
+    """
+    Apply elite stat multipliers to enemy stats.
+    
+    Args:
+        max_hp: Base max HP
+        attack_power: Base attack power
+        defense: Base defense
+        xp_reward: Base XP reward
+    
+    Returns:
+        Tuple of (elite_max_hp, elite_attack_power, elite_defense, elite_xp_reward)
+    """
+    elite_hp = int(max_hp * ELITE_HP_MULTIPLIER)
+    elite_attack = int(attack_power * ELITE_ATTACK_MULTIPLIER)
+    elite_defense = int(defense * ELITE_DEFENSE_MULTIPLIER)
+    elite_xp = int(xp_reward * ELITE_XP_MULTIPLIER)
+    
+    return elite_hp, elite_attack, elite_defense, elite_xp
+
+
+def make_enemy_elite(enemy, floor_index: int) -> None:
+    """
+    Convert an existing enemy to an elite variant.
+    
+    This modifies the enemy in-place, applying:
+    - Enhanced stats (HP, attack, defense, XP)
+    - Elite name prefix ("Elite")
+    - Elite flag for visual/mechanical identification
+    
+    Args:
+        enemy: Enemy entity to make elite
+        floor_index: Current floor (for stat scaling)
+    """
+    # Mark as elite
+    setattr(enemy, "is_elite", True)
+    
+    # Get current stats (or compute from archetype if needed)
+    max_hp = getattr(enemy, "max_hp", 12)
+    attack_power = getattr(enemy, "attack_power", 4)
+    defense = getattr(enemy, "defense", 0)
+    xp_reward = getattr(enemy, "xp_reward", 5)
+    
+    # Apply elite modifiers
+    elite_hp, elite_attack, elite_defense, elite_xp = apply_elite_modifiers(
+        max_hp, attack_power, defense, xp_reward
+    )
+    
+    # Update stats
+    setattr(enemy, "max_hp", elite_hp)
+    setattr(enemy, "hp", elite_hp)  # Full heal when becoming elite
+    setattr(enemy, "attack_power", elite_attack)
+    setattr(enemy, "defense", elite_defense)
+    setattr(enemy, "xp_reward", elite_xp)
+    
+    # Update name with "Elite" prefix
+    enemy_type = getattr(enemy, "enemy_type", "Enemy")
+    if not enemy_type.startswith("Elite "):
+        setattr(enemy, "enemy_type", f"Elite {enemy_type}")
+        # Also update the original name for display
+        setattr(enemy, "original_name", enemy_type)
+    
+    # Elite visual indicator: slightly brighter/more vibrant color
+    # We'll use a glow effect in rendering, but also tint the base color
+    base_color = getattr(enemy, "color", (200, 80, 80))
+    # Make elite enemies slightly brighter and more saturated
+    elite_color = (
+        min(255, int(base_color[0] * 1.2)),
+        min(255, int(base_color[1] * 1.15)),
+        min(255, int(base_color[2] * 1.1)),
+    )
+    setattr(enemy, "color", elite_color)
 
 
 # Build registries on import

@@ -75,6 +75,23 @@ def _build_item_stats_summary(stats: Dict[str, float]) -> str:
     return "  ".join(parts)
 
 
+def _get_rarity_color(rarity: str) -> tuple[int, int, int]:
+    """
+    Get a display color for an item based on its rarity.
+    
+    Falls back to a neutral color if the rarity is unknown.
+    """
+    rarity_key = (rarity or "").lower()
+    palette = {
+        "common": (220, 220, 220),
+        "uncommon": (140, 220, 140),   # soft green
+        "rare": (140, 180, 255),       # soft blue
+        "epic": (200, 150, 255),       # purple
+        "legendary": (255, 200, 120),  # orange/gold
+    }
+    return palette.get(rarity_key, (220, 220, 220))
+
+
 def _build_item_info_line(item_def: "ItemDef", include_description: bool = False) -> str:
     """
     Build a single compact line for item info.
@@ -581,22 +598,27 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                             bg.fill((60, 60, 90, 210))
                             screen.blit(bg, (right_x - 10, y - 2))
                         
-                        # Item name with selection indicator
+                        # Item name with selection indicator + rarity tag
                         selection_marker = "> " if is_selected else "  "
-                        line = f"{selection_marker}{item_def.name}{equipped_marker}"
-                        # Use brighter color if equipped or selected
+                        rarity = getattr(item_def, "rarity", "") or ""
+                        rarity_label = f" [{rarity.capitalize()}]" if rarity else ""
+                        line = f"{selection_marker}{item_def.name}{rarity_label}{equipped_marker}"
+
+                        # Base color from rarity, then brighten for equipped/selected
+                        base_color = _get_rarity_color(rarity)
                         if is_selected:
-                            item_color = (255, 255, 150)
+                            item_color = tuple(min(255, c + 40) for c in base_color)
                         elif equipped_marker:
-                            item_color = (255, 255, 200)
+                            item_color = tuple(min(255, c + 20) for c in base_color)
                         else:
-                            item_color = (220, 220, 220)
+                            item_color = base_color
                         t = ui_font.render(line, True, item_color)
                         screen.blit(t, (right_x, y))
                         y += 20
 
-                        # One-line stats/description, slightly dimmer and indented
-                        info_line = _build_item_info_line(item_def)
+                        # One-line stats/description, slightly dimmer and indented.
+                        # Show extra info (description) for the currently selected item.
+                        info_line = _build_item_info_line(item_def, include_description=is_selected)
                         if info_line:
                             info_color = (200, 200, 180) if is_selected else (170, 170, 170)
                             info_surf = ui_font.render(info_line, True, info_color)

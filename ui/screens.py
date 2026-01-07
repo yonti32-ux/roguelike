@@ -194,20 +194,31 @@ class InventoryScreen:
                 game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
                 return
 
-        # Equip selected item with Enter/Space
+        # Equip or use selected item with Enter/Space
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.CONFIRM, event):
                 if 0 <= cursor < len(item_indices):
                     item_id = flat_list[item_indices[cursor]][0]
                     if item_id:
-                        game.equip_item_for_inventory_focus(item_id)
+                        item_def = get_item_def(item_id)
+                        if item_def is not None and item_def.slot == "consumable":
+                            # Use consumable instead of equipping it.
+                            if hasattr(game, "use_consumable_from_inventory"):
+                                game.use_consumable_from_inventory(item_id)
+                        else:
+                            game.equip_item_for_inventory_focus(item_id)
                 return
         else:
             if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 if 0 <= cursor < len(item_indices):
                     item_id = flat_list[item_indices[cursor]][0]
                     if item_id:
-                        game.equip_item_for_inventory_focus(item_id)
+                        item_def = get_item_def(item_id)
+                        if item_def is not None and item_def.slot == "consumable":
+                            if hasattr(game, "use_consumable_from_inventory"):
+                                game.use_consumable_from_inventory(item_id)
+                        else:
+                            game.equip_item_for_inventory_focus(item_id)
                 return
 
     def draw(self, game: "Game") -> None:
