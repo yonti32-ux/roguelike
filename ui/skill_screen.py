@@ -34,7 +34,7 @@ from ui.skill_tree_layout import (
 )
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
 
 
 def get_unlocked_skills_for_hero(game: "Game") -> List[str]:

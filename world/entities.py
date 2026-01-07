@@ -1,9 +1,12 @@
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
 
 import pygame
 
 from settings import COLOR_PLAYER, COLOR_ENEMY
+from engine.sprites.sprite_helpers import draw_sprite_with_camera
+from engine.sprites.sprites import get_sprite_manager, SpriteCategory
+from engine.sprites.sprite_registry import get_registry, EntitySpriteType
 
 
 @dataclass
@@ -72,6 +75,31 @@ class Player(Entity):
         camera_y: float = 0.0,
         zoom: float = 1.0,
     ) -> None:
+        # Try to use sprite first, fallback to color-based rendering
+        try:
+            sprite_manager = get_sprite_manager()
+            registry = get_registry()
+            
+            sprite_id = registry.get_entity_sprite_id(EntitySpriteType.PLAYER)
+            sprite = sprite_manager.get_sprite(
+                SpriteCategory.ENTITY,
+                sprite_id,
+                fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                size=(self.width, self.height),
+            )
+            
+            if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                # Use sprite (it's a real sprite, not a fallback)
+                draw_sprite_with_camera(
+                    surface, sprite,
+                    self.x, self.y,
+                    camera_x, camera_y, zoom
+                )
+                return
+        except Exception:
+            pass  # Fall through to color-based rendering
+        
+        # Fallback: Color-based rendering
         world_rect = self.rect
         if zoom <= 0:
             zoom = 1.0
@@ -109,6 +137,61 @@ class Enemy(Entity):
         camera_y: float = 0.0,
         zoom: float = 1.0,
     ) -> None:
+        # Try to use sprite first, fallback to color-based rendering
+        try:
+            sprite_manager = get_sprite_manager()
+            registry = get_registry()
+            
+            # Get enemy type for sprite lookup
+            enemy_type = getattr(self, "archetype_id", None) or "default"
+            sprite_id = registry.get_enemy_sprite_id(enemy_type)
+            
+            sprite = sprite_manager.get_sprite(
+                SpriteCategory.ENTITY,
+                sprite_id,
+                fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                size=(self.width, self.height),
+            )
+            
+            if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                # Use sprite (it's a real sprite, not a fallback)
+                draw_sprite_with_camera(
+                    surface, sprite,
+                    self.x, self.y,
+                    camera_x, camera_y, zoom
+                )
+                
+                # Still draw elite glow if needed
+                is_elite = getattr(self, "is_elite", False)
+                if is_elite:
+                    world_rect = self.rect
+                    if zoom <= 0:
+                        zoom = 1.0
+                    sx = int((world_rect.x - camera_x) * zoom)
+                    sy = int((world_rect.y - camera_y) * zoom)
+                    sw = max(1, int(world_rect.width * zoom))
+                    sh = max(1, int(world_rect.height * zoom))
+                    
+                    glow_size = 3
+                    glow_rect = pygame.Rect(
+                        sx - glow_size,
+                        sy - glow_size,
+                        sw + glow_size * 2,
+                        sh + glow_size * 2
+                    )
+                    glow_color = (255, 220, 100, 100)
+                    glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+                    pygame.draw.rect(glow_surf, glow_color, glow_surf.get_rect())
+                    surface.blit(glow_surf, (glow_rect.x, glow_rect.y))
+                    
+                    screen_rect = pygame.Rect(sx, sy, sw, sh)
+                    border_color = (255, 200, 50)
+                    pygame.draw.rect(surface, border_color, screen_rect, width=2)
+                return
+        except Exception:
+            pass  # Fall through to color-based rendering
+        
+        # Fallback: Color-based rendering
         world_rect = self.rect
         if zoom <= 0:
             zoom = 1.0
@@ -175,6 +258,35 @@ class Chest(Entity):
         camera_y: float = 0.0,
         zoom: float = 1.0,
     ) -> None:
+        # Try to use sprite first, fallback to color-based rendering
+        try:
+            sprite_manager = get_sprite_manager()
+            registry = get_registry()
+            
+            sprite_id = registry.get_entity_sprite_id(EntitySpriteType.CHEST)
+            variant = "opened" if self.opened else "closed"
+            fallback_color = self.color_opened if self.opened else self.color_closed
+            
+            sprite = sprite_manager.get_sprite(
+                SpriteCategory.ENTITY,
+                sprite_id,
+                variant=variant,
+                fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                size=(self.width, self.height),
+            )
+            
+            if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                # Use sprite (it's a real sprite, not a fallback)
+                draw_sprite_with_camera(
+                    surface, sprite,
+                    self.x, self.y,
+                    camera_x, camera_y, zoom
+                )
+                return
+        except Exception:
+            pass  # Fall through to color-based rendering
+        
+        # Fallback: Color-based rendering
         world_rect = self.rect
         if zoom <= 0:
             zoom = 1.0
@@ -236,3 +348,47 @@ class Merchant(Entity):
     def __post_init__(self) -> None:
         # Merchants should feel like solid NPCs.
         self.blocks_movement = True
+    
+    def draw(
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
+    ) -> None:
+        # Try to use sprite first, fallback to color-based rendering
+        try:
+            sprite_manager = get_sprite_manager()
+            registry = get_registry()
+            
+            sprite_id = registry.get_entity_sprite_id(EntitySpriteType.MERCHANT)
+            sprite = sprite_manager.get_sprite(
+                SpriteCategory.ENTITY,
+                sprite_id,
+                fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                size=(self.width, self.height),
+            )
+            
+            if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                # Use sprite (it's a real sprite, not a fallback)
+                draw_sprite_with_camera(
+                    surface, sprite,
+                    self.x, self.y,
+                    camera_x, camera_y, zoom
+                )
+                return
+        except Exception:
+            pass  # Fall through to color-based rendering
+        
+        # Fallback: Color-based rendering
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        pygame.draw.rect(surface, self.color, screen_rect)

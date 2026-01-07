@@ -19,7 +19,7 @@ from systems.enemies import (
 from systems.events import EVENTS
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from ..core.game import Game
 
 
 def _choose_enemy_type_for_floor(floor_index: int) -> str:

@@ -6,7 +6,7 @@ import pygame
 from typing import Optional
 
 from settings import COLOR_BG, FPS
-from engine.config import get_config, save_config
+from ..core.config import get_config, save_config
 
 
 class PauseMenuScene:

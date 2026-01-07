@@ -292,7 +292,7 @@ def _serialize_map(game_map: GameMap) -> Dict[str, Any]:
 
 def _deserialize_game(screen, save_data: Dict[str, Any]) -> Any:
     """Reconstruct a Game instance from saved data."""
-    from engine.game import Game
+    from ..core.game import Game
     
     # Get hero class from save data
     hero_class_id = save_data.get("hero_stats", {}).get("hero_class_id", "warrior")

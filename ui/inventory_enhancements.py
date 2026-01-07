@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, List, Optional, Dict, Tuple, Callable
 from enum import Enum
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
     from systems.inventory import ItemDef, Inventory
 
 

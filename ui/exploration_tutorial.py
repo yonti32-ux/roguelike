@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
 
 
 def draw_exploration_tutorial(surface: pygame.Surface, font: pygame.font.Font, game: "Game") -> None:

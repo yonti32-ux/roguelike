@@ -62,3 +62,4 @@ TERRAIN_SPAWN_CHANCE = 0.3  # 30% chance each cell spawns terrain
 # Movement system
 BASE_MOVEMENT_POINTS = 3  # Base movement points per turn
 HAZARD_MOVEMENT_COST = 2  # Hazards cost extra movement (1 + 1 = 2 total)
+DIAGONAL_MOVEMENT_COST = 1.5  # Diagonal movement costs 1.5x more (rounded up)

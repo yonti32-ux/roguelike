@@ -8,18 +8,18 @@ from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
 from world.game_map import GameMap
 from world.entities import Player, Enemy, Merchant
-from .battle_scene import BattleScene
-from .input import create_default_input_manager
+from ..scenes.battle_scene import BattleScene
+from ..controllers.input import create_default_input_manager
 
-from .exploration import ExplorationController
-from .cheats import handle_cheat_key
-from .hero_manager import (
+from ..controllers.exploration import ExplorationController
+from ..utils.cheats import handle_cheat_key
+from ..managers.hero_manager import (
     init_hero_for_class,
     apply_hero_stats_to_player,
     grant_xp_to_companions,
     gain_xp_from_event,
 )
-from .message_log import MessageLog
+from ..managers.message_log import MessageLog
 from systems.progression import HeroStats
 
 from systems import perks as perk_system
@@ -37,9 +37,9 @@ from ui.screens import (
     ShopScreen,
     SkillScreen,
 )
-from .perk_selection_scene import PerkSelectionScene
+from ..scenes.perk_selection_scene import PerkSelectionScene
 from ui.skill_screen import SkillScreenCore
-from .floor_spawning import spawn_all_entities_for_floor
+from ..managers.floor_spawning import spawn_all_entities_for_floor
 try:
     from telemetry.logger import telemetry
 except Exception:  # telemetry must never break the game
@@ -136,6 +136,14 @@ class Game:
         # Tooltip system
         from ui.tooltip import Tooltip
         self.tooltip = Tooltip()
+        
+        # Initialize sprite system (with fallback to color-based rendering)
+        from ..sprites.init_sprites import init_game_sprites
+        try:
+            init_game_sprites()
+        except Exception as e:
+            print(f"Warning: Sprite system initialization failed: {e}")
+            print("Falling back to color-based rendering.")
 
         # --- Exploration log overlay (multi-line message history) ---
         self.show_exploration_log: bool = False
@@ -194,10 +202,10 @@ class Game:
         
         # Debug console
         try:
-            from .debug_console import DebugConsole
+            from ..utils.debug_console import DebugConsole
             self.debug_console = DebugConsole(screen)
             # Register with error handler
-            from .error_handler import set_debug_console
+            from ..utils.error_handler import set_debug_console
             set_debug_console(self.debug_console)
         except Exception:
             # If debug console fails to initialize, continue without it
@@ -1239,9 +1247,9 @@ class Game:
 
     def _handle_pause_menu(self) -> None:
         """Open pause menu and handle user selection."""
-        from engine.pause_menu import PauseMenuScene, OptionsMenuScene
-        from engine.save_menu import SaveMenuScene
-        from engine.save_system import save_game, load_game
+        from ..scenes.pause_menu import PauseMenuScene, OptionsMenuScene
+        from ..scenes.save_menu import SaveMenuScene
+        from ..utils.save_system import save_game, load_game
         
         # Draw current game state first (so it's visible behind pause overlay)
         if self.mode == GameMode.EXPLORATION:
@@ -1279,7 +1287,7 @@ class Game:
         
         elif choice == "options":
             # Show options/controls screen
-            from engine.resolution_menu import ResolutionMenuScene
+            from ..scenes.resolution_menu import ResolutionMenuScene
             options_menu = OptionsMenuScene(self.screen)
             sub_choice = options_menu.run()
             
@@ -1379,7 +1387,7 @@ class Game:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_F5:
                 # Quick save to slot 1
-                from engine.save_system import save_game
+                from ..utils.save_system import save_game
                 if save_game(self, slot=1):
                     self.add_message("Game saved to slot 1!")
                 else:
@@ -1387,8 +1395,8 @@ class Game:
                 return
             elif event.key == pygame.K_F6:
                 # Open save menu
-                from engine.save_menu import SaveMenuScene
-                from engine.save_system import save_game
+                from ..scenes.save_menu import SaveMenuScene
+                from ..utils.save_system import save_game
                 save_menu = SaveMenuScene(self.screen, mode="save")
                 selected_slot = save_menu.run()
                 if selected_slot is not None:
@@ -1399,8 +1407,8 @@ class Game:
                 return
             elif event.key == pygame.K_F7:
                 # Open load menu
-                from engine.save_menu import SaveMenuScene
-                from engine.save_system import load_game, list_saves
+                from ..scenes.save_menu import SaveMenuScene
+                from ..utils.save_system import load_game, list_saves
                 load_menu = SaveMenuScene(self.screen, mode="load")
                 selected_slot = load_menu.run()
                 if selected_slot is not None:

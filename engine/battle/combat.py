@@ -19,6 +19,30 @@ from systems.statuses import outgoing_multiplier, incoming_multiplier
 from engine.battle.types import BattleUnit
 
 
+def _get_distance(gx1: int, gy1: int, gx2: int, gy2: int, use_chebyshev: bool = False) -> int:
+    """
+    Calculate distance between two grid positions.
+    
+    Args:
+        gx1, gy1: First position
+        gx2, gy2: Second position
+        use_chebyshev: If True, use Chebyshev distance (for melee/8-directional).
+                      If False, use Manhattan distance (for ranged/4-directional).
+    
+    Returns:
+        Distance in tiles
+    """
+    dx = abs(gx1 - gx2)
+    dy = abs(gy1 - gy2)
+    
+    if use_chebyshev:
+        # Chebyshev distance: max(dx, dy) - allows diagonal movement
+        return max(dx, dy)
+    else:
+        # Manhattan distance: dx + dy - standard for ranged attacks
+        return dx + dy
+
+
 class BattleCombat:
     """
     Handles combat calculations for the battle scene.
@@ -39,13 +63,15 @@ class BattleCombat:
         """
         Check if attacker is flanking the target.
         Flanking occurs when attacking from behind or the side.
-        Simplified: if attacker is adjacent and there's no ally directly opposite, it's a flank.
+        Updated for 8-directional: checks if attacker is adjacent (orthogonal or diagonal)
+        and there's no ally directly opposite.
         """
         dx = attacker.gx - target.gx
         dy = attacker.gy - target.gy
         
-        # Must be directly adjacent for flanking
-        if abs(dx) + abs(dy) != 1:
+        # Must be directly adjacent for flanking (orthogonal or diagonal, distance 1 using Chebyshev)
+        distance = _get_distance(attacker.gx, attacker.gy, target.gx, target.gy, use_chebyshev=True)
+        if distance != 1:
             return False
         
         # Check if there's an ally directly opposite the attacker (target would be "facing" that way)
@@ -59,8 +85,22 @@ class BattleCombat:
             ally_dx = ally.gx - target.gx
             ally_dy = ally.gy - target.gy
             # If ally is directly opposite attacker, target is facing that direction (not a flank)
-            if ally_dx == opposite_dx and ally_dy == opposite_dy:
-                return False
+            # Check using Chebyshev distance to allow diagonal opposites
+            if abs(ally_dx) <= 1 and abs(ally_dy) <= 1:
+                # Normalize to direction
+                if ally_dx != 0:
+                    ally_dx_sign = 1 if ally_dx > 0 else -1
+                else:
+                    ally_dx_sign = 0
+                if ally_dy != 0:
+                    ally_dy_sign = 1 if ally_dy > 0 else -1
+                else:
+                    ally_dy_sign = 0
+                
+                # Check if opposite direction (or same direction, which also protects)
+                if (ally_dx_sign == opposite_dx or (opposite_dx == 0 and ally_dx_sign == 0)) and \
+                   (ally_dy_sign == opposite_dy or (opposite_dy == 0 and ally_dy_sign == 0)):
+                    return False
         
         # No ally opposite attacker, so it's a flank
         return True
@@ -181,25 +221,30 @@ class BattleCombat:
         
         if action_type == "attack":
             weapon_range = self._get_weapon_range(unit)
-            distance = abs(target.gx - unit.gx) + abs(target.gy - unit.gy)
+            # Use Chebyshev distance for melee (range 1), Manhattan for ranged
+            is_melee = weapon_range == 1
+            distance = _get_distance(unit.gx, unit.gy, target.gx, target.gy, use_chebyshev=is_melee)
             
             if distance > weapon_range:
                 return None, None
             
             base_damage = unit.attack_power
             
-            # Apply damage falloff for ranged attacks
-            if weapon_range > 1 and distance > 1:
-                falloff_factor = 1.0 - (0.15 * (distance - 1) / (weapon_range - 1))
-                base_damage = int(base_damage * falloff_factor)
-                base_damage = max(1, base_damage)
+            # Apply damage falloff for ranged attacks (using Manhattan distance)
+            if weapon_range > 1:
+                manhattan_distance = _get_distance(unit.gx, unit.gy, target.gx, target.gy, use_chebyshev=False)
+                if manhattan_distance > 1:
+                    falloff_factor = 1.0 - (0.15 * (manhattan_distance - 1) / (weapon_range - 1))
+                    base_damage = int(base_damage * falloff_factor)
+                    base_damage = max(1, base_damage)
         
         elif action_type == "skill" and skill is not None:
             if skill.base_power <= 0:
                 return None, None  # Non-damage skill
             
-            max_range = getattr(skill, "range_tiles", 1)
-            distance = abs(target.gx - unit.gx) + abs(target.gy - unit.gy)
+            max_range = int(getattr(skill, "range_tiles", 1) or 1)
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+            distance = _get_distance(unit.gx, unit.gy, target.gx, target.gy, use_chebyshev=use_chebyshev)
             
             if distance > max_range:
                 return None, None

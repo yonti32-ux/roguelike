@@ -9,6 +9,7 @@ from .statuses import StatusEffect
 
 
 TargetMode = Literal["self", "adjacent_enemy"]
+RangeMetric = Literal["manhattan", "chebyshev"]
 
 
 @dataclass
@@ -34,6 +35,10 @@ class Skill:
     - aoe_affects_allies: If True, AoE affects friendly units (default: False)
     - aoe_affects_enemies: If True, AoE affects enemy units (default: True)
     - aoe_affects_self: If True, AoE affects the caster (default: False)
+    - range_tiles: Maximum targeting range in tiles (default 1).
+    - range_metric: Distance metric for targeting:
+        - "chebyshev": 8-directional / diagonal-friendly (default; good for melee/adjacent)
+        - "manhattan": 4-directional diamond (good for ranged-by-tiles)
     """
     id: str
     name: str
@@ -57,6 +62,10 @@ class Skill:
     aoe_affects_allies: bool = False
     aoe_affects_enemies: bool = True
     aoe_affects_self: bool = False
+
+    # Targeting range fields
+    range_tiles: int = 1
+    range_metric: RangeMetric = "chebyshev"
 
 
 SKILLS: Dict[str, Skill] = {}

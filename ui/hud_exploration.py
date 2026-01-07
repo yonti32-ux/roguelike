@@ -11,7 +11,7 @@ from ui.hud_utils import _draw_bar, _draw_resource_bar_with_label, _draw_compact
 from ui.ui_scaling import scale_value
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
 
 
 def _draw_hero_panel(

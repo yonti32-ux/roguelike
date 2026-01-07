@@ -6,7 +6,7 @@ import random
 import pygame
 
 from settings import TILE_SIZE
-from .message_log import get_rarity_color
+from ..managers.message_log import get_rarity_color
 from world.entities import Enemy, Chest
 from world.entities import EventNode  # NEW
 from world.entities import Merchant  # NEW merchant NPC
@@ -25,7 +25,7 @@ from systems.input import InputAction
 
 if TYPE_CHECKING:
     # Only imported for type hints, to avoid circular imports at runtime
-    from engine.game import Game
+    from ..core.game import Game
 
 
 class ExplorationController:

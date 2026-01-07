@@ -292,6 +292,17 @@ register(Perk(
     tags=["defense", "control", "skills"],
 ))
 
+# Sentinel: Attacks of Opportunity
+register(Perk(
+    id="sentinel",
+    name="Sentinel",
+    description="You can make attacks of opportunity when enemies leave your melee range. Deals 75% damage.",
+    unlock_level=4,
+    branch="ward",
+    requires=["iron_guard_1"],
+    tags=["defense", "reactions"],
+))
+
 # ----------------- Focus tree -----------------
 
 register(Perk(

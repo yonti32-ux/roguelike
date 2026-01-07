@@ -12,7 +12,7 @@ from settings import TILE_SIZE
 from world.entities import Enemy
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
     from world.entities import Enemy
 
 

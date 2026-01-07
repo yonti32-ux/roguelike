@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Dict, Any
 import pygame
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
     from systems.inventory import ItemDef
 
 

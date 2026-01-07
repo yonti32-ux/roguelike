@@ -2,11 +2,11 @@ import sys
 import pygame
 
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TITLE, FPS
-from engine.game import Game
-from engine.character_creation import CharacterCreationScene
-from engine.main_menu import MainMenuScene
-from engine.save_menu import SaveMenuScene
-from engine.save_system import load_game
+from engine.core.game import Game
+from engine.scenes.character_creation import CharacterCreationScene
+from engine.scenes.main_menu import MainMenuScene
+from engine.scenes.save_menu import SaveMenuScene
+from engine.utils.save_system import load_game
 
 TELEMETRY_ENABLED = False  # flip to True when needed
 
@@ -46,7 +46,7 @@ def main() -> None:
     pygame.display.set_caption(TITLE)
 
     # Load resolution settings
-    from engine.config import load_config
+    from engine.core.config import load_config
     config = load_config()
     width, height = config.get_resolution()
     
@@ -77,8 +77,8 @@ def main() -> None:
     
     elif menu_choice == "options":
         # Show options menu (resolution settings)
-        from engine.pause_menu import OptionsMenuScene
-        from engine.resolution_menu import ResolutionMenuScene
+        from engine.scenes.pause_menu import OptionsMenuScene
+        from engine.scenes.resolution_menu import ResolutionMenuScene
         options_menu = OptionsMenuScene(screen)
         sub_choice = options_menu.run()
         

@@ -756,9 +756,26 @@ class BattleRenderer:
         range_color = (100, 150, 255, 80)  # Semi-transparent blue
         unit_gx, unit_gy = unit.gx, unit.gy
         
+        # Determine if we should use Chebyshev distance (for melee) or Manhattan (for ranged)
+        use_chebyshev = False
+        if action_type == "attack":
+            weapon_range = self.scene.combat._get_weapon_range(unit)
+            use_chebyshev = (weapon_range == 1)  # Melee uses Chebyshev
+        elif action_type == "skill" and skill is not None:
+            # Skills can opt into Manhattan targeting (future ranged-by-tiles),
+            # but default to Chebyshev so "adjacent" includes diagonals.
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+        
         for gx in range(self.scene.grid_width):
             for gy in range(self.scene.grid_height):
-                distance = abs(gx - unit_gx) + abs(gy - unit_gy)
+                # Calculate distance using appropriate metric
+                if use_chebyshev:
+                    dx = abs(gx - unit_gx)
+                    dy = abs(gy - unit_gy)
+                    distance = max(dx, dy)
+                else:
+                    distance = abs(gx - unit_gx) + abs(gy - unit_gy)
+                
                 if distance <= max_range and distance > 0:  # Don't highlight unit's own tile
                     x = self.scene.grid_origin_x + gx * self.scene.cell_size
                     y = self.scene.grid_origin_y + gy * self.scene.cell_size

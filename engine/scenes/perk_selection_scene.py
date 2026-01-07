@@ -15,7 +15,7 @@ from systems import perks as perk_system
 from systems.party import get_companion, recalc_companion_stats_for_level
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from ..core.game import Game
 
 
 @dataclass

@@ -24,7 +24,7 @@ from ui.hud_screens import (
 from systems.input import InputAction
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
 
 
 class BaseScreen(Protocol):

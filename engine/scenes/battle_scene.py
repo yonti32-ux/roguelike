@@ -87,7 +87,8 @@ from engine.battle.pathfinding import BattlePathfinding
 from engine.battle.combat import BattleCombat
 from engine.battle.terrain import BattleTerrainManager
 from engine.battle.ai import BattleAI
-from engine.config import get_config
+from engine.battle.reactions import BattleReactions, ReactionType
+from ..core.config import get_config
 
 
 
@@ -118,6 +119,9 @@ class BattleScene:
         # Initialize basic setup (grid, terrain, log, state)
         self._init_basic_setup()
         
+        # Initialize managers first (needed for reactions system during unit initialization)
+        self._init_managers()
+        
         # Initialize hero unit
         hero_unit = self._init_hero_unit()
         self.player_units: List[BattleUnit] = [hero_unit]
@@ -128,9 +132,8 @@ class BattleScene:
         # Initialize enemy units
         self._init_enemy_units(enemies)
         
-        # Initialize turn order and managers
+        # Initialize turn order
         self._init_turn_order()
-        self._init_managers()
         
         # Initialize cooldowns / statuses for first unit
         if self.turn_order:
@@ -251,6 +254,7 @@ class BattleScene:
             pass
 
         # Extra skills granted by perks (from systems.perks)
+        # Also grant reaction capabilities from perks
         hero_perk_ids = getattr(self.player, "perks", [])
         for pid in hero_perk_ids:
             try:
@@ -258,6 +262,7 @@ class BattleScene:
             except KeyError:
                 continue
 
+            # Grant skills from perks
             for skill_id in getattr(perk, "grant_skills", []):
                 try:
                     hero_unit.skills[skill_id] = get_skill(skill_id)
@@ -266,6 +271,10 @@ class BattleScene:
                 except KeyError:
                     # Skill not registered yet – ignore silently
                     continue
+            
+            # Grant reaction capabilities from perks (Sentinel grants AoO)
+            if pid == "sentinel":
+                self.reactions.grant_reaction_capability(hero_unit, ReactionType.ATTACK_OF_OPPORTUNITY)
 
         # Prefer a persisted slot layout if present on the hero entity
         # (e.g. synced from HeroStats.skill_slots). Fallback to auto layout.
@@ -372,6 +381,10 @@ class BattleScene:
                                 companion_unit.cooldowns.setdefault(skill_id, 0)
                             except KeyError:
                                 continue
+                        
+                        # Grant reaction capabilities from perks (Sentinel grants AoO)
+                        if pid == "sentinel":
+                            self.reactions.grant_reaction_capability(companion_unit, ReactionType.ATTACK_OF_OPPORTUNITY)
 
                 # Use a persisted layout from CompanionState if possible,
                 # otherwise fall back to an automatic layout.
@@ -579,6 +592,9 @@ class BattleScene:
         
         # Initialize AI
         self.ai = BattleAI(self)
+        
+        # Initialize reaction system
+        self.reactions = BattleReactions(self)
 
     # ------------ Log helpers ------------
 
@@ -668,6 +684,9 @@ class BattleScene:
         unit.regenerate_stamina()  # Amount calculated based on level
         unit.regenerate_mana()  # Amount calculated based on level
         
+        # Reset reaction points
+        self.reactions.reset_reactions(unit)
+        
         # Reset movement points at start of turn
         unit.current_movement_points = unit.max_movement_points
         
@@ -705,66 +724,120 @@ class BattleScene:
                 return True
         return False
 
-    def _get_movement_cost(self, gx: int, gy: int) -> int:
+    def _get_movement_cost(self, gx: int, gy: int, dx: int = 0, dy: int = 0) -> float:
         """
         Get the movement cost to enter a cell.
         Normal cells cost 1, hazards cost extra.
+        Diagonal movement costs more (1.5x base cost).
+        
+        Args:
+            gx, gy: Grid coordinates of the destination cell
+            dx, dy: Direction vector (0/±1 for orthogonal, both ±1 for diagonal)
         """
         terrain = self.terrain_manager.get_terrain(gx, gy)
-        if terrain.terrain_type == "hazard":
-            return HAZARD_MOVEMENT_COST
-        return 1
+        base_cost = HAZARD_MOVEMENT_COST if terrain.terrain_type == "hazard" else 1.0
+        
+        # Apply diagonal multiplier if moving diagonally
+        is_diagonal = abs(dx) == 1 and abs(dy) == 1
+        if is_diagonal:
+            from settings import DIAGONAL_MOVEMENT_COST
+            base_cost *= DIAGONAL_MOVEMENT_COST
+        
+        return base_cost
     
     # Pathfinding methods have been moved to engine.battle.pathfinding.BattlePathfinding
 
     def _try_move_unit(self, unit: BattleUnit, dx: int, dy: int) -> bool:
         """
         Legacy single-step movement. For new pathfinding system, use _move_unit_along_path.
+        Supports 8-directional movement with diagonal cost.
+        Checks for disengagement and triggers Attacks of Opportunity.
         """
+        old_gx, old_gy = unit.gx, unit.gy
         new_gx = unit.gx + dx
         new_gy = unit.gy + dy
         
-        # Check movement cost
-        move_cost = self._get_movement_cost(new_gx, new_gy)
+        # Check movement cost (include direction for diagonal calculation)
+        move_cost = self._get_movement_cost(new_gx, new_gy, dx, dy)
         if unit.current_movement_points < move_cost:
             return False
         
         if self._cell_blocked(new_gx, new_gy):
             return False
         
+        # Check for disengagement (leaving melee range)
+        # This happens BEFORE we actually move
+        reactors = self.reactions.check_disengagement(unit, old_gx, old_gy, new_gx, new_gy)
+        
+        # Move the unit
         unit.gx = new_gx
         unit.gy = new_gy
         unit.current_movement_points -= move_cost
+        
+        # Execute attacks of opportunity from all eligible reactors
+        # Note: Reactions happen after movement (classic D&D style)
+        for reactor in reactors:
+            self.reactions.execute_attack_of_opportunity(reactor, unit)
+        
         return True
     
     def _move_unit_along_path(self, unit: BattleUnit, path: List[tuple[int, int]]) -> bool:
         """
         Move unit along a path, consuming movement points.
         Returns True if movement was successful.
+        Supports 8-directional movement with diagonal costs.
+        Checks for disengagement at each step and triggers Attacks of Opportunity.
         """
         if not path or len(path) < 2:
             return False
         
-        total_cost = 0
+        # Track movement step by step to detect disengagement
+        old_gx, old_gy = unit.gx, unit.gy
+        
+        total_cost = 0.0
         for i in range(1, len(path)):
+            prev_gx, prev_gy = path[i-1] if i > 1 else (old_gx, old_gy)
             gx, gy = path[i]
-            total_cost += self._get_movement_cost(gx, gy)
+            dx = gx - prev_gx
+            dy = gy - prev_gy
+            step_cost = self._get_movement_cost(gx, gy, dx, dy)
+            
+            # Check if this step causes disengagement (before moving)
+            reactors = self.reactions.check_disengagement(unit, prev_gx, prev_gy, gx, gy)
+            
+            total_cost += step_cost
+            old_gx, old_gy = prev_gx, prev_gy  # Update for next iteration
         
         if unit.current_movement_points < total_cost:
             return False
         
         # Move unit to end of path
         final_pos = path[-1]
-        unit.gx, unit.gy = final_pos
+        final_gx, final_gy = final_pos
+        unit.gx, unit.gy = final_gx, final_gy
         unit.current_movement_points -= total_cost
+        
+        # Execute attacks of opportunity for the final position
+        # (Check disengagement from starting position to final position)
+        start_gx, start_gy = path[0]
+        reactors = self.reactions.check_disengagement(unit, start_gx, start_gy, final_gx, final_gy)
+        for reactor in reactors:
+            self.reactions.execute_attack_of_opportunity(reactor, unit)
+        
         return True
 
-    def _enemies_in_range(self, unit: BattleUnit, max_range: int) -> List[BattleUnit]:
+    def _enemies_in_range(self, unit: BattleUnit, max_range: int, use_chebyshev: bool = False) -> List[BattleUnit]:
         """
-        Return all enemy units within a given Manhattan range.
+        Return all enemy units within a given range.
         Delegates to AI module.
+        
+        Args:
+            unit: The unit checking range
+            max_range: Maximum range
+            use_chebyshev: If True, use Chebyshev distance (for melee/8-directional).
+                          If False, use Manhattan distance (for ranged/4-directional).
         """
-        return self.ai.enemies_in_range(unit, max_range)
+        return self.ai.enemies_in_range(unit, max_range, use_chebyshev=use_chebyshev)
 
     def _adjacent_enemies(self, unit: BattleUnit) -> List[BattleUnit]:
         """
@@ -1010,9 +1083,9 @@ class BattleScene:
         if skill.target_mode == "self":
             target_unit = unit
         elif skill.target_mode == "adjacent_enemy":
-            # Range-ready: skills can define range_tiles (defaults to 1)
-            max_range = getattr(skill, "range_tiles", 1)
-            candidates = self._enemies_in_range(unit, max_range)
+            max_range = int(getattr(skill, "range_tiles", 1) or 1)
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+            candidates = self._enemies_in_range(unit, max_range, use_chebyshev=use_chebyshev)
             if not candidates:
                 if not for_ai:
                     self._log(f"No enemy in range for {skill.name}!")
@@ -1047,8 +1120,11 @@ class BattleScene:
                     self._log(f"No target selected for {skill.name}!")
                 return False
             # Verify target is in range
-            max_range = getattr(skill, "range_tiles", 1)
-            distance = abs(target_unit.gx - unit.gx) + abs(target_unit.gy - unit.gy)
+            max_range = int(getattr(skill, "range_tiles", 1) or 1)
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+            dx = abs(target_unit.gx - unit.gx)
+            dy = abs(target_unit.gy - unit.gy)
+            distance = max(dx, dy) if use_chebyshev else (dx + dy)
             if distance > max_range:
                 if not for_ai:
                     self._log(f"{target_unit.name} is out of range for {skill.name}!")
@@ -1093,7 +1169,7 @@ class BattleScene:
         affected_units: List[BattleUnit] = []
         if has_aoe:
             # AoE skill - find all units in AoE area
-            from engine.battle.aoe import get_units_in_aoe
+            from ..battle.aoe import get_units_in_aoe
             
             all_units = list(self.player_units) + list(self.enemy_units)
             affected_units = get_units_in_aoe(
@@ -1230,11 +1306,13 @@ class BattleScene:
         
         if action_type == "attack":
             weapon_range = self.combat._get_weapon_range(unit)
-            valid_targets = self._enemies_in_range(unit, weapon_range)
+            is_melee = weapon_range == 1
+            valid_targets = self._enemies_in_range(unit, weapon_range, use_chebyshev=is_melee)
         elif action_type == "skill" and skill is not None:
             if skill.target_mode == "adjacent_enemy":
-                max_range = getattr(skill, "range_tiles", 1)
-                valid_targets = self._enemies_in_range(unit, max_range)
+                max_range = int(getattr(skill, "range_tiles", 1) or 1)
+                use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+                valid_targets = self._enemies_in_range(unit, max_range, use_chebyshev=use_chebyshev)
         
         if not valid_targets:
             # No valid targets - can't enter targeting mode

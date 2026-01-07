@@ -13,7 +13,7 @@ from systems.party import (
 )
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from ..core.game import Game
 
 
 def init_hero_for_class(game: "Game", hero_class_id: str) -> None:

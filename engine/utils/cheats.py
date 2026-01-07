@@ -94,7 +94,7 @@ def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
     #      (only if not in battle, to avoid weirdness)
     # ------------------------------------------------------------------
     if key == pygame.K_F8:
-        from .game import GameMode  # local import to avoid cycles
+        from ..core.game import GameMode  # local import to avoid cycles
 
         if game.mode != GameMode.BATTLE:
             game.floor += 1

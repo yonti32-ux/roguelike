@@ -13,7 +13,7 @@ from systems.economy import (
 )
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
     from systems.inventory import Inventory, ItemDef
 
 

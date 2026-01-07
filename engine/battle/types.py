@@ -70,6 +70,10 @@ class BattleUnit:
     # Movement points system
     max_movement_points: int = BASE_MOVEMENT_POINTS
     current_movement_points: int = BASE_MOVEMENT_POINTS
+    
+    # Reaction system (for AoO, overwatch, etc.)
+    reaction_capabilities: List[str] = field(default_factory=list)  # List of reaction types this unit can perform
+    reactions_remaining: int = 0  # Reaction points remaining this turn
 
     @property
     def hp(self) -> int:

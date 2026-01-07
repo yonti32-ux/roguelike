@@ -294,21 +294,72 @@ class GameMap:
                     pygame.draw.rect(surface, (0, 0, 0), rect)
                     continue
 
-                base_color = tile.color
-                if coord in self.visible:
-                    # Currently visible - full brightness
-                    color = base_color
-                else:
-                    # Explored but not currently visible - stays "lit" but slightly dimmed
-                    # Increased from 0.6 to 0.85 for much better visibility
-                    factor = 0.85
-                    color = (
-                        int(base_color[0] * factor),
-                        int(base_color[1] * factor),
-                        int(base_color[2] * factor),
+                # Try to use sprite first, fallback to color-based rendering
+                sprite_used = False
+                try:
+                    from engine.sprites.sprites import get_sprite_manager, SpriteCategory
+                    from engine.sprites.sprite_registry import get_registry, TileSpriteType
+                    
+                    sprite_manager = get_sprite_manager()
+                    registry = get_registry()
+                    
+                    # Determine tile type
+                    from world.tiles import FLOOR_TILE, WALL_TILE, UP_STAIRS_TILE, DOWN_STAIRS_TILE
+                    if tile == FLOOR_TILE:
+                        tile_type = TileSpriteType.FLOOR
+                    elif tile == WALL_TILE:
+                        tile_type = TileSpriteType.WALL
+                    elif tile == UP_STAIRS_TILE:
+                        tile_type = TileSpriteType.UP_STAIRS
+                    elif tile == DOWN_STAIRS_TILE:
+                        tile_type = TileSpriteType.DOWN_STAIRS
+                    else:
+                        tile_type = TileSpriteType.FLOOR  # Default fallback
+                    
+                    sprite_id = registry.get_tile_sprite_id(tile_type)
+                    base_color = tile.color
+                    
+                    sprite = sprite_manager.get_sprite(
+                        SpriteCategory.TILE,
+                        sprite_id,
+                        fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                        size=(tile_screen_size, tile_screen_size),
                     )
+                    
+                    if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                        # Use sprite (it's a real sprite, not a fallback)
+                        # Adjust brightness for visibility
+                        if coord in self.visible:
+                            # Currently visible - full brightness
+                            sprite_surface = sprite.copy()
+                        else:
+                            # Explored but not currently visible - slightly dimmed
+                            factor = 0.85
+                            sprite_surface = sprite.copy()
+                            sprite_surface.set_alpha(int(255 * factor))
+                        
+                        surface.blit(sprite_surface, rect)
+                        sprite_used = True
+                except Exception:
+                    pass  # Fall through to color-based rendering
+                
+                # Fallback: Color-based rendering
+                if not sprite_used:
+                    base_color = tile.color
+                    if coord in self.visible:
+                        # Currently visible - full brightness
+                        color = base_color
+                    else:
+                        # Explored but not currently visible - stays "lit" but slightly dimmed
+                        # Increased from 0.6 to 0.85 for much better visibility
+                        factor = 0.85
+                        color = (
+                            int(base_color[0] * factor),
+                            int(base_color[1] * factor),
+                            int(base_color[2] * factor),
+                        )
 
-                pygame.draw.rect(surface, color, rect)
+                    pygame.draw.rect(surface, color, rect)
                 
                 # Draw stairs symbols to make them more obvious
                 from world.tiles import UP_STAIRS_TILE, DOWN_STAIRS_TILE
