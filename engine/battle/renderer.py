@@ -49,6 +49,7 @@ class BattleRenderer:
         surface: pygame.Surface,
         unit: Optional[BattleUnit],
         screen_w: int,
+        ui_scale: float = 1.0,
     ) -> None:
         """
         Draw a small HUD panel for the currently active unit (hero, companion,
@@ -57,24 +58,29 @@ class BattleRenderer:
         if unit is None:
             return
 
-        panel_width = 320
-        panel_height = 80
+        # Slightly larger, scaled panel with room for future portrait/stats.
+        panel_width = int(360 * ui_scale)
+        panel_height = int(86 * ui_scale)
         x = (screen_w - panel_width) // 2
-        y = 16
+        y = int(28 * ui_scale)
 
         bg_rect = pygame.Rect(x, y, panel_width, panel_height)
         # Background
-        pygame.draw.rect(surface, (18, 18, 28), bg_rect)
+        pygame.draw.rect(surface, (12, 14, 24), bg_rect)
 
         # Border colour by side
         border_color = COLOR_PLAYER if unit.side == "player" else COLOR_ENEMY
         pygame.draw.rect(surface, border_color, bg_rect, width=2)
 
+        # Layout: left side label column, right side status icons.
+        padding_x = int(12 * ui_scale)
+        padding_y = int(8 * ui_scale)
+
         # Name + role
         role = "Party" if unit.side == "player" else "Enemy"
         name_line = f"{unit.name} ({role})"
-        name_surf = self.font.render(name_line, True, (230, 230, 230))
-        surface.blit(name_surf, (x + 10, y + 8))
+        name_surf = self.font.render(name_line, True, (235, 235, 235))
+        surface.blit(name_surf, (x + padding_x, y + padding_y))
 
         # HP + stats line
         hp_line = f"HP {unit.hp}/{unit.max_hp}"
@@ -97,18 +103,22 @@ class BattleRenderer:
             else:
                 res_line = f"MP {cur_mana}/{max_mana}"
 
+        line_y = y + padding_y + self.font.get_height() + int(2 * ui_scale)
         hp_surf = self.font.render(hp_line, True, (210, 210, 210))
-        stats_surf = self.font.render(stats_line, True, (200, 200, 200))
-        res_surf = self.font.render(res_line, True, (190, 190, 230)) if res_line else None
+        surface.blit(hp_surf, (x + padding_x, line_y))
 
-        surface.blit(hp_surf, (x + 10, y + 32))
-        surface.blit(stats_surf, (x + 10, y + 48))
-        if res_surf is not None:
-            surface.blit(res_surf, (x + 10, y + 64))
+        line_y += self.font.get_height()
+        stats_surf = self.font.render(stats_line, True, (200, 200, 200))
+        surface.blit(stats_surf, (x + padding_x, line_y))
+
+        if res_line:
+            line_y += self.font.get_height()
+            res_surf = self.font.render(res_line, True, (185, 195, 235))
+            surface.blit(res_surf, (x + padding_x, line_y))
 
         # Simple status indicators on the right side of the panel
-        icon_x = x + panel_width - 18
-        icon_y = y + 10
+        icon_x = x + panel_width - int(18 * ui_scale)
+        icon_y = y + padding_y
         
         _draw_status_indicators(
             surface,
@@ -119,7 +129,7 @@ class BattleRenderer:
             has_weakened=self.scene._has_status(unit, "weakened"),
             has_stunned=self.scene._is_stunned(unit),
             has_dot=self.scene._has_dot(unit),
-            icon_spacing=18,
+            icon_spacing=int(18 * ui_scale),
         )
 
     def draw_grid(self, surface: pygame.Surface) -> None:
@@ -435,6 +445,36 @@ class BattleRenderer:
             name_x = rect.centerx - name_surf.get_width() // 2
             name_y = rect.bottom + 10
             surface.blit(name_surf, (name_x, name_y))
+            
+            # Debug overlay for sprites
+            try:
+                from ..utils.cheats import is_debug_sprites_enabled
+                from ..sprites.sprites import get_sprite_manager, SpriteCategory
+                from ..sprites.sprite_registry import get_registry, EntitySpriteType
+                from ..sprites.sprite_helpers import draw_sprite_debug_overlay
+                
+                if is_debug_sprites_enabled():
+                    sprite_manager = get_sprite_manager()
+                    registry = get_registry()
+                    
+                    # Determine sprite ID based on unit type
+                    if unit.side == "player":
+                        sprite_id = registry.get_entity_sprite_id(EntitySpriteType.PLAYER)
+                    else:
+                        # Enemy unit - get archetype_id from entity
+                        enemy_type = getattr(unit.entity, "archetype_id", None) or "default"
+                        sprite_id = registry.get_enemy_sprite_id(enemy_type)
+                    
+                    # Draw debug overlay at the rect position
+                    draw_sprite_debug_overlay(
+                        surface, None, sprite_id, rect.x, rect.y,
+                        rect.width, rect.height,
+                        original_size=None,
+                        requested_size=(rect.width, rect.height),
+                        sprite_manager=sprite_manager,
+                    )
+            except Exception:
+                pass  # Ignore errors in debug overlay
 
         # ---------------- Enemy units ----------------
         for unit in self.scene.enemy_units:
@@ -548,6 +588,32 @@ class BattleRenderer:
             name_x = rect.centerx - name_surf.get_width() // 2
             name_y = rect.bottom + 10
             surface.blit(name_surf, (name_x, name_y))
+            
+            # Debug overlay for sprites
+            try:
+                from ..utils.cheats import is_debug_sprites_enabled
+                from ..sprites.sprites import get_sprite_manager, SpriteCategory
+                from ..sprites.sprite_registry import get_registry, EntitySpriteType
+                from ..sprites.sprite_helpers import draw_sprite_debug_overlay
+                
+                if is_debug_sprites_enabled():
+                    sprite_manager = get_sprite_manager()
+                    registry = get_registry()
+                    
+                    # Enemy unit - get archetype_id from entity
+                    enemy_type = getattr(unit.entity, "archetype_id", None) or "default"
+                    sprite_id = registry.get_enemy_sprite_id(enemy_type)
+                    
+                    # Draw debug overlay at the rect position
+                    draw_sprite_debug_overlay(
+                        surface, None, sprite_id, rect.x, rect.y,
+                        rect.width, rect.height,
+                        original_size=None,
+                        requested_size=(rect.width, rect.height),
+                        sprite_manager=sprite_manager,
+                    )
+            except Exception:
+                pass  # Ignore errors in debug overlay
         
         # ---------------- Floating damage numbers ----------------
         self.draw_floating_damage(surface)
@@ -621,6 +687,7 @@ class BattleRenderer:
             y = spark["y"]
             timer = spark["timer"]
             is_crit = spark.get("is_crit", False)
+            is_dodge = spark.get("is_dodge", False)
             
             # Spark size based on remaining time (fade out)
             max_time = 0.3
@@ -629,8 +696,17 @@ class BattleRenderer:
             if size <= 0:
                 continue
             
-            # Color based on crit
-            if is_crit:
+            # Color based on crit or dodge
+            if is_dodge:
+                # Blue/green spark for dodges (indicates a miss)
+                color = (100, 255, 200)  # Cyan/teal spark for dodges
+                # Draw a "whoosh" effect (multiple sparks in a line)
+                for i in range(3):
+                    offset = size * (i - 1) * 0.5
+                    spark_x = int(x + offset)
+                    spark_y = int(y)
+                    pygame.draw.circle(surface, color, (spark_x, spark_y), size // 2)
+            elif is_crit:
                 color = (255, 255, 150)  # Yellow spark for crits
                 # Draw multiple sparks for crit (4 sparks in a cross pattern)
                 for i in range(4):
@@ -817,7 +893,7 @@ class BattleRenderer:
                     rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
                     pygame.draw.rect(surface, (255, 200, 150), rect, width=2)
 
-    def draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int) -> None:
+    def draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int, ui_scale: float = 1.0) -> None:
         """Draw a small indicator showing the next few units in turn order."""
         if not self.scene.turn_order:
             return
@@ -838,14 +914,14 @@ class BattleRenderer:
             return  # Don't show if only current unit
         
         # Draw small icons/names for upcoming turns
-        indicator_y = 115  # Just below the active unit panel
-        indicator_w = len(next_units) * 90
-        if indicator_w < 200:
-            indicator_w = 200  # Minimum width
+        indicator_y = int(120 * ui_scale)  # Just below the active unit panel
+        indicator_w = len(next_units) * int(96 * ui_scale)
+        if indicator_w < int(220 * ui_scale):
+            indicator_w = int(220 * ui_scale)  # Minimum width
         indicator_x = (screen_w - indicator_w) // 2
         
         # Background panel
-        panel_h = 30
+        panel_h = int(32 * ui_scale)
         panel = pygame.Surface((indicator_w, panel_h), pygame.SRCALPHA)
         panel.fill((0, 0, 0, 150))
         surface.blit(panel, (indicator_x, indicator_y))
@@ -864,7 +940,7 @@ class BattleRenderer:
                     color = COLOR_ENEMY
             
             # Small icon/indicator
-            icon_size = 20
+            icon_size = int(22 * ui_scale)
             icon_x = indicator_x + x_offset + 5
             icon_y = indicator_y + 5
             
@@ -874,9 +950,17 @@ class BattleRenderer:
             
             # Unit name/label
             label_surf = self.font.render(label, True, (220, 220, 220))
-            label_x = icon_x + icon_size + 4
+            label_x = icon_x + icon_size + int(4 * ui_scale)
             label_y = icon_y + (icon_size - label_surf.get_height()) // 2
             surface.blit(label_surf, (label_x, label_y))
             
-            x_offset += 90
+            # Initiative value (small text below name)
+            init_value = unit.initiative
+            init_text = f"INI:{init_value}"
+            init_surf = self.font.render(init_text, True, (180, 200, 255))
+            init_x = label_x
+            init_y = label_y + label_surf.get_height() + int(2 * ui_scale)
+            surface.blit(init_surf, (init_x, init_y))
+            
+            x_offset += int(96 * ui_scale)
 

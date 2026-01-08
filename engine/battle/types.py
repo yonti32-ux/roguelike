@@ -96,6 +96,20 @@ class BattleUnit:
         return getattr(self.entity, "max_stamina", 0)
 
     @property
+    def initiative(self) -> int:
+        """Get initiative value for turn order (higher = goes first)."""
+        # Try to get initiative directly from entity
+        initiative = getattr(self.entity, "initiative", None)
+        if initiative is not None:
+            return int(initiative)
+        # Fallback: derive from speed if available (speed * 10 as base initiative)
+        speed = getattr(self.entity, "speed", 1.0)
+        if isinstance(speed, (int, float)):
+            return int(speed * 10)
+        # Final fallback: default initiative
+        return 10
+
+    @property
     def level(self) -> int:
         """Get the level of this unit's entity."""
         # Try to get level from entity (hero/companion have this)

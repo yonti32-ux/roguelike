@@ -11,6 +11,10 @@ if TYPE_CHECKING:
 # Global cheat mode flag (toggled with F9)
 _cheat_mode_enabled = False
 
+# Global debug sprites overlay flag (toggled with F10)
+# This doesn't require cheat mode - it's a development tool
+DEBUG_SPRITES = False
+
 
 def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
     """
@@ -27,6 +31,19 @@ def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
         return False
 
     key = event.key
+
+    # ------------------------------------------------------------------
+    # F10: Toggle debug sprite overlay (doesn't require cheat mode)
+    # ------------------------------------------------------------------
+    if key == pygame.K_F10:
+        global DEBUG_SPRITES
+        DEBUG_SPRITES = not DEBUG_SPRITES
+        game.last_message = (
+            "[DEBUG] Sprite overlay ON. Press F10 again to disable."
+            if DEBUG_SPRITES
+            else "[DEBUG] Sprite overlay OFF."
+        )
+        return True
 
     # ------------------------------------------------------------------
     # F9: Toggle cheat mode on/off
@@ -104,3 +121,8 @@ def handle_cheat_key(game: "Game", event: pygame.event.Event) -> bool:
 
     # No cheat handled
     return False
+
+
+def is_debug_sprites_enabled() -> bool:
+    """Check if debug sprite overlay is enabled."""
+    return DEBUG_SPRITES

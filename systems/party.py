@@ -284,6 +284,9 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
             defense = base_stats.defense  # Defense grows via perks/items mostly
             skill_power = base_stats.skill_power  # Skill power grows via perks mostly
             
+            # Initiative growth per level (same as hero: +1 every 2 levels)
+            initiative = base_stats.initiative + (level - 1) // 2
+            
             # Resource pools from class (scaled appropriately)
             stamina = base_stats.max_stamina + (level - 1) * 3  # Reduced growth: 3 per level
             mana = base_stats.max_mana + (level - 1) * 2  # Reduced growth: 2 per level
@@ -315,6 +318,8 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         # Defense grows slowly; every ~3 levels
         def_linear = BASE_DEF + (level - 1) // 3
         sp_linear = BASE_SP + 0.05 * (level - 1)
+        # Initiative grows slowly: +1 every 2 levels (same as hero)
+        initiative_linear = 10 + (level - 1) // 2
 
         # Apply template specialisation
         hp = hp_linear * float(template.hp_factor)
@@ -333,9 +338,20 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         stamina = stamina_linear * float(template.hp_factor) * 0.9  # Slight reduction
         mana = mana_linear * float(template.skill_power_factor) * 0.9  # Slight reduction
 
+    # Initialize initiative from level-based growth (before perks)
+    # For class-based companions, use base_stats.initiative + level growth
+    # For factor-based companions, use calculated initiative_linear
+    if companion_class_id:
+        # Initiative already calculated above from base_stats.initiative + level growth
+        pass  # initiative variable already set above
+    else:
+        # Use the calculated initiative_linear from factor-based path
+        initiative = initiative_linear
+    
     # Apply per-companion perk bonuses, if any.
     stamina_regen_bonus = 0
     mana_regen_bonus = 0
+    movement_points_bonus = 0
     if state.perks:
         mods = total_stat_modifiers_for_perks(state.perks)
         hp += mods.get("max_hp", 0)
@@ -346,6 +362,8 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         stamina += int(mods.get("max_stamina", 0))
         stamina_regen_bonus = int(mods.get("stamina_regen_bonus", 0))
         mana_regen_bonus = int(mods.get("mana_regen_bonus", 0))
+        initiative += int(mods.get("initiative", 0))  # Add perk bonuses to base initiative
+        movement_points_bonus = int(mods.get("movement_points_bonus", movement_points_bonus))
 
     # Apply equipment bonuses, if this companion has any gear equipped.
     equipped = getattr(state, "equipped", None) or {}
@@ -371,6 +389,8 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
     state.max_stamina = max(0, int(stamina))
     state.stamina_regen_bonus = stamina_regen_bonus
     state.mana_regen_bonus = mana_regen_bonus
+    state.initiative = initiative
+    state.movement_points_bonus = movement_points_bonus
 
 
 def init_companion_stats(state: CompanionState, template: CompanionDef) -> None:
@@ -503,16 +523,22 @@ def create_companion_entity(
     setattr(companion_entity, "max_stamina", comp_max_stamina)
     setattr(companion_entity, "level", comp_level)  # For regeneration scaling
     
-    # Set regeneration bonuses from companion state (if available)
+    # Set regeneration bonuses and initiative/movement from companion state (if available)
     if state is not None:
         # Get regeneration bonuses from state (calculated from perks in recalc_companion_stats_for_level)
         stamina_regen = getattr(state, "stamina_regen_bonus", 0)
         mana_regen = getattr(state, "mana_regen_bonus", 0)
+        initiative = getattr(state, "initiative", 10)
+        movement_points_bonus = getattr(state, "movement_points_bonus", 0)
         setattr(companion_entity, "stamina_regen_bonus", stamina_regen)
         setattr(companion_entity, "mana_regen_bonus", mana_regen)
+        setattr(companion_entity, "initiative", int(initiative))
+        setattr(companion_entity, "movement_points_bonus", int(movement_points_bonus))
     else:
         setattr(companion_entity, "stamina_regen_bonus", 0)
         setattr(companion_entity, "mana_regen_bonus", 0)
+        setattr(companion_entity, "initiative", 10)
+        setattr(companion_entity, "movement_points_bonus", 0)
     
     return companion_entity
 

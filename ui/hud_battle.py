@@ -5,6 +5,7 @@ import pygame
 
 from systems.input import InputAction
 from ui.hud_utils import _draw_bar, _draw_status_indicators
+from ui.ui_scaling import scale_value
 
 
 def _draw_battle_unit_card(
@@ -23,6 +24,8 @@ def _draw_battle_unit_card(
     is_active: bool = False,
     is_player: bool = True,
     statuses: List = None,
+    *,
+    scale: float = 1.0,
 ) -> None:
     """
     Draw a battle unit card showing name, HP, resources, and status indicators.
@@ -30,55 +33,88 @@ def _draw_battle_unit_card(
     """
     if statuses is None:
         statuses = []
-    
-    card_h = 70
+
+    # Scaled dimensions
+    card_h = scale_value(78, scale)
+    padding_x = scale_value(8, scale)
+    padding_y = scale_value(6, scale)
+    portrait_size = scale_value(46, scale)
+    bar_height = scale_value(10, scale)
+
     card_surf = pygame.Surface((width, card_h), pygame.SRCALPHA)
-    
+
     # Background color based on side and active state
     if is_active:
-        bg_color = (40, 50, 60, 200) if is_player else (60, 40, 40, 200)
-        border_color = (100, 150, 255) if is_player else (255, 100, 100)
+        bg_color = (42, 52, 68, 220) if is_player else (68, 42, 42, 220)
+        border_color = (110, 170, 255) if is_player else (255, 120, 120)
     else:
-        bg_color = (20, 20, 30, 180) if is_player else (30, 20, 20, 180)
-        border_color = (80, 100, 120) if is_player else (120, 80, 80)
-    
+        bg_color = (18, 20, 30, 190) if is_player else (30, 18, 18, 190)
+        border_color = (80, 100, 130) if is_player else (140, 90, 90)
+
     card_surf.fill(bg_color)
     pygame.draw.rect(card_surf, border_color, (0, 0, width, card_h), 2)
     surface.blit(card_surf, (x, y))
-    
-    text_x = x + 6
-    text_y = y + 4
-    
-    # Name
-    name_color = (240, 240, 240) if is_active else (200, 200, 200)
+
+    # --- Portrait placeholder (left) ---
+    portrait_x = x + padding_x
+    portrait_y = y + padding_y
+    portrait_rect = pygame.Rect(portrait_x, portrait_y, portrait_size, portrait_size)
+    # Slightly inset background so future portrait art has a frame
+    pygame.draw.rect(surface, (10, 10, 16), portrait_rect)
+    pygame.draw.rect(surface, border_color, portrait_rect, 2)
+
+    # --- Text + bars column (right of portrait) ---
+    text_x = portrait_rect.right + padding_x
+    text_y = y + padding_y
+    usable_width = max(40, x + width - padding_x - text_x)
+
+    # Name (slightly brighter when active)
+    name_color = (245, 245, 245) if is_active else (210, 210, 210)
     name_surf = font.render(name, True, name_color)
     surface.blit(name_surf, (text_x, text_y))
-    text_y += 18
-    
-    # HP bar
+    text_y += scale_value(20, scale)
+
+    # HP label + bar
     hp_ratio = hp / max_hp if max_hp > 0 else 0.0
-    hp_color = (200, 80, 80) if hp > 0 else (100, 50, 50)
-    hp_label = font.render(f"HP {hp}/{max_hp}", True, (220, 220, 220))
+    hp_color = (210, 90, 90) if hp > 0 else (110, 60, 60)
+    hp_label = font.render(f"HP {hp}/{max_hp}", True, (225, 225, 225))
     surface.blit(hp_label, (text_x, text_y))
-    text_y += 16
-    _draw_bar(surface, text_x, text_y, width - 12, 8, hp_ratio, (60, 30, 30), hp_color, (255, 255, 255))
-    text_y += 12
-    
-    # Resources (stamina/mana) - compact
+    text_y += scale_value(14, scale)
+    _draw_bar(
+        surface,
+        text_x,
+        text_y,
+        usable_width,
+        bar_height,
+        hp_ratio,
+        (60, 30, 30),
+        hp_color,
+        (255, 255, 255),
+    )
+    text_y += bar_height + scale_value(4, scale)
+
+    # Resources (stamina / mana) - compact, but with clearer color coding
     if max_stamina > 0 or max_mana > 0:
         res_parts = []
         if max_stamina > 0:
             res_parts.append(f"STA {current_stamina}/{max_stamina}")
         if max_mana > 0:
             res_parts.append(f"MP {current_mana}/{max_mana}")
-        res_text = font.render(" | ".join(res_parts), True, (180, 200, 220))
+        res_text = font.render(" | ".join(res_parts), True, (180, 210, 235))
         surface.blit(res_text, (text_x, text_y))
-        text_y += 16
-    
-    # Status indicators (right side)
-    icon_x = x + width - 20
-    icon_y = y + 4
-    _draw_status_indicators(surface, font, icon_x, icon_y, statuses=statuses, icon_spacing=14)
+
+    # Status indicators (right side, vertically stacked)
+    icon_x = x + width - padding_x - scale_value(14, scale)
+    icon_y = y + padding_y
+    _draw_status_indicators(
+        surface,
+        font,
+        icon_x,
+        icon_y,
+        statuses=statuses,
+        icon_spacing=scale_value(14, scale),
+        vertical=True,
+    )
 
 
 def _draw_battle_skill_hotbar(

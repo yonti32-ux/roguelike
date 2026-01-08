@@ -228,7 +228,7 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                     except KeyError:
                         arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
 
-                    max_hp, attack_power, defense, xp_reward = compute_scaled_stats(
+                    max_hp, attack_power, defense, xp_reward, initiative = compute_scaled_stats(
                         arch, floor_index
                     )
 
@@ -248,6 +248,7 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                     setattr(enemy, "attack_power", attack_power)
                     setattr(enemy, "defense", defense)
                     setattr(enemy, "xp_reward", xp_reward)
+                    setattr(enemy, "initiative", initiative)
                     setattr(enemy, "enemy_type", arch.name)
                     setattr(enemy, "archetype_id", arch.id)
                     setattr(enemy, "ai_profile", arch.ai_profile)
@@ -296,7 +297,7 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
             except KeyError:
                 arch = choose_archetype_for_floor(floor_index, room_tag=room_tag)
 
-            max_hp, attack_power, defense, xp_reward = compute_scaled_stats(arch, floor_index)
+            max_hp, attack_power, defense, xp_reward, initiative = compute_scaled_stats(arch, floor_index)
 
             ex, ey = game_map.center_entity_on_tile(spawn_tx, spawn_ty, enemy_width, enemy_height)
             enemy = Enemy(
@@ -316,6 +317,7 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
 
             # XP reward and metadata
             setattr(enemy, "xp_reward", xp_reward)
+            setattr(enemy, "initiative", initiative)
             setattr(enemy, "enemy_type", arch.name)
             setattr(enemy, "archetype_id", arch.id)
             setattr(enemy, "ai_profile", arch.ai_profile)

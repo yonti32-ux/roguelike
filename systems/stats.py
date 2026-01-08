@@ -6,7 +6,8 @@ class StatBlock:
     max_hp: int = 30
     attack: int = 6
     defense: int = 0
-    speed: float = 1.0      # for turn order later
+    speed: float = 1.0      # multiplier for movement points (speed 1.2 = 20% more movement)
+    initiative: int = 10   # for turn order (higher = goes first)
     skill_power: float = 1.0
 
     crit_chance: float = 0.0
@@ -18,3 +19,7 @@ class StatBlock:
     # Regeneration bonuses (added to base regen per turn)
     stamina_regen_bonus: int = 0
     mana_regen_bonus: int = 0
+
+    # Movement bonuses
+    # Extra battle movement points per turn on top of BASE_MOVEMENT_POINTS.
+    movement_points_bonus: int = 0

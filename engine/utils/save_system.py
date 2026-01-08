@@ -210,6 +210,8 @@ def _serialize_stat_block(stat_block: StatBlock) -> Dict[str, Any]:
         "stamina_regen_bonus": stat_block.stamina_regen_bonus,
         "mana_regen_bonus": stat_block.mana_regen_bonus,
         "speed": stat_block.speed,
+        "initiative": stat_block.initiative,
+        "movement_points_bonus": stat_block.movement_points_bonus,
     }
 
 
@@ -403,6 +405,8 @@ def _deserialize_stat_block(stat_block: StatBlock, data: Dict[str, Any]) -> None
     stat_block.stamina_regen_bonus = data.get("stamina_regen_bonus", 0)
     stat_block.mana_regen_bonus = data.get("mana_regen_bonus", 0)
     stat_block.speed = data.get("speed", 1.0)
+    stat_block.initiative = data.get("initiative", 10)
+    stat_block.movement_points_bonus = data.get("movement_points_bonus", 0)
 
 
 def _deserialize_inventory(inventory: Inventory, data: Dict[str, Any]) -> None:

@@ -76,6 +76,8 @@ class Player(Entity):
         zoom: float = 1.0,
     ) -> None:
         # Try to use sprite first, fallback to color-based rendering
+        sprite_id = None
+        sprite_manager = None
         try:
             sprite_manager = get_sprite_manager()
             registry = get_registry()
@@ -90,10 +92,21 @@ class Player(Entity):
             
             if sprite and not sprite_manager.is_sprite_fallback(sprite):
                 # Use sprite (it's a real sprite, not a fallback)
+                # Get original size for debug overlay
+                original_sprite = sprite_manager.get_sprite(
+                    SpriteCategory.ENTITY,
+                    sprite_id,
+                    fallback_color=None,
+                    size=None,  # Get at canonical size
+                )
+                original_size = original_sprite.get_size() if original_sprite else sprite.get_size()
                 draw_sprite_with_camera(
                     surface, sprite,
                     self.x, self.y,
-                    camera_x, camera_y, zoom
+                    camera_x, camera_y, zoom,
+                    sprite_id=sprite_id,
+                    original_size=original_size,
+                    sprite_manager=sprite_manager,
                 )
                 return
         except Exception:
@@ -111,6 +124,17 @@ class Player(Entity):
 
         screen_rect = pygame.Rect(sx, sy, sw, sh)
         pygame.draw.rect(surface, self.color, screen_rect)
+        
+        # Draw debug overlay even in fallback rendering if enabled
+        if sprite_id and sprite_manager:
+            from engine.sprites.sprite_helpers import draw_sprite_debug_overlay
+            draw_sprite_debug_overlay(
+                surface, None, sprite_id, sx, sy,
+                sw, sh,
+                original_size=None,
+                requested_size=(self.width, self.height),
+                sprite_manager=sprite_manager,
+            )
 
     def take_damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
@@ -138,6 +162,8 @@ class Enemy(Entity):
         zoom: float = 1.0,
     ) -> None:
         # Try to use sprite first, fallback to color-based rendering
+        sprite_id = None
+        sprite_manager = None
         try:
             sprite_manager = get_sprite_manager()
             registry = get_registry()
@@ -155,10 +181,21 @@ class Enemy(Entity):
             
             if sprite and not sprite_manager.is_sprite_fallback(sprite):
                 # Use sprite (it's a real sprite, not a fallback)
+                # Get original size for debug overlay
+                original_sprite = sprite_manager.get_sprite(
+                    SpriteCategory.ENTITY,
+                    sprite_id,
+                    fallback_color=None,
+                    size=None,  # Get at canonical size
+                )
+                original_size = original_sprite.get_size() if original_sprite else sprite.get_size()
                 draw_sprite_with_camera(
                     surface, sprite,
                     self.x, self.y,
-                    camera_x, camera_y, zoom
+                    camera_x, camera_y, zoom,
+                    sprite_id=sprite_id,
+                    original_size=original_size,
+                    sprite_manager=sprite_manager,
                 )
                 
                 # Still draw elite glow if needed
@@ -227,6 +264,17 @@ class Enemy(Entity):
             pygame.draw.rect(surface, border_color, screen_rect, width=2)
         
         pygame.draw.rect(surface, self.color, screen_rect)
+        
+        # Draw debug overlay even in fallback rendering if enabled
+        if sprite_id and sprite_manager:
+            from engine.sprites.sprite_helpers import draw_sprite_debug_overlay
+            draw_sprite_debug_overlay(
+                surface, None, sprite_id, sx, sy,
+                sw, sh,
+                original_size=None,
+                requested_size=(self.width, self.height),
+                sprite_manager=sprite_manager,
+            )
 
     def take_damage(self, amount: int) -> None:
         self.hp = max(0, self.hp - amount)
@@ -259,6 +307,8 @@ class Chest(Entity):
         zoom: float = 1.0,
     ) -> None:
         # Try to use sprite first, fallback to color-based rendering
+        sprite_id = None
+        sprite_manager = None
         try:
             sprite_manager = get_sprite_manager()
             registry = get_registry()
@@ -277,10 +327,22 @@ class Chest(Entity):
             
             if sprite and not sprite_manager.is_sprite_fallback(sprite):
                 # Use sprite (it's a real sprite, not a fallback)
+                # Get original size for debug overlay
+                original_sprite = sprite_manager.get_sprite(
+                    SpriteCategory.ENTITY,
+                    sprite_id,
+                    variant=variant,
+                    fallback_color=None,
+                    size=None,  # Get at canonical size
+                )
+                original_size = original_sprite.get_size() if original_sprite else sprite.get_size()
                 draw_sprite_with_camera(
                     surface, sprite,
                     self.x, self.y,
-                    camera_x, camera_y, zoom
+                    camera_x, camera_y, zoom,
+                    sprite_id=sprite_id,
+                    original_size=original_size,
+                    sprite_manager=sprite_manager,
                 )
                 return
         except Exception:
@@ -299,6 +361,17 @@ class Chest(Entity):
         screen_rect = pygame.Rect(sx, sy, sw, sh)
         color = self.color_opened if self.opened else self.color_closed
         pygame.draw.rect(surface, color, screen_rect)
+        
+        # Draw debug overlay even in fallback rendering if enabled
+        if sprite_id and sprite_manager:
+            from engine.sprites.sprite_helpers import draw_sprite_debug_overlay
+            draw_sprite_debug_overlay(
+                surface, None, sprite_id, sx, sy,
+                sw, sh,
+                original_size=None,
+                requested_size=(self.width, self.height),
+                sprite_manager=sprite_manager,
+            )
 
 
 @dataclass
@@ -357,6 +430,8 @@ class Merchant(Entity):
         zoom: float = 1.0,
     ) -> None:
         # Try to use sprite first, fallback to color-based rendering
+        sprite_id = None
+        sprite_manager = None
         try:
             sprite_manager = get_sprite_manager()
             registry = get_registry()
@@ -371,10 +446,21 @@ class Merchant(Entity):
             
             if sprite and not sprite_manager.is_sprite_fallback(sprite):
                 # Use sprite (it's a real sprite, not a fallback)
+                # Get original size for debug overlay
+                original_sprite = sprite_manager.get_sprite(
+                    SpriteCategory.ENTITY,
+                    sprite_id,
+                    fallback_color=None,
+                    size=None,  # Get at canonical size
+                )
+                original_size = original_sprite.get_size() if original_sprite else sprite.get_size()
                 draw_sprite_with_camera(
                     surface, sprite,
                     self.x, self.y,
-                    camera_x, camera_y, zoom
+                    camera_x, camera_y, zoom,
+                    sprite_id=sprite_id,
+                    original_size=original_size,
+                    sprite_manager=sprite_manager,
                 )
                 return
         except Exception:
@@ -392,3 +478,14 @@ class Merchant(Entity):
 
         screen_rect = pygame.Rect(sx, sy, sw, sh)
         pygame.draw.rect(surface, self.color, screen_rect)
+        
+        # Draw debug overlay even in fallback rendering if enabled
+        if sprite_id and sprite_manager:
+            from engine.sprites.sprite_helpers import draw_sprite_debug_overlay
+            draw_sprite_debug_overlay(
+                surface, None, sprite_id, sx, sy,
+                sw, sh,
+                original_size=None,
+                requested_size=(self.width, self.height),
+                sprite_manager=sprite_manager,
+            )

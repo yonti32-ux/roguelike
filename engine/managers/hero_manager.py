@@ -136,13 +136,30 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
     if base_stats is not None:
         stamina_regen_bonus = getattr(base_stats, "stamina_regen_bonus", 0)
         mana_regen_bonus = getattr(base_stats, "mana_regen_bonus", 0)
+        movement_points_bonus = getattr(base_stats, "movement_points_bonus", 0)
         setattr(game.player, "stamina_regen_bonus", stamina_regen_bonus)
         setattr(game.player, "mana_regen_bonus", mana_regen_bonus)
+        setattr(game.player, "movement_points_bonus", int(movement_points_bonus))
     # ---- Move speed ----
     move_speed = getattr(hs, "move_speed",
                          getattr(hs, "speed",
                                  getattr(game.player, "speed", 200.0)))
     game.player.speed = move_speed
+
+    # ---- Initiative (for turn order) ----
+    initiative_val = None
+    if base is not None:
+        initiative_val = getattr(base, "initiative", None)
+    if initiative_val is None:
+        # Fallback: derive from speed if available (speed * 10 as base initiative)
+        speed_val = getattr(hs, "speed", None)
+        if speed_val is None and base is not None:
+            speed_val = getattr(base, "speed", 1.0)
+        if speed_val is not None:
+            initiative_val = int(speed_val * 10)
+    if initiative_val is None:
+        initiative_val = getattr(game.player, "initiative", 10)
+    game.player.initiative = initiative_val
 
     # ---- Level (for regeneration scaling) ----
     game.player.level = hs.level

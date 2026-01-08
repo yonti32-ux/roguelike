@@ -33,6 +33,7 @@ from settings import (
     FLANKING_DAMAGE_BONUS,
     TERRAIN_SPAWN_CHANCE,
     BASE_MOVEMENT_POINTS,
+    MAX_SPEED_MULTIPLIER,
     HAZARD_MOVEMENT_COST,
 )
 from world.entities import Player, Enemy
@@ -89,6 +90,7 @@ from engine.battle.terrain import BattleTerrainManager
 from engine.battle.ai import BattleAI
 from engine.battle.reactions import BattleReactions, ReactionType
 from ..core.config import get_config
+from ui.ui_scaling import get_ui_scale, get_hud_panel_width, get_hud_spacing
 
 
 
@@ -163,6 +165,12 @@ class BattleScene:
         self.grid_origin_x = 0
         self.grid_origin_y = 0
         
+        # Camera offset for panning the battlefield view
+        self.camera_x = 0.0
+        self.camera_y = 0.0
+        # Camera speed will be loaded from config in update() method
+        self.camera_speed = 50.0  # Default pixels per second (will be overridden by config)
+        
         # Terrain system: 2D grid of terrain types
         self.terrain: Dict[tuple[int, int], BattleTerrain] = {}
         
@@ -233,9 +241,15 @@ class BattleScene:
         # Initialize resource pools from entity max values
         hero_unit.init_resources_from_entity()
         
-        # Initialize movement points
-        hero_unit.max_movement_points = BASE_MOVEMENT_POINTS
-        hero_unit.current_movement_points = BASE_MOVEMENT_POINTS
+        # Initialize movement points (base plus any bonus from hero stats/perks)
+        # Speed stat acts as a multiplier for movement points (speed 1.2 = 20% more movement)
+        # Speed is capped at MAX_SPEED_MULTIPLIER to prevent excessive movement
+        hero_mp_bonus = float(getattr(self.player, "movement_points_bonus", 0) or 0)
+        hero_speed = float(getattr(self.player, "speed", 1.0) or 1.0)
+        hero_speed = min(hero_speed, MAX_SPEED_MULTIPLIER)  # Cap speed
+        base_mp = BASE_MOVEMENT_POINTS + hero_mp_bonus
+        hero_unit.max_movement_points = max(1, int(base_mp * hero_speed))
+        hero_unit.current_movement_points = hero_unit.max_movement_points
 
         # Core hero skills – now robust against missing registry
         hero_unit.skills = {}
@@ -441,9 +455,15 @@ class BattleScene:
             # Initialize resource pools from entity max values
             companion_unit.init_resources_from_entity()
             
-            # Initialize movement points
-            companion_unit.max_movement_points = BASE_MOVEMENT_POINTS
-            companion_unit.current_movement_points = BASE_MOVEMENT_POINTS
+            # Initialize movement points (companions use base value + speed multiplier)
+            # Speed stat acts as a multiplier for movement points (speed 1.2 = 20% more movement)
+            # Speed is capped at MAX_SPEED_MULTIPLIER to prevent excessive movement
+            comp_mp_bonus = float(getattr(companion_entity, "movement_points_bonus", 0) or 0)
+            comp_speed = float(getattr(companion_entity, "speed", 1.0) or 1.0)
+            comp_speed = min(comp_speed, MAX_SPEED_MULTIPLIER)  # Cap speed
+            base_mp = BASE_MOVEMENT_POINTS + comp_mp_bonus
+            companion_unit.max_movement_points = max(1, int(base_mp * comp_speed))
+            companion_unit.current_movement_points = companion_unit.max_movement_points
 
             try:
                 companion_unit.skills = {
@@ -521,9 +541,15 @@ class BattleScene:
             # Initialize resource pools from entity max values
             unit.init_resources_from_entity()
             
-            # Initialize movement points
-            unit.max_movement_points = BASE_MOVEMENT_POINTS
-            unit.current_movement_points = BASE_MOVEMENT_POINTS
+            # Initialize movement points (enemies can also receive bonuses and speed multiplier)
+            # Speed stat acts as a multiplier for movement points (speed 1.2 = 20% more movement)
+            # Speed is capped at MAX_SPEED_MULTIPLIER to prevent excessive movement
+            enemy_mp_bonus = float(getattr(enemy, "movement_points_bonus", 0) or 0)
+            enemy_speed = float(getattr(enemy, "speed", 1.0) or 1.0)
+            enemy_speed = min(enemy_speed, MAX_SPEED_MULTIPLIER)  # Cap speed
+            base_mp = BASE_MOVEMENT_POINTS + enemy_mp_bonus
+            unit.max_movement_points = max(1, int(base_mp * enemy_speed))
+            unit.current_movement_points = unit.max_movement_points
 
             # Skills from archetype
             if arch_id is not None:
@@ -565,9 +591,15 @@ class BattleScene:
 
     def _init_turn_order(self) -> None:
         """Initialize turn order and battle state."""
-        # Turn state
-        self.turn_order: List[BattleUnit] = self.player_units + self.enemy_units
-        random.shuffle(self.turn_order)
+        # Turn state - sort by initiative (higher = goes first)
+        # Use random tiebreaker for units with same initiative
+        all_units = self.player_units + self.enemy_units
+        # Sort by initiative (descending), with random tiebreaker
+        self.turn_order: List[BattleUnit] = sorted(
+            all_units,
+            key=lambda u: (u.initiative, random.random()),
+            reverse=True
+        )
         self.turn_index: int = 0
         self.turn: Side = self.turn_order[0].side if self.turn_order else "player"
         self.status: BattleStatus = "ongoing"
@@ -650,7 +682,14 @@ class BattleScene:
         """
         Add or refresh a status on the unit.
         For stackable statuses (like disease), increase stacks instead of refreshing.
+        Checks status_resist before applying status effects.
         """
+        # Check status resistance (chance to resist the status)
+        status_resist = float(getattr(unit.entity, "status_resist", 0.0))
+        if status_resist > 0.0 and random.random() < status_resist:
+            self._log(f"{unit.name} resists {status.name}!")
+            return  # Status resisted, don't apply
+        
         for existing in unit.statuses:
             if existing.name == status.name:
                 # Stackable statuses: increase stacks and refresh duration
@@ -1906,6 +1945,8 @@ class BattleScene:
                 self._enter_movement_mode(unit)
             return
 
+        # Camera movement is handled in update() method for continuous movement
+
         # Movement (logical actions) - only when not targeting
         # Single-step movement still works (legacy support)
         if input_manager is not None:
@@ -2034,6 +2075,30 @@ class BattleScene:
             if spark["timer"] <= 0:
                 self._hit_sparks.remove(spark)
 
+        # Camera movement (Shift + Arrow keys) - continuous movement while keys are held
+        if self.targeting_mode is None:
+            # Load camera speed from config (check game reference)
+            if self.game is not None:
+                from ..core.config import get_config
+                config = get_config()
+                self.camera_speed = getattr(config, "battle_camera_speed", 50.0)
+            
+            keys = pygame.key.get_pressed()
+            modifiers = pygame.key.get_mods()
+            shift_pressed = modifiers & (pygame.KMOD_LSHIFT | pygame.KMOD_RSHIFT)
+            
+            if shift_pressed:
+                # Use config-based camera speed (already in pixels per second)
+                move_speed = self.camera_speed
+                if keys[pygame.K_UP]:
+                    self.camera_y += move_speed * dt
+                if keys[pygame.K_DOWN]:
+                    self.camera_y -= move_speed * dt
+                if keys[pygame.K_LEFT]:
+                    self.camera_x += move_speed * dt
+                if keys[pygame.K_RIGHT]:
+                    self.camera_x -= move_speed * dt
+
         unit = self._active_unit()
 
         # Only enemies act automatically; players/companions are driven by input.
@@ -2060,15 +2125,26 @@ class BattleScene:
         grid_px_w = self.grid_width * self.cell_size
         grid_px_h = self.grid_height * self.cell_size
 
-        top_ui_height = 150  # space for Party/Enemy HP, Turn, Active, Turn Order, etc.
+        ui_scale = get_ui_scale(screen_w, screen_h)
+        top_ui_height = int(150 * ui_scale)  # space for Party/Enemy HP, Turn, Active, Turn Order, etc.
         # Bottom UI: hint line (20px) + gap (8px) + max log (6 lines * 20px = 120px) + margin (20px)
         bottom_ui_height = 168  # space for log + gap + key hints
 
         available_h = max(0, screen_h - top_ui_height - bottom_ui_height)
 
-        self.grid_origin_x = (screen_w - grid_px_w) // 2
+        # Base grid position (centered)
+        base_grid_x = (screen_w - grid_px_w) // 2
+        base_grid_y = top_ui_height + max(0, (available_h - grid_px_h) // 2)
+        
+        # Clamp camera to prevent panning too far (allow some panning but keep grid visible)
+        max_camera_offset = min(grid_px_w, grid_px_h) * 0.5  # Allow panning up to half the grid size
+        self.camera_x = max(-max_camera_offset, min(max_camera_offset, self.camera_x))
+        self.camera_y = max(-max_camera_offset, min(max_camera_offset, self.camera_y))
+        
+        # Apply camera offset
+        self.grid_origin_x = base_grid_x + int(self.camera_x)
         # Center the grid in the middle band, but never above the top_ui area
-        self.grid_origin_y = top_ui_height + max(0, (available_h - grid_px_h) // 2)
+        self.grid_origin_y = base_grid_y + int(self.camera_y)
 
         # ------------------------------------------------------------------
         # 2) Grid + units
@@ -2100,10 +2176,10 @@ class BattleScene:
         active_unit = self._active_unit() if self.status == "ongoing" and self.turn_order else None
         
         # Party unit cards (left side)
-        party_x = 20
-        party_y = 20
-        card_width = 180
-        card_spacing = 10
+        party_x = get_hud_spacing(ui_scale)
+        party_y = get_hud_spacing(ui_scale)
+        card_width = get_hud_panel_width(screen_w, ui_scale)
+        card_spacing = get_hud_spacing(ui_scale)
         
         for idx, unit in enumerate(self.player_units):
             if not unit.is_alive:
@@ -2113,7 +2189,7 @@ class BattleScene:
                 surface,
                 self.font,
                 party_x,
-                party_y + idx * (70 + card_spacing),
+                party_y + idx * (80 + card_spacing),
                 card_width,
                 unit.name,
                 unit.hp,
@@ -2125,11 +2201,12 @@ class BattleScene:
                 is_active=is_active,
                 is_player=True,
                 statuses=getattr(unit, "statuses", []),
+                scale=ui_scale,
             )
         
         # Enemy unit cards (right side)
-        enemy_x = screen_w - card_width - 20
-        enemy_y = 20
+        enemy_x = screen_w - card_width - get_hud_spacing(ui_scale)
+        enemy_y = party_y
         
         for idx, unit in enumerate(self.enemy_units):
             if not unit.is_alive:
@@ -2139,7 +2216,7 @@ class BattleScene:
                 surface,
                 self.font,
                 enemy_x,
-                enemy_y + idx * (70 + card_spacing),
+                enemy_y + idx * (80 + card_spacing),
                 card_width,
                 unit.name,
                 unit.hp,
@@ -2151,10 +2228,11 @@ class BattleScene:
                 is_active=is_active,
                 is_player=False,
                 statuses=getattr(unit, "statuses", []),
+                scale=ui_scale,
             )
         
         # Active unit HUD panel (center top) - keep existing for detailed info
-        self.renderer.draw_active_unit_panel(surface, active_unit, screen_w)
+        self.renderer.draw_active_unit_panel(surface, active_unit, screen_w, ui_scale)
         
         # Turn indicator (center, above active panel)
         if self.status == "ongoing" and self.turn_order:
@@ -2168,11 +2246,11 @@ class BattleScene:
             (200, 200, 255),
         )
         turn_x = (screen_w - turn_text.get_width()) // 2
-        surface.blit(turn_text, (turn_x, 8))
+        surface.blit(turn_text, (turn_x, get_hud_spacing(ui_scale)))
         
         # Turn order indicator (show next 3-4 units)
         if self.status == "ongoing":
-            self.renderer.draw_turn_order_indicator(surface, screen_w)
+            self.renderer.draw_turn_order_indicator(surface, screen_w, ui_scale)
 
         # ------------------------------------------------------------------
         # 4) Bottom UI: combat log + key hints
@@ -2191,31 +2269,31 @@ class BattleScene:
 
         grid_bottom_y = self.grid_origin_y + grid_px_h
         
-        # Calculate log position: below grid, but above hint with proper spacing
-        # We want the log to end at least `log_hint_gap` pixels above the hint line
-        desired_log_bottom = hint_y - log_hint_gap
-        desired_log_top = desired_log_bottom - log_total_height
+        # Maximum allowed bottom position for log (must be above hint line)
+        max_log_bottom = hint_y - log_hint_gap
         
-        # But also ensure it's below the grid
+        # Prefer to position log below grid, but hint line is absolute limit
         min_log_top = grid_bottom_y + 10
         
-        # Use the higher of the two (which ensures it's below grid)
-        # But if that would cause overlap with hint, clamp it
-        log_y_start = max(min_log_top, desired_log_top)
+        # Calculate how many log lines can fit between grid and hint line
+        available_height = max_log_bottom - min_log_top
         
-        # Final check: ensure log doesn't overlap with hint
-        log_bottom = log_y_start + log_total_height
-        if log_bottom > hint_y - log_hint_gap:
-            # Not enough space - reduce log lines shown to fit
-            available_height = hint_y - log_hint_gap - log_y_start
+        # If not enough space, reduce log lines to fit
+        if available_height < log_total_height:
             max_fittable_lines = max(1, available_height // line_height)
             if max_fittable_lines < len(log_lines):
                 log_lines = log_lines[-max_fittable_lines:]
                 log_total_height = line_height * len(log_lines)
-                # Recalculate log position with new height
-                log_y_start = hint_y - log_hint_gap - log_total_height
-                # But still ensure it's below the grid
-                log_y_start = max(min_log_top, log_y_start)
+        
+        # Position log: prefer below grid, but ensure it ends above hint line
+        log_y_start = min_log_top
+        log_bottom = log_y_start + log_total_height
+        
+        # If log would extend below hint line, move it up
+        if log_bottom > max_log_bottom:
+            log_y_start = max_log_bottom - log_total_height
+            # Ensure we don't go negative
+            log_y_start = max(0, log_y_start)
         
         log_y = log_y_start
 
@@ -2335,7 +2413,7 @@ class BattleScene:
                     guard_part = f" | {guard_key} guard"
                 
                 hint_text = self.font.render(
-                    f"{name_prefix}: move WASD/arrows | {atk_part}{guard_part}",
+                    f"{name_prefix}: move WASD/arrows | {atk_part}{guard_part} | Shift+Arrows pan camera",
                     True,
                     (180, 180, 180),
                 )

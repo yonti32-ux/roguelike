@@ -97,6 +97,11 @@ class HeroStats:
             self.base.attack += 1
             # defense / skill_power are mostly perk- or reward-driven
             
+            # Initiative growth per level (small, to keep up with floor scaling)
+            # +1 initiative every 2 levels (so level 2, 4, 6, etc.)
+            if self.level % 2 == 0:
+                self.base.initiative += 1
+            
             # Resource pool growth per level
             self.base.max_stamina += 3  # +3 stamina per level
             self.base.max_mana += 2  # +2 mana per level

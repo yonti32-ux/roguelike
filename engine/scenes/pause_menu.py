@@ -174,10 +174,27 @@ class OptionsMenuScene:
                 key=lambda i: abs(self.battle_speed_levels[i] - current_speed)
             )
         
+        # Battle camera speed options (pixels per second)
+        self.camera_speed_levels = [25.0, 50.0, 100.0, 150.0, 200.0]
+        self.camera_speed_index = 1  # Default to 50.0 (normal speed)
+        
+        # Load current camera speed from config
+        current_camera_speed = getattr(config, "battle_camera_speed", 50.0)
+        # Find the closest matching speed level
+        if current_camera_speed in self.camera_speed_levels:
+            self.camera_speed_index = self.camera_speed_levels.index(current_camera_speed)
+        else:
+            # Find closest match
+            self.camera_speed_index = min(
+                range(len(self.camera_speed_levels)),
+                key=lambda i: abs(self.camera_speed_levels[i] - current_camera_speed)
+            )
+        
         # Main menu options
         self.main_options = [
             ("controls", "View Controls & Hotkeys"),
             ("battle_speed", "Battle Speed"),  # Will show current speed
+            ("camera_speed", "Battle Camera Speed"),  # Will show current camera speed
             ("resolution", "Change Resolution"),
             ("back", "Back"),
         ]
@@ -251,7 +268,7 @@ class OptionsMenuScene:
             return "back"  # Explicitly return "back" to close options
         
         if self.mode == "main":
-            # Check if battle speed is selected
+            # Check if battle speed or camera speed is selected
             option_id, _ = self.main_options[self.selected_index]
             if option_id == "battle_speed":
                 # Left/Right arrows adjust battle speed
@@ -262,6 +279,16 @@ class OptionsMenuScene:
                 if key in (pygame.K_RIGHT, pygame.K_d):
                     self.battle_speed_index = (self.battle_speed_index + 1) % len(self.battle_speed_levels)
                     self._apply_battle_speed()
+                    return None
+            elif option_id == "camera_speed":
+                # Left/Right arrows adjust camera speed
+                if key in (pygame.K_LEFT, pygame.K_a):
+                    self.camera_speed_index = (self.camera_speed_index - 1) % len(self.camera_speed_levels)
+                    self._apply_camera_speed()
+                    return None
+                if key in (pygame.K_RIGHT, pygame.K_d):
+                    self.camera_speed_index = (self.camera_speed_index + 1) % len(self.camera_speed_levels)
+                    self._apply_camera_speed()
                     return None
             
             # Navigation
@@ -323,10 +350,13 @@ class OptionsMenuScene:
                 # Option text
                 color = (255, 255, 210) if is_selected else (180, 180, 180)
                 
-                # Special handling for battle speed to show current value
+                # Special handling for battle speed and camera speed to show current value
                 if option_id == "battle_speed":
                     current_speed = self.battle_speed_levels[self.battle_speed_index]
                     display_text = f"Battle Speed: {current_speed:.1f}x"
+                elif option_id == "camera_speed":
+                    current_speed = self.camera_speed_levels[self.camera_speed_index]
+                    display_text = f"Battle Camera Speed: {current_speed:.0f} px/s"
                 else:
                     display_text = option_text
                 
@@ -337,7 +367,7 @@ class OptionsMenuScene:
             
             # Hint
             option_id, _ = self.main_options[self.selected_index]
-            if option_id == "battle_speed":
+            if option_id in ("battle_speed", "camera_speed"):
                 hint_text = "←/→: Adjust Speed   ↑/↓: Navigate   Esc: Back"
             else:
                 hint_text = "↑/↓: Navigate   Enter: Select   Esc: Back"
@@ -398,5 +428,11 @@ class OptionsMenuScene:
         """Apply the selected battle speed to config and save it."""
         config = get_config()
         config.battle_speed = self.battle_speed_levels[self.battle_speed_index]
+        save_config()
+    
+    def _apply_camera_speed(self) -> None:
+        """Apply the selected camera speed to config and save it."""
+        config = get_config()
+        config.battle_camera_speed = self.camera_speed_levels[self.camera_speed_index]
         save_config()
 

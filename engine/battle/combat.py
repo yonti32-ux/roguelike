@@ -152,6 +152,22 @@ class BattleCombat:
         Apply damage from attacker to target, respecting statuses and defenses.
         Returns the actual damage dealt.
         """
+        # Check for dodge first (before any damage calculations)
+        dodge_chance = float(getattr(target.entity, "dodge_chance", 0.0))
+        if dodge_chance > 0.0 and random.random() < dodge_chance:
+            self.scene._log(f"{target.name} dodges the attack!")
+            # Add miss effect at target position
+            target_x = self.scene.grid_origin_x + target.gx * self.scene.cell_size + self.scene.cell_size // 2
+            target_y = self.scene.grid_origin_y + target.gy * self.scene.cell_size + self.scene.cell_size // 2
+            self.scene._hit_sparks.append({
+                "x": target_x,
+                "y": target_y,
+                "timer": 0.3,
+                "is_crit": False,
+                "is_dodge": True,  # Flag for rendering dodge effect
+            })
+            return 0  # No damage dealt
+        
         # Roll for critical hit
         is_crit = self._roll_critical_hit()
         

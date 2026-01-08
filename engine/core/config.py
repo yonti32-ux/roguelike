@@ -21,6 +21,7 @@ class GameConfig:
         self.fullscreen: bool = False
         self.match_desktop: bool = False  # If True, use desktop resolution
         self.battle_speed: float = 1.0  # Battle speed multiplier (0.5x = slow, 1.0x = normal, 2.0x = fast)
+        self.battle_camera_speed: float = 50.0  # Battle camera pan speed (pixels per second)
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary for saving."""
@@ -30,6 +31,7 @@ class GameConfig:
             "fullscreen": self.fullscreen,
             "match_desktop": self.match_desktop,
             "battle_speed": self.battle_speed,
+            "battle_camera_speed": self.battle_camera_speed,
         }
     
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -39,6 +41,7 @@ class GameConfig:
         self.fullscreen = data.get("fullscreen", False)
         self.match_desktop = data.get("match_desktop", False)
         self.battle_speed = data.get("battle_speed", 1.0)
+        self.battle_camera_speed = data.get("battle_camera_speed", 50.0)
     
     def get_resolution(self) -> Tuple[int, int]:
         """

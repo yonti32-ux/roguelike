@@ -110,14 +110,16 @@ def _apply_battle_focus_2(hero_stats: object) -> None:
 
 
 def _apply_fleet_footwork_1(hero_stats: object) -> None:
-    # First mobility perk: slight defense bump
+    # First mobility perk: slight defense bump + a touch of initiative
     hero_stats.base.defense += 1
+    hero_stats.base.initiative += 2
 
 
 def _apply_fleet_footwork_2(hero_stats: object) -> None:
-    # Second mobility perk: more defense + a bit of HP
+    # Second mobility perk: more defense + a bit of HP + more initiative
     hero_stats.base.defense += 1
     hero_stats.base.max_hp += 5
+    hero_stats.base.initiative += 3
 
 
 # --- Regeneration perk effects --------------------------------------------
@@ -159,7 +161,23 @@ def _apply_iron_will(hero_stats: object) -> None:
 
 
 def _apply_swift_strike(hero_stats: object) -> None:
+    # Faster attacks slightly improve both speed and initiative
     hero_stats.base.speed += 0.1
+    hero_stats.base.initiative += 1
+
+
+def _apply_quickstep_1(hero_stats: object) -> None:
+    # New mobility perk: extra movement points and initiative
+    # Reduced from +1 to +0.5 to make high movement rare
+    hero_stats.base.movement_points_bonus += 0.5
+    hero_stats.base.initiative += 2
+
+
+def _apply_quickstep_2(hero_stats: object) -> None:
+    # Stronger version: more movement and a bit more initiative
+    # Reduced from +1 to +0.5 to make high movement rare
+    hero_stats.base.movement_points_bonus += 0.5
+    hero_stats.base.initiative += 3
 
 
 def _apply_arcane_attunement(hero_stats: object) -> None:
@@ -344,7 +362,7 @@ register(Perk(
 register(Perk(
     id="fleet_footwork_1",
     name="Fleet Footwork I",
-    description="Unlocks Nimble Step (T) and +1 Defense.",
+    description="Unlocks Nimble Step (T), +1 Defense, and +2 Initiative.",
     unlock_level=3,
     branch="mobility",
     requires=[],
@@ -356,7 +374,7 @@ register(Perk(
 register(Perk(
     id="fleet_footwork_2",
     name="Fleet Footwork II",
-    description="+1 Defense and +5 Max HP.",
+    description="+1 Defense, +5 Max HP, and +3 Initiative.",
     unlock_level=5,
     branch="mobility",
     requires=["fleet_footwork_1"],
@@ -367,6 +385,28 @@ register(Perk(
 # ----------------- Warrior-specific perks ---------------------------------
 
 # Cleave unlock
+register(Perk(
+    id="quickstep_1",
+    name="Quickstep I",
+    description="+0.5 Movement Point and +2 Initiative per turn.",
+    unlock_level=5,  # Increased from 4 to make it harder to get
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    tags=["mobility", "initiative"],
+    apply_fn=_apply_quickstep_1,
+))
+
+register(Perk(
+    id="quickstep_2",
+    name="Quickstep II",
+    description="+0.5 additional Movement Point and +3 Initiative per turn.",
+    unlock_level=8,  # Increased from 6 to make it harder to get
+    branch="mobility",
+    requires=["quickstep_1"],
+    tags=["mobility", "initiative"],
+    apply_fn=_apply_quickstep_2,
+))
+
 register(Perk(
     id="warrior_cleave",
     name="Weapon Mastery",

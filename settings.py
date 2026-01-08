@@ -15,8 +15,8 @@ COLOR_ENEMY = (200, 80, 80)
 TILE_SIZE = 32
 
 # Battle settings
-BATTLE_GRID_WIDTH = 15  # Increased for larger parties and tactical positioning
-BATTLE_GRID_HEIGHT = 7  # Increased for more vertical space
+BATTLE_GRID_WIDTH = 19  # Increased to accommodate speed-based movement and make high MP rare (was 17)
+BATTLE_GRID_HEIGHT = 11  # Increased for more vertical space and tactical positioning (was 9)
 BATTLE_CELL_SIZE = 70  # Slightly smaller to fit larger grid on screen
 BATTLE_ENEMY_TIMER = 0.6
 MAX_BATTLE_ENEMIES = 6  # Increased to match larger grid
@@ -61,5 +61,6 @@ TERRAIN_SPAWN_CHANCE = 0.3  # 30% chance each cell spawns terrain
 
 # Movement system
 BASE_MOVEMENT_POINTS = 3  # Base movement points per turn
+MAX_SPEED_MULTIPLIER = 1.3  # Maximum speed multiplier (caps movement point bonus from speed) - reduced to make high movement rare
 HAZARD_MOVEMENT_COST = 2  # Hazards cost extra movement (1 + 1 = 2 total)
 DIAGONAL_MOVEMENT_COST = 1.5  # Diagonal movement costs 1.5x more (rounded up)
