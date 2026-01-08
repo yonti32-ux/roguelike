@@ -206,7 +206,7 @@ def _gather_context_hints(game: "Game", game_map, player) -> List[str]:
         else:
             hints.append("The air hums with many hostile presences.")
 
-    # Chest / event proximity
+    # Chest / event / trap proximity
     exploration = getattr(game, "exploration", None)
     if exploration is not None:
         chest = exploration.find_chest_near_player(max_distance_px=TILE_SIZE)
@@ -228,6 +228,20 @@ def _gather_context_hints(game: "Game", game_map, player) -> List[str]:
                         hints.append("There is something unusual here – press E to interact.")
                 else:
                     hints.append("There is something unusual here – press E to interact.")
+            else:
+                # Check for traps
+                from world.entities import Trap
+                from systems.traps import get_trap_def
+                trap = exploration.find_trap_near_player(max_distance_px=TILE_SIZE)
+                if trap is not None:
+                    if trap.triggered or trap.disarmed:
+                        pass  # Don't show hints for inactive traps
+                    elif trap.detected:
+                        trap_def = get_trap_def(trap.trap_id)
+                        trap_name = trap_def.name if trap_def else "trap"
+                        hints.append(f"A {trap_name} is visible here – press E to disarm.")
+                    else:
+                        hints.append("You sense danger nearby – press E to investigate.")
     
     return hints
 

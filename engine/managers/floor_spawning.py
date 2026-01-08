@@ -6,7 +6,7 @@ import math
 
 from settings import TILE_SIZE
 from world.game_map import GameMap
-from world.entities import Enemy, Merchant
+from world.entities import Enemy, Merchant, Trap
 from systems.enemies import (
     choose_archetype_for_floor,
     compute_scaled_stats,
@@ -17,6 +17,7 @@ from systems.enemies import (
     UNIQUE_ROOM_ENEMIES,
 )
 from systems.events import EVENTS
+from systems.traps import TRAPS
 
 if TYPE_CHECKING:
     from ..core.game import Game
@@ -798,19 +799,147 @@ def ensure_debug_merchant_on_floor_three(
     game_map.entities.append(merchant)
 
 
+def spawn_traps_for_floor(game_map: GameMap, floor_index: int) -> None:
+    """
+    Spawn traps on walkable tiles.
+    
+    Room-aware logic:
+    - Avoid stairs and spawn-safe radius.
+    - Prefer corridors and doorways (chokepoints).
+    - Sometimes place near treasure (risk/reward).
+    - Scale trap count with floor depth.
+    """
+    if not TRAPS:
+        return  # No traps registered
+    
+    trap_width = TILE_SIZE // 3  # Smaller than chests
+    trap_height = TILE_SIZE // 3
+    
+    up = game_map.up_stairs
+    down = game_map.down_stairs
+    
+    # Safe radius around main spawn
+    safe_radius_tiles = 3
+    if up is not None:
+        safe_cx, safe_cy = up
+    else:
+        safe_cx = game_map.width // 2
+        safe_cy = game_map.height // 2
+    
+    # Tiles already occupied by entities
+    occupied_tiles: set[tuple[int, int]] = set()
+    for entity in getattr(game_map, "entities", []):
+        if not hasattr(entity, "rect"):
+            continue
+        cx, cy = entity.rect.center
+        tx, ty = game_map.world_to_tile(cx, cy)
+        occupied_tiles.add((tx, ty))
+    
+    # Categorize tiles: corridors, doorways, treasure rooms, other
+    corridor_tiles: list[tuple[int, int]] = []
+    treasure_tiles: list[tuple[int, int]] = []
+    other_tiles: list[tuple[int, int]] = []
+    
+    for ty in range(game_map.height):
+        for tx in range(game_map.width):
+            if not game_map.is_walkable_tile(tx, ty):
+                continue
+            if up is not None and (tx, ty) == up:
+                continue
+            if down is not None and (tx, ty) == down:
+                continue
+            if (tx, ty) in occupied_tiles:
+                continue
+            
+            dx = tx - safe_cx
+            dy = ty - safe_cy
+            if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
+                continue
+            
+            room = game_map.get_room_at(tx, ty) if hasattr(game_map, "get_room_at") else None
+            if room is None:
+                # Corridors are good for traps (chokepoints)
+                corridor_tiles.append((tx, ty))
+            else:
+                tag = getattr(room, "tag", "generic")
+                if tag == "start" or tag == "sanctum":
+                    continue  # No traps in safe areas
+                elif tag == "treasure":
+                    treasure_tiles.append((tx, ty))
+                else:
+                    other_tiles.append((tx, ty))
+    
+    if not (corridor_tiles or treasure_tiles or other_tiles):
+        return
+    
+    # Scale trap count: 1-3 traps per floor, more on deeper floors
+    base_traps = 1 + (floor_index // 3)  # 1 on floors 1-2, 2 on 3-5, 3 on 6+
+    max_traps = min(3, base_traps)
+    
+    # Prefer corridors (chokepoints), then treasure rooms (risk/reward)
+    random.shuffle(corridor_tiles)
+    random.shuffle(treasure_tiles)
+    random.shuffle(other_tiles)
+    
+    chosen_tiles: list[tuple[int, int]] = []
+    remaining = max_traps
+    
+    # 50% chance to place a trap near treasure (risk/reward)
+    if treasure_tiles and remaining > 0 and random.random() < 0.5:
+        chosen_tiles.append(treasure_tiles[0])
+        remaining -= 1
+    
+    # Fill rest from corridors (preferred) and other tiles
+    pool = corridor_tiles + other_tiles
+    random.shuffle(pool)
+    chosen_tiles.extend(pool[:remaining])
+    
+    if not chosen_tiles:
+        return
+    
+    # Choose trap types (weighted by floor)
+    available_trap_ids = list(TRAPS.keys())
+    
+    # Early floors: simpler traps (spike, weakness)
+    # Later floors: more dangerous traps (poison, fire, teleport)
+    if floor_index <= 2:
+        preferred = ["spike_trap", "weakness_trap", "gold_trap"]
+        trap_pool = [t for t in preferred if t in available_trap_ids] or available_trap_ids
+    elif floor_index <= 5:
+        preferred = ["spike_trap", "poison_trap", "fire_trap", "weakness_trap"]
+        trap_pool = [t for t in preferred if t in available_trap_ids] or available_trap_ids
+    else:
+        # Deep floors: all traps available
+        trap_pool = available_trap_ids
+    
+    for tx, ty in chosen_tiles:
+        trap_id = random.choice(trap_pool)
+        x, y = game_map.center_entity_on_tile(tx, ty, trap_width, trap_height)
+        trap = Trap(
+            x=x,
+            y=y,
+            width=trap_width,
+            height=trap_height,
+            trap_id=trap_id,
+            detected=False,
+        )
+        game_map.entities.append(trap)
+
+
 def spawn_all_entities_for_floor(
     game: "Game",
     game_map: GameMap,
     floor_index: int,
 ) -> None:
     """
-    Spawn all entities (enemies, events, chests, merchants) for a floor.
+    Spawn all entities (enemies, events, chests, merchants, traps) for a floor.
     This is the main entry point called from Game.load_floor().
     """
     spawn_enemies_for_floor(game, game_map, floor_index)
     spawn_events_for_floor(game_map, floor_index)
     spawn_chests_for_floor(game, game_map, floor_index)
     spawn_merchants_for_floor(game_map, floor_index)
+    spawn_traps_for_floor(game_map, floor_index)
 
     # Debug/testing: always ensure at least one merchant on floor 3
     ensure_debug_merchant_on_floor_three(game_map, floor_index)

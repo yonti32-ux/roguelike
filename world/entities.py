@@ -489,3 +489,82 @@ class Merchant(Entity):
                 requested_size=(self.width, self.height),
                 sprite_manager=sprite_manager,
             )
+
+
+@dataclass
+class Trap(Entity):
+    """
+    Environmental trap that triggers when stepped on.
+    
+    - Does NOT block movement (player can walk over it).
+    - Triggers when player's center is within trigger radius.
+    - Can be detected (becomes visible) and disarmed.
+    - Once triggered or disarmed, becomes inactive.
+    """
+    trap_id: str = "spike_trap"
+    detected: bool = False  # If True, trap is visible to player
+    triggered: bool = False  # If True, trap has been activated
+    disarmed: bool = False  # If True, trap was safely disarmed
+    color_hidden: Tuple[int, int, int] = (80, 80, 80)  # Subtle gray when hidden
+    color_detected: Tuple[int, int, int] = (200, 150, 50)  # Orange when detected
+    color_triggered: Tuple[int, int, int] = (150, 150, 150)  # Gray when triggered/disarmed
+    
+    def __post_init__(self) -> None:
+        # Traps don't block movement - you walk over them
+        self.blocks_movement = False
+    
+    @property
+    def is_active(self) -> bool:
+        """Return True if trap can still trigger."""
+        return not (self.triggered or self.disarmed)
+    
+    def draw(
+        self,
+        surface: pygame.Surface,
+        camera_x: float = 0.0,
+        camera_y: float = 0.0,
+        zoom: float = 1.0,
+    ) -> None:
+        """Draw trap with visual state based on detection/trigger status."""
+        world_rect = self.rect
+        if zoom <= 0:
+            zoom = 1.0
+
+        sx = int((world_rect.x - camera_x) * zoom)
+        sy = int((world_rect.y - camera_y) * zoom)
+        sw = max(1, int(world_rect.width * zoom))
+        sh = max(1, int(world_rect.height * zoom))
+
+        screen_rect = pygame.Rect(sx, sy, sw, sh)
+        
+        # Choose color based on state
+        if self.triggered or self.disarmed:
+            color = self.color_triggered
+        elif self.detected:
+            color = self.color_detected
+        else:
+            # Hidden: draw very subtly (only if in FOV)
+            color = self.color_hidden
+        
+        # Draw trap as a small square/circle
+        pygame.draw.rect(surface, color, screen_rect)
+        
+        # If detected but not triggered, add a warning indicator (small X or !)
+        if self.detected and not self.triggered and not self.disarmed:
+            # Draw a small warning symbol
+            center_x = sx + sw // 2
+            center_y = sy + sh // 2
+            # Draw a small X
+            line_w = max(1, int(2 * zoom))
+            pygame.draw.line(
+                surface, (255, 100, 100),
+                (center_x - sw // 4, center_y - sh // 4),
+                (center_x + sw // 4, center_y + sh // 4),
+                line_w
+            )
+            pygame.draw.line(
+                surface, (255, 100, 100),
+                (center_x + sw // 4, center_y - sh // 4),
+                (center_x - sw // 4, center_y + sh // 4),
+                line_w
+            )

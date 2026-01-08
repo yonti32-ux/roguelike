@@ -10,10 +10,12 @@ from ..managers.message_log import get_rarity_color
 from world.entities import Enemy, Chest
 from world.entities import EventNode  # NEW
 from world.entities import Merchant  # NEW merchant NPC
+from world.entities import Trap  # NEW: traps
 from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot, get_shop_stock_for_floor
 from systems.events import get_event_def, EventResult  # NEW
+from systems.traps import get_trap_def, TrapResult  # NEW: trap system
 from systems.economy import (
     calculate_shop_buy_price,
     calculate_shop_sell_price,
@@ -283,6 +285,8 @@ class ExplorationController:
             
             if can_move:
                 game.player.move_to(new_x, new_y)
+                # Check for trap triggers after movement
+                self._check_trap_triggers(game)
             elif blocking_enemies:
                 # Blocked by enemies - try sliding to see if we can go around them
                 # Try X-axis movement (horizontal sliding)
@@ -291,6 +295,7 @@ class ExplorationController:
                 )
                 if can_move_x:
                     game.player.move_to(game.player.x + move_vector.x, game.player.y)
+                    self._check_trap_triggers(game)
                 elif blocking_enemies_x and game.post_battle_grace <= 0.0:
                     # Can't slide past enemy on X axis, trigger battle
                     game.start_battle(blocking_enemies_x[0])
@@ -301,6 +306,7 @@ class ExplorationController:
                     )
                     if can_move_y:
                         game.player.move_to(game.player.x, game.player.y + move_vector.y)
+                        self._check_trap_triggers(game)
                     elif blocking_enemies_y and game.post_battle_grace <= 0.0:
                         # Can't slide past enemy on Y axis either, trigger battle
                         game.start_battle(blocking_enemies_y[0])
@@ -313,6 +319,7 @@ class ExplorationController:
                 )
                 if can_move_x:
                     game.player.move_to(game.player.x + move_vector.x, game.player.y)
+                    self._check_trap_triggers(game)
                 elif blocking_enemies_x and game.post_battle_grace <= 0.0:
                     game.start_battle(blocking_enemies_x[0])
                 else:
@@ -322,6 +329,7 @@ class ExplorationController:
                     )
                     if can_move_y:
                         game.player.move_to(game.player.x, game.player.y + move_vector.y)
+                        self._check_trap_triggers(game)
                     elif blocking_enemies_y and game.post_battle_grace <= 0.0:
                         game.start_battle(blocking_enemies_y[0])
                     # If completely blocked, do nothing
@@ -801,12 +809,172 @@ class ExplorationController:
             if getattr(game, "active_screen", None) is getattr(game, "shop_screen", None):
                 game.active_screen = None
 
+    # --- Trap helpers ---------------------------------------------------
+
+    def _find_trap_near_player(
+        self,
+        max_distance_px: int = TILE_SIZE // 2,
+    ) -> Optional[Trap]:
+        """
+        Return a trap entity near/under the player, or None.
+        """
+        game = self.game
+
+        if game.current_map is None or game.player is None:
+            return None
+
+        px, py = game.player.rect.center
+        max_dist_sq = max_distance_px * max_distance_px
+
+        for entity in getattr(game.current_map, "entities", []):
+            if not isinstance(entity, Trap):
+                continue
+            tx, ty = entity.rect.center
+            dx = tx - px
+            dy = ty - py
+            if dx * dx + dy * dy <= max_dist_sq:
+                return entity
+
+        return None
+
+    def find_trap_near_player(self, max_distance_px: int) -> Optional[Trap]:
+        """
+        Public wrapper so UI code can query nearby traps.
+        """
+        return self._find_trap_near_player(max_distance_px=max_distance_px)
+
+    def _check_trap_triggers(self, game: "Game") -> None:
+        """
+        Check if player is standing on any active traps and trigger them.
+        Called after player movement.
+        """
+        if game.current_map is None or game.player is None:
+            return
+
+        px, py = game.player.rect.center
+        trigger_radius = TILE_SIZE // 2  # Trigger when player center is within half a tile
+
+        for entity in list(game.current_map.entities):
+            if not isinstance(entity, Trap):
+                continue
+            if not entity.is_active:
+                continue
+
+            tx, ty = entity.rect.center
+            dx = tx - px
+            dy = ty - py
+            dist_sq = dx * dx + dy * dy
+
+            if dist_sq <= trigger_radius * trigger_radius:
+                # Player stepped on trap - trigger it
+                self._trigger_trap(entity)
+                break  # Only trigger one trap per movement
+
+    def _trigger_trap(self, trap: Trap) -> None:
+        """
+        Trigger a trap: run its handler and apply effects.
+        """
+        game = self.game
+
+        if trap.triggered or trap.disarmed:
+            return
+
+        trap_def = get_trap_def(trap.trap_id)
+        if trap_def is None:
+            game.last_message = "The trap fizzles harmlessly."
+            trap.triggered = True
+            return
+
+        # Run trap handler
+        result = trap_def.handler(game)
+
+        # Mark trap as triggered
+        trap.triggered = True
+
+        # Show message
+        game.last_message = result.text
+
+        # Apply status effects if any
+        if result.status_effect is not None:
+            if hasattr(game.player, "statuses"):
+                game.player.statuses.append(result.status_effect)
+            elif hasattr(game, "player_statuses"):
+                if not hasattr(game, "player_statuses"):
+                    game.player_statuses = []
+                game.player_statuses.append(result.status_effect)
+
+        # Re-sync player stats in case HP changed
+        if game.player is not None:
+            game.apply_hero_stats_to_player(full_heal=False)
+
+    def _detect_trap(self, trap: Trap) -> bool:
+        """
+        Attempt to detect a trap. Returns True if successful.
+        Uses trap's detection difficulty and player skill (if any).
+        """
+        trap_def = get_trap_def(trap.trap_id)
+        if trap_def is None:
+            return False
+
+        # Base detection chance: 1.0 - difficulty (so 0.0 difficulty = always detect)
+        base_chance = 1.0 - trap_def.detection_difficulty
+
+        # TODO: Add player skill/perk bonuses here
+        # For now, just use base chance with some randomness
+        detection_roll = random.random()
+
+        # If trap is already detected, always succeed
+        if trap.detected:
+            return True
+
+        # Check if detection succeeds
+        if detection_roll < base_chance:
+            trap.detected = True
+            return True
+
+        return False
+
+    def _disarm_trap(self, trap: Trap) -> bool:
+        """
+        Attempt to disarm a trap. Returns True if successful.
+        On failure, trap may trigger (small chance).
+        """
+        game = self.game
+
+        if trap.triggered or trap.disarmed:
+            return False
+
+        trap_def = get_trap_def(trap.trap_id)
+        if trap_def is None:
+            return False
+
+        # Base disarm chance: 1.0 - difficulty
+        base_chance = 1.0 - trap_def.disarm_difficulty
+
+        # TODO: Add player skill/perk bonuses here
+        disarm_roll = random.random()
+
+        if disarm_roll < base_chance:
+            # Success: trap is disarmed
+            trap.disarmed = True
+            game.last_message = f"You successfully disarm the {trap_def.name}."
+            return True
+        else:
+            # Failure: small chance trap triggers anyway (10%)
+            if random.random() < 0.1:
+                game.last_message = "You fail to disarm the trap, and it triggers!"
+                self._trigger_trap(trap)
+            else:
+                game.last_message = "You fail to disarm the trap, but it doesn't trigger."
+            return False
+
     def try_interact(self) -> None:
         """
         Contextual interaction when pressing E:
         - If a chest is nearby, open it.
         - Else if an event node is nearby, trigger it.
         - Else if a merchant is nearby, open the merchant UI.
+        - Else if a detected trap is nearby, attempt to disarm it.
         - Otherwise, show a soft 'nothing here' message.
         """
         game = self.game
@@ -833,5 +1001,24 @@ class ExplorationController:
             self._open_shop()
             return
 
-        # 4) Nothing
+        # 4) Try trap detection/disarming
+        trap = self._find_trap_near_player(max_distance_px=TILE_SIZE // 2)
+        if trap is not None:
+            if trap.triggered or trap.disarmed:
+                game.last_message = "The trap has already been triggered or disarmed."
+                return
+            
+            if not trap.detected:
+                # Try to detect it first
+                if self._detect_trap(trap):
+                    game.last_message = f"You notice a {get_trap_def(trap.trap_id).name if get_trap_def(trap.trap_id) else 'trap'} here. Press E again to disarm."
+                else:
+                    game.last_message = "You sense something is off, but can't identify what."
+                return
+            else:
+                # Trap is detected, attempt to disarm
+                self._disarm_trap(trap)
+                return
+
+        # 5) Nothing
         game.last_message = "There is nothing here to interact with."

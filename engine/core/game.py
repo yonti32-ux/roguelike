@@ -1012,7 +1012,7 @@ class Game:
             group.append(enemy)
 
         # Add other nearby enemies within a radius
-        radius = TILE_SIZE * 4
+        radius = TILE_SIZE * 5
         px, py = self.player.rect.center
 
         for entity in list(self.current_map.entities):
@@ -1027,7 +1027,7 @@ class Game:
                 group.append(entity)
 
         # Limit how many can join a single battle (for sanity)
-        max_group_size = 3
+        max_group_size = 6
         encounter_enemies = group[:max_group_size]
 
         # 2) Remove all encounter enemies from the map so they can't be re-used
