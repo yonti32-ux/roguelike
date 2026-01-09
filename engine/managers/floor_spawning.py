@@ -16,6 +16,12 @@ from systems.enemies import (
     make_enemy_elite,
     UNIQUE_ROOM_ENEMIES,
 )
+from systems.bosses import (
+    choose_miniboss_archetype_for_floor,
+    choose_final_boss_archetype,
+    compute_scaled_boss_stats,
+    generate_boss_name_for_archetype,
+)
 from systems.events import EVENTS
 from systems.traps import TRAPS
 
@@ -926,16 +932,296 @@ def spawn_traps_for_floor(game_map: GameMap, floor_index: int) -> None:
         game_map.entities.append(trap)
 
 
+def spawn_miniboss_for_floor(game: "Game", game_map: GameMap, floor_index: int) -> None:
+    """
+    Spawn a mini-boss on this floor if it's a mini-boss floor (every 3 floors).
+    
+    Mini-bosses spawn randomly in a room (prefer "lair" rooms if available).
+    Floor 3, 6, 9, 12, etc. get mini-bosses.
+    
+    Args:
+        game: Game instance
+        game_map: Current game map
+        floor_index: Current floor number
+    """
+    # Check if this is a mini-boss floor (every 3 floors: 3, 6, 9, ...)
+    if floor_index % 3 != 0 or floor_index <= 0:
+        return  # Not a mini-boss floor
+    
+    # Don't spawn mini-boss if there's a final boss (last floor)
+    if game.current_poi is not None:
+        from world.poi.types import DungeonPOI
+        if isinstance(game.current_poi, DungeonPOI):
+            if floor_index >= game.current_poi.floor_count:
+                return  # Final boss floor, skip mini-boss
+    
+    try:
+        arch = choose_miniboss_archetype_for_floor(floor_index)
+    except RuntimeError:
+        # No mini-boss archetypes available, skip
+        return
+    
+    boss_width = 28  # Slightly larger than regular enemies
+    boss_height = 28
+    
+    up = game_map.up_stairs
+    down = game_map.down_stairs
+    
+    # Safe radius around spawn
+    safe_radius_tiles = 5  # Larger safe zone for bosses
+    if up is not None:
+        safe_cx, safe_cy = up
+    else:
+        safe_cx = game_map.width // 2
+        safe_cy = game_map.height // 2
+    
+    # Find suitable spawn locations (prefer lair rooms)
+    lair_tiles: List[tuple[int, int]] = []
+    room_tiles: List[tuple[int, int]] = []
+    
+    for ty in range(game_map.height):
+        for tx in range(game_map.width):
+            if not game_map.is_walkable_tile(tx, ty):
+                continue
+            if up is not None and (tx, ty) == up:
+                continue
+            if down is not None and (tx, ty) == down:
+                continue
+            
+            # Check safe radius
+            dx = tx - safe_cx
+            dy = ty - safe_cy
+            if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
+                continue
+            
+            # Check if tile is occupied
+            occupied = False
+            for entity in game_map.entities:
+                if not hasattr(entity, "rect"):
+                    continue
+                cx, cy = entity.rect.center
+                etx, ety = game_map.world_to_tile(cx, cy)
+                if (tx, ty) == (etx, ety):
+                    occupied = True
+                    break
+            if occupied:
+                continue
+            
+            room = game_map.get_room_at(tx, ty) if hasattr(game_map, "get_room_at") else None
+            if room is None:
+                continue  # Bosses spawn in rooms, not corridors
+            
+            tag = getattr(room, "tag", "generic")
+            if tag == "start" or tag == "sanctum":
+                continue
+            elif tag == "lair":
+                lair_tiles.append((tx, ty))
+            else:
+                room_tiles.append((tx, ty))
+    
+    # Prefer lair rooms, but use any room if needed
+    candidate_tiles = lair_tiles if lair_tiles else room_tiles
+    if not candidate_tiles:
+        return  # No suitable location
+    
+    # Choose random location
+    spawn_tx, spawn_ty = random.choice(candidate_tiles)
+    
+    # Compute stats
+    max_hp, attack_power, defense, xp_reward, initiative = compute_scaled_boss_stats(arch, floor_index)
+    
+    # Generate boss name
+    boss_name = generate_boss_name_for_archetype(arch, floor_index, is_final_boss=False)
+    
+    # Spawn boss
+    ex, ey = game_map.center_entity_on_tile(spawn_tx, spawn_ty, boss_width, boss_height)
+    boss = Enemy(
+        x=ex,
+        y=ey,
+        width=boss_width,
+        height=boss_height,
+        speed=70.0,
+    )
+    
+    # Set boss stats
+    setattr(boss, "max_hp", max_hp)
+    setattr(boss, "hp", max_hp)
+    setattr(boss, "attack_power", attack_power)
+    setattr(boss, "defense", defense)
+    setattr(boss, "xp_reward", xp_reward)
+    setattr(boss, "initiative", initiative)
+    setattr(boss, "enemy_type", boss_name)
+    setattr(boss, "archetype_id", arch.id)
+    setattr(boss, "ai_profile", arch.ai_profile)
+    setattr(boss, "is_boss", True)
+    setattr(boss, "is_miniboss", True)
+    setattr(boss, "boss_type", "mini_boss")
+    setattr(boss, "blocks_movement", True)
+    
+    # Bosses get a special color (reddish-purple)
+    setattr(boss, "color", (180, 50, 180))
+    
+    game_map.entities.append(boss)
+
+
+def spawn_final_boss(game: "Game", game_map: GameMap, floor_index: int) -> None:
+    """
+    Spawn the final boss on the last floor of the dungeon.
+    
+    Final boss spawns in the treasure room (farthest from start).
+    
+    Args:
+        game: Game instance
+        game_map: Current game map
+        floor_index: Current floor number (should be the last floor)
+    """
+    # Check if this is the last floor
+    if game.current_poi is None:
+        return
+    
+    from world.poi.types import DungeonPOI
+    if not isinstance(game.current_poi, DungeonPOI):
+        return
+    
+    if floor_index != game.current_poi.floor_count:
+        return  # Not the last floor
+    
+    try:
+        arch = choose_final_boss_archetype(game.current_poi.floor_count)
+    except RuntimeError:
+        # No final boss archetypes available, skip
+        return
+    
+    boss_width = 32  # Larger than mini-boss
+    boss_height = 32
+    
+    up = game_map.up_stairs
+    down = game_map.down_stairs
+    
+    # Safe radius around spawn
+    safe_radius_tiles = 5
+    if up is not None:
+        safe_cx, safe_cy = up
+    else:
+        safe_cx = game_map.width // 2
+        safe_cy = game_map.height // 2
+    
+    # Find treasure room (preferred) or lair room
+    treasure_tiles: List[tuple[int, int]] = []
+    lair_tiles: List[tuple[int, int]] = []
+    room_tiles: List[tuple[int, int]] = []
+    
+    for ty in range(game_map.height):
+        for tx in range(game_map.width):
+            if not game_map.is_walkable_tile(tx, ty):
+                continue
+            if up is not None and (tx, ty) == up:
+                continue
+            if down is not None and (tx, ty) == down:
+                continue
+            
+            # Check safe radius
+            dx = tx - safe_cx
+            dy = ty - safe_cy
+            if dx * dx + dy * dy <= safe_radius_tiles * safe_radius_tiles:
+                continue
+            
+            # Check if tile is occupied
+            occupied = False
+            for entity in game_map.entities:
+                if not hasattr(entity, "rect"):
+                    continue
+                cx, cy = entity.rect.center
+                etx, ety = game_map.world_to_tile(cx, cy)
+                if (tx, ty) == (etx, ety):
+                    occupied = True
+                    break
+            if occupied:
+                continue
+            
+            room = game_map.get_room_at(tx, ty) if hasattr(game_map, "get_room_at") else None
+            if room is None:
+                continue
+            
+            tag = getattr(room, "tag", "generic")
+            if tag == "start" or tag == "sanctum":
+                continue
+            elif tag == "treasure":
+                treasure_tiles.append((tx, ty))
+            elif tag == "lair":
+                lair_tiles.append((tx, ty))
+            else:
+                room_tiles.append((tx, ty))
+    
+    # Prefer treasure room, then lair, then any room
+    candidate_tiles = treasure_tiles if treasure_tiles else (lair_tiles if lair_tiles else room_tiles)
+    if not candidate_tiles:
+        return  # No suitable location
+    
+    # Choose center of treasure room or best room
+    if treasure_tiles:
+        # Prefer center of treasure room
+        avg_x = sum(t[0] for t in treasure_tiles) // len(treasure_tiles)
+        avg_y = sum(t[1] for t in treasure_tiles) // len(treasure_tiles)
+        if (avg_x, avg_y) in treasure_tiles:
+            spawn_tx, spawn_ty = avg_x, avg_y
+        else:
+            spawn_tx, spawn_ty = random.choice(treasure_tiles)
+    else:
+        spawn_tx, spawn_ty = random.choice(candidate_tiles)
+    
+    # Compute stats
+    max_hp, attack_power, defense, xp_reward, initiative = compute_scaled_boss_stats(arch, floor_index)
+    
+    # Generate boss name
+    boss_name = generate_boss_name_for_archetype(arch, floor_index, is_final_boss=True)
+    
+    # Spawn boss
+    ex, ey = game_map.center_entity_on_tile(spawn_tx, spawn_ty, boss_width, boss_height)
+    boss = Enemy(
+        x=ex,
+        y=ey,
+        width=boss_width,
+        height=boss_height,
+        speed=70.0,
+    )
+    
+    # Set boss stats
+    setattr(boss, "max_hp", max_hp)
+    setattr(boss, "hp", max_hp)
+    setattr(boss, "attack_power", attack_power)
+    setattr(boss, "defense", defense)
+    setattr(boss, "xp_reward", xp_reward)
+    setattr(boss, "initiative", initiative)
+    setattr(boss, "enemy_type", boss_name)
+    setattr(boss, "archetype_id", arch.id)
+    setattr(boss, "ai_profile", arch.ai_profile)
+    setattr(boss, "is_boss", True)
+    setattr(boss, "is_final_boss", True)
+    setattr(boss, "boss_type", "final_boss")
+    setattr(boss, "blocks_movement", True)
+    
+    # Final boss gets a special color (bright purple-gold)
+    setattr(boss, "color", (220, 100, 255))
+    
+    game_map.entities.append(boss)
+
+
 def spawn_all_entities_for_floor(
     game: "Game",
     game_map: GameMap,
     floor_index: int,
 ) -> None:
     """
-    Spawn all entities (enemies, events, chests, merchants, traps) for a floor.
+    Spawn all entities (enemies, events, chests, merchants, traps, bosses) for a floor.
     This is the main entry point called from Game.load_floor().
     """
     spawn_enemies_for_floor(game, game_map, floor_index)
+    
+    # Spawn bosses (mini-bosses and final boss)
+    spawn_miniboss_for_floor(game, game_map, floor_index)
+    spawn_final_boss(game, game_map, floor_index)
+    
     spawn_events_for_floor(game_map, floor_index)
     spawn_chests_for_floor(game, game_map, floor_index)
     spawn_merchants_for_floor(game_map, floor_index)

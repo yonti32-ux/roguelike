@@ -23,6 +23,7 @@ class OverworldConfig:
     world_height: int = 512
     region_size: int = 64
     seed: Optional[int] = None
+    world_name: Optional[str] = None
     
     # POI settings
     poi_density: float = 0.15
@@ -57,6 +58,9 @@ class OverworldConfig:
     # Sight/exploration settings
     sight_radius: int = 8
     
+    # Zoom settings
+    default_zoom_index: int = 1  # Index into zoom levels (1 = 75% default)
+    
     @classmethod
     def load(cls) -> "OverworldConfig":
         """Load configuration from file, using defaults if file doesn't exist."""
@@ -78,6 +82,7 @@ class OverworldConfig:
             config.region_size = world_data.get("region_size", config.region_size)
             seed_val = world_data.get("seed")
             config.seed = int(seed_val) if seed_val is not None else None
+            config.world_name = world_data.get("world_name", config.world_name)
             
             # POI settings
             poi_data = data.get("poi", {})
@@ -109,6 +114,10 @@ class OverworldConfig:
             sight_data = data.get("sight", {})
             config.sight_radius = sight_data.get("radius", config.sight_radius)
             
+            # Zoom settings
+            zoom_data = data.get("zoom", {})
+            config.default_zoom_index = zoom_data.get("default_index", config.default_zoom_index)
+            
         except Exception as e:
             print(f"Error loading overworld config: {e}")
             print("Using default configuration.")
@@ -126,6 +135,7 @@ class OverworldConfig:
                     "height": self.world_height,
                     "region_size": self.region_size,
                     "seed": self.seed,
+                    "world_name": self.world_name,
                 },
                 "poi": {
                     "density": self.poi_density,
@@ -150,6 +160,9 @@ class OverworldConfig:
                 "sight": {
                     "radius": self.sight_radius,
                 },
+                "zoom": {
+                    "default_index": self.default_zoom_index,
+                },
             }
             
             with OVERWORLD_CONFIG_FILE.open("w", encoding="utf-8") as f:
@@ -167,6 +180,7 @@ class OverworldConfig:
             "world_height": self.world_height,
             "region_size": self.region_size,
             "seed": self.seed,
+            "world_name": self.world_name,
             "poi_density": self.poi_density,
             "poi_min_distance": self.poi_min_distance,
             "poi_distribution": self.poi_distribution,
@@ -180,5 +194,6 @@ class OverworldConfig:
             "starting_location_x": self.starting_location_x,
             "starting_location_y": self.starting_location_y,
             "sight_radius": self.sight_radius,
+            "default_zoom_index": self.default_zoom_index,
         }
 

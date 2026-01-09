@@ -6,6 +6,7 @@ import pygame
 
 if TYPE_CHECKING:
     from world.overworld.map import OverworldMap
+    from world.overworld.config import OverworldConfig
     from world.poi.base import PointOfInterest
     from world.time.time_system import TimeSystem
 
@@ -18,6 +19,7 @@ from ..controllers.input import create_default_input_manager
 
 from ..controllers.exploration import ExplorationController
 from ..utils.cheats import handle_cheat_key
+from systems.input import InputAction
 from ..managers.hero_manager import (
     init_hero_for_class,
     apply_hero_stats_to_player,
@@ -70,7 +72,7 @@ class Game:
     - "battle": zoomed turn-based fight handled by BattleScene
     """
 
-    def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior") -> None:
+    def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior", overworld_config: Optional["OverworldConfig"] = None) -> None:
         self.screen = screen
 
         # Logical input manager (actions -> keys/buttons).
@@ -173,6 +175,11 @@ class Game:
         self.overworld_map: Optional["OverworldMap"] = None
         self.current_poi: Optional["PointOfInterest"] = None
         self.time_system: Optional["TimeSystem"] = None
+        
+        # Confirmation dialog state
+        self.pending_overworld_confirmation: bool = False
+        self.confirmation_message: str = ""
+        self.confirmation_action: Optional[callable] = None
 
         # XP from the current battle (set when we start it)
         self.pending_battle_xp: int = 0
@@ -204,6 +211,12 @@ class Game:
             default_zoom * 1.4     # More zoomed in option
         ]
         self.zoom_index: int = 1  # start at default zoom
+        
+        # Overworld zoom (separate from exploration zoom)
+        # Overworld uses tile-based rendering, so zoom is applied to tile size
+        # Base tile size for overworld is 16 pixels
+        self.overworld_zoom_levels = [0.5, 0.75, 1.0, 1.25, 1.5]  # 50% to 150% zoom
+        self.overworld_zoom_index: int = 1  # Start at 75% (0.75) - default
         
         self.camera_x: float = 0.0
         self.camera_y: float = 0.0
@@ -247,8 +260,8 @@ class Game:
         from ..controllers.overworld import OverworldController
         self.overworld = OverworldController(self)
         
-        # Initialize overworld system
-        self._init_overworld()
+        # Initialize overworld system (use provided config if available)
+        self._init_overworld(overworld_config)
         
         # Load initial floor (only if not starting in overworld mode)
         # For now, we'll load floor 1 when entering a dungeon
@@ -273,17 +286,32 @@ class Game:
             # Consumables are not randomized.
             self.inventory.add_item(cid, randomized=False)
     
-    def _init_overworld(self) -> None:
+    def _init_overworld(self, overworld_config: Optional["OverworldConfig"] = None) -> None:
         """Initialize the overworld map and time system."""
         try:
             print("Initializing overworld system...")
             from world.overworld import OverworldConfig, WorldGenerator
             from world.time import TimeSystem
             
-            # Load overworld configuration
+            # Load overworld configuration (use provided config or load from file)
             print("Loading overworld config...")
-            config = OverworldConfig.load()
-            print(f"Config loaded: {config.world_width}x{config.world_height}, density={config.poi_density}")
+            if overworld_config is not None:
+                config = overworld_config
+                print(f"Using provided config: {config.world_width}x{config.world_height}, density={config.poi_density}")
+                
+                # Set zoom index from config
+                if hasattr(config, "default_zoom_index"):
+                    self.overworld_zoom_index = config.default_zoom_index
+                    # Clamp to valid range
+                    self.overworld_zoom_index = max(0, min(self.overworld_zoom_index, len(self.overworld_zoom_levels) - 1))
+            else:
+                config = OverworldConfig.load()
+                print(f"Config loaded from file: {config.world_width}x{config.world_height}, density={config.poi_density}")
+                
+                # Set zoom index from config if available
+                if hasattr(config, "default_zoom_index"):
+                    self.overworld_zoom_index = config.default_zoom_index
+                    self.overworld_zoom_index = max(0, min(self.overworld_zoom_index, len(self.overworld_zoom_levels) - 1))
             
             # Generate overworld
             print("Generating world...")
@@ -294,8 +322,7 @@ class Game:
             self.time_system = TimeSystem()
             
             # Discover POIs near starting location (within sight radius)
-            from world.overworld import OverworldConfig
-            config = OverworldConfig.load()
+            # Use the same config we used for generation
             start_x, start_y = self.overworld_map.get_player_position()
             nearby_pois = self.overworld_map.get_pois_in_range(start_x, start_y, radius=config.sight_radius)
             for poi in nearby_pois:
@@ -852,6 +879,16 @@ class Game:
             return 1.0
         idx = max(0, min(self.zoom_index, len(levels) - 1))
         return float(levels[idx])
+    
+    @property
+    def overworld_zoom(self) -> float:
+        """Current zoom scale for the overworld map."""
+        levels = getattr(self, "overworld_zoom_levels", [1.0])
+        idx = getattr(self, "overworld_zoom_index", 2)
+        if not levels:
+            return 1.0
+        idx = max(0, min(idx, len(levels) - 1))
+        return float(levels[idx])
 
     def _center_camera_on_player(self) -> None:
         """Center the camera around the player in world space before clamping."""
@@ -1053,6 +1090,26 @@ class Game:
             self.last_message = "You need to stand on the stairs to travel."
             return
 
+        # Check if we're trying to go up from floor 1 (return to overworld)
+        if delta < 0 and self.floor == 1:
+            # Going up from first floor - confirm return to overworld
+            self.pending_overworld_confirmation = True
+            self.confirmation_message = "Return to the overworld? (Y/N)"
+            self.confirmation_action = lambda: self._return_to_overworld_from_dungeon()
+            return
+
+        # Check if we're trying to go down from the last floor (return to overworld)
+        if delta > 0 and self.current_poi is not None:
+            # Check if this is a dungeon POI with floor_count
+            from world.poi.types import DungeonPOI
+            if isinstance(self.current_poi, DungeonPOI):
+                if self.floor == self.current_poi.floor_count:
+                    # On the last floor, going down means return to overworld
+                    self.pending_overworld_confirmation = True
+                    self.confirmation_message = "Return to the overworld? (Y/N)"
+                    self.confirmation_action = lambda: self._return_to_overworld_from_dungeon()
+                    return
+
         new_floor = self.floor + delta
         if new_floor <= 0:
             self.last_message = "You cannot go any higher."
@@ -1062,6 +1119,16 @@ class Game:
         self.floor = new_floor
         self.load_floor(self.floor, from_direction=direction)
         self.last_message = f"You travel to floor {self.floor}."
+    
+    def _return_to_overworld_from_dungeon(self) -> None:
+        """Return to overworld from the dungeon."""
+        if self.current_poi is not None:
+            self.exit_poi()
+            self.last_message = "You return to the overworld."
+        else:
+            # Fallback if no POI (shouldn't happen, but be safe)
+            self.enter_overworld_mode()
+            self.last_message = "You return to the overworld."
 
     # ------------------------------------------------------------------
     # Battle handling
@@ -1409,6 +1476,12 @@ class Game:
             # Overworld updates
             if hasattr(self, "overworld"):
                 self.overworld.update(dt)
+            
+            # Update tooltip (but don't set hover target - overworld HUD handles it)
+            if hasattr(self, "tooltip") and self.tooltip:
+                mouse_pos = pygame.mouse.get_pos()
+                # Only update mouse position, hover detection is done in draw
+                self.tooltip.mouse_pos = mouse_pos
         
         elif self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
@@ -1510,6 +1583,46 @@ class Game:
                         self.add_message("No save found in that slot.")
                 return
 
+        # Confirmation dialog handling (has priority when active)
+        if self.pending_overworld_confirmation:
+            if event.type == pygame.KEYDOWN:
+                input_manager = getattr(self, "input_manager", None)
+                if input_manager is not None:
+                    if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                        # Y or Enter - confirm
+                        if self.confirmation_action is not None:
+                            self.confirmation_action()
+                        self.pending_overworld_confirmation = False
+                        self.confirmation_message = ""
+                        self.confirmation_action = None
+                        return
+                    elif input_manager.event_matches_action(InputAction.CANCEL, event):
+                        # N or Escape - cancel
+                        self.pending_overworld_confirmation = False
+                        self.confirmation_message = ""
+                        self.confirmation_action = None
+                        self.last_message = "Stay in the dungeon."
+                        return
+                else:
+                    # Fallback: raw key handling
+                    if event.key == pygame.K_y or event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                        # Y or Enter - confirm
+                        if self.confirmation_action is not None:
+                            self.confirmation_action()
+                        self.pending_overworld_confirmation = False
+                        self.confirmation_message = ""
+                        self.confirmation_action = None
+                        return
+                    elif event.key == pygame.K_n or event.key == pygame.K_ESCAPE:
+                        # N or Escape - cancel
+                        self.pending_overworld_confirmation = False
+                        self.confirmation_message = ""
+                        self.confirmation_action = None
+                        self.last_message = "Stay in the dungeon."
+                        return
+            # Don't process other events while confirmation is pending
+            return
+        
         # Debug console input handling (has priority when visible)
         if self.debug_console and self.debug_console.is_visible():
             if self.debug_console.handle_event(event, game=self):
@@ -1517,6 +1630,11 @@ class Game:
         
         # Mode-specific handling.
         if self.mode == GameMode.OVERWORLD:
+            # Handle mouse wheel for zoom
+            if event.type == pygame.MOUSEWHEEL and hasattr(self, "overworld"):
+                self.overworld.handle_mouse_wheel(event)
+                return
+            
             # If a modal screen is active, route input to it
             if getattr(self, "active_screen", None) is not None:
                 self.active_screen.handle_event(self, event)
@@ -1574,6 +1692,10 @@ class Game:
         # Note: Clock is passed via a temporary attribute set in main loop
         if self.debug_console and hasattr(self, '_debug_clock'):
             self.debug_console.draw(game=self, clock=self._debug_clock)
+        
+        # Draw confirmation dialog if pending (always on top)
+        if self.pending_overworld_confirmation:
+            self._draw_confirmation_dialog()
 
         # Flip the final composed frame to the screen.
         pygame.display.flip()
@@ -1638,4 +1760,49 @@ class Game:
             self.debug_console.draw(game=self, clock=None)  # Clock passed from main loop
         # Note: Don't call pygame.display.flip() here - the main draw() method handles flipping
         # after all overlays are drawn to prevent flickering
+    
+    def _draw_confirmation_dialog(self) -> None:
+        """Draw the confirmation dialog overlay."""
+        screen = self.screen
+        screen_w, screen_h = screen.get_size()
+        
+        # Semi-transparent overlay
+        overlay = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))  # Dark overlay with transparency
+        screen.blit(overlay, (0, 0))
+        
+        # Dialog box
+        dialog_width = 500
+        dialog_height = 220
+        dialog_x = (screen_w - dialog_width) // 2
+        dialog_y = (screen_h - dialog_height) // 2
+        
+        # Draw dialog background
+        dialog_bg = pygame.Rect(dialog_x, dialog_y, dialog_width, dialog_height)
+        pygame.draw.rect(screen, (40, 40, 60), dialog_bg)
+        pygame.draw.rect(screen, (255, 255, 255), dialog_bg, 2)
+        
+        # Draw message text
+        font = self.ui_font
+        font_title = pygame.font.SysFont("consolas", 24)
+        
+        # Title
+        title_text = font_title.render("Confirmation", True, (255, 255, 255))
+        title_rect = title_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 40))
+        screen.blit(title_text, title_rect)
+        
+        # Message
+        message_text = font.render(self.confirmation_message, True, (255, 255, 255))
+        message_rect = message_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 100))
+        screen.blit(message_text, message_rect)
+        
+        # Instructions
+        instruction_text = font.render("Press Y/Enter to confirm, N/Escape to cancel", True, (200, 200, 200))
+        instruction_rect = instruction_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 160))
+        screen.blit(instruction_text, instruction_rect)
+        
+        # Additional hint about controls
+        hint_text = font.render("Use E on stairs to go down, Q to go up", True, (150, 150, 150))
+        hint_rect = hint_text.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 180))
+        screen.blit(hint_text, hint_rect)
 

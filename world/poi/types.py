@@ -63,7 +63,7 @@ class DungeonPOI(PointOfInterest):
             next_floor = max(self.cleared_floors) + 1
             if next_floor > self.floor_count:
                 # All floors cleared
-                game.add_message(f"{self.name} has been fully explored.")
+                game.add_message(f"{self.name} has been fully explored! All {self.floor_count} floors are cleared.")
                 return
         else:
             next_floor = 1
@@ -79,14 +79,21 @@ class DungeonPOI(PointOfInterest):
         # Switch to exploration mode
         game.enter_exploration_mode()
         
-        game.add_message(f"You enter {self.name}.")
+        # Better entry message with more detail
+        floors_cleared = len(self.cleared_floors)
+        if floors_cleared > 0:
+            game.add_message(f"You enter {self.name} (Level {self.level}). Continuing from floor {next_floor}/{self.floor_count}...")
+        else:
+            game.add_message(f"You enter {self.name} (Level {self.level}). This dungeon has {self.floor_count} floors. Starting at floor 1...")
     
     def exit(self, game: "Game") -> None:
         """Exit the dungeon and return to overworld."""
         if game.current_poi is self:
+            floors_cleared = len(self.cleared_floors)
+            progress = f"{floors_cleared}/{self.floor_count} floors" if self.floor_count > 0 else "explored"
             game.current_poi = None
             game.enter_overworld_mode()
-            game.add_message(f"You exit {self.name}.")
+            game.add_message(f"You exit {self.name}. Progress: {progress} cleared.")
     
     def mark_floor_cleared(self, floor: int) -> None:
         """Mark a floor as cleared."""
@@ -127,14 +134,15 @@ class VillagePOI(PointOfInterest):
         game.current_poi = self
         game.enter_exploration_mode()
         # TODO: Load village map/interior
-        game.add_message(f"You enter {self.name}. It's a peaceful village.")
+        buildings = ", ".join(b.title() for b in self.buildings[:2]) if self.buildings else "basic services"
+        game.add_message(f"You enter {self.name} (Level {self.level}). A peaceful village with {buildings}.")
     
     def exit(self, game: "Game") -> None:
         """Exit the village."""
         if game.current_poi is self:
             game.current_poi = None
             game.enter_overworld_mode()
-            game.add_message(f"You leave {self.name}.")
+            game.add_message(f"You leave {self.name} and return to the overworld.")
 
 
 class TownPOI(PointOfInterest):
@@ -160,14 +168,15 @@ class TownPOI(PointOfInterest):
         game.current_poi = self
         game.enter_exploration_mode()
         # TODO: Load town map/interior
-        game.add_message(f"You enter {self.name}. A bustling town.")
+        buildings = ", ".join(b.title() for b in self.buildings[:3]) if self.buildings else "many services"
+        game.add_message(f"You enter {self.name} (Level {self.level}). A bustling town with {buildings}.")
     
     def exit(self, game: "Game") -> None:
         """Exit the town."""
         if game.current_poi is self:
             game.current_poi = None
             game.enter_overworld_mode()
-            game.add_message(f"You leave {self.name}.")
+            game.add_message(f"You leave {self.name} and return to the overworld.")
 
 
 class CampPOI(PointOfInterest):
@@ -191,12 +200,12 @@ class CampPOI(PointOfInterest):
         game.current_poi = self
         game.enter_exploration_mode()
         # TODO: Load camp map/interior
-        game.add_message(f"You enter {self.name}. A small camp.")
+        game.add_message(f"You enter {self.name} (Level {self.level}). A small, temporary camp.")
     
     def exit(self, game: "Game") -> None:
         """Exit the camp."""
         if game.current_poi is self:
             game.current_poi = None
             game.enter_overworld_mode()
-            game.add_message(f"You leave {self.name}.")
+            game.add_message(f"You leave {self.name} and return to the overworld.")
 

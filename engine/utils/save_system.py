@@ -189,9 +189,21 @@ def _serialize_game(game) -> Dict[str, Any]:
     current_poi_id = None
     if hasattr(game, "current_poi") and game.current_poi is not None:
         current_poi_id = game.current_poi.poi_id
+    
+    # Overworld config (including world_name)
+    overworld_config_data = None
+    if hasattr(game, "overworld_config") and game.overworld_config is not None:
+        from world.overworld.config import OverworldConfig
+        config = game.overworld_config
+        overworld_config_data = {
+            "world_name": config.world_name,
+            "seed": config.seed,
+            "world_width": config.world_width,
+            "world_height": config.world_height,
+        }
 
     return {
-        "version": "1.1",  # Save format version (bumped for overworld support)
+        "version": "1.2",  # Save format version (bumped for world_name support)
         "floor": current_floor_num,
         "hero_stats": hero_stats_dict,
         "inventory": inventory_dict,
@@ -204,6 +216,7 @@ def _serialize_game(game) -> Dict[str, Any]:
         "pois": pois_data,
         "time": time_data,
         "current_poi": current_poi_id,
+        "overworld_config": overworld_config_data,
     }
 
 
@@ -377,8 +390,19 @@ def _deserialize_game(screen, save_data: Dict[str, Any]) -> Any:
     # Get hero class from save data
     hero_class_id = save_data.get("hero_stats", {}).get("hero_class_id", "warrior")
     
+    # Load overworld config from save if available
+    overworld_config = None
+    if "overworld_config" in save_data and save_data["overworld_config"] is not None:
+        from world.overworld.config import OverworldConfig
+        config_data = save_data["overworld_config"]
+        overworld_config = OverworldConfig()
+        overworld_config.world_name = config_data.get("world_name")
+        overworld_config.seed = config_data.get("seed")
+        overworld_config.world_width = config_data.get("world_width", overworld_config.world_width)
+        overworld_config.world_height = config_data.get("world_height", overworld_config.world_height)
+    
     # Create game instance
-    game = Game(screen, hero_class_id=hero_class_id)
+    game = Game(screen, hero_class_id=hero_class_id, overworld_config=overworld_config)
     
     # Restore hero stats
     if "hero_stats" in save_data:
@@ -622,13 +646,18 @@ def _deserialize_overworld(data: Dict[str, Any]):
         tiles=tiles,
     )
     
-    # Restore player position
-    player_pos = data.get("player_position", [0, 0])
-    overworld.set_player_position(player_pos[0], player_pos[1])
-    
-    # Restore explored tiles
+    # Restore explored tiles FIRST (before setting player position)
+    # This ensures explored tiles are preserved even if sight_radius would add more
     explored_list = data.get("explored_tiles", [])
     overworld.explored_tiles = {tuple(coord) for coord in explored_list}
+    
+    # Restore player position (this will also explore tiles in sight radius,
+    # but we've already restored the explored tiles, so we won't lose any)
+    player_pos = data.get("player_position", [0, 0])
+    # Get sight radius from config if available
+    from world.overworld.config import OverworldConfig
+    config = OverworldConfig.load()
+    overworld.set_player_position(player_pos[0], player_pos[1], sight_radius=config.sight_radius)
     
     return overworld
 

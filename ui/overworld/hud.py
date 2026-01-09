@@ -5,6 +5,7 @@ Renders the overworld map, POIs, player, and UI elements.
 """
 
 import pygame
+import math
 from typing import TYPE_CHECKING
 
 from settings import COLOR_BG, TILE_SIZE
@@ -13,8 +14,8 @@ if TYPE_CHECKING:
     from engine.core.game import Game
 
 
-# Overworld tile size (larger than exploration tiles for zoomed-out view)
-OVERWORLD_TILE_SIZE = 16  # Pixels per overworld tile
+# Base overworld tile size (before zoom)
+BASE_OVERWORLD_TILE_SIZE = 16  # Pixels per overworld tile at 100% zoom
 
 
 def draw_overworld(game: "Game") -> None:
@@ -26,6 +27,7 @@ def draw_overworld(game: "Game") -> None:
     - POI markers
     - Player icon
     - UI overlay (time, position, etc.)
+    - POI tooltips on hover
     """
     if game.overworld_map is None:
         # Fallback: blank screen
@@ -45,9 +47,22 @@ def draw_overworld(game: "Game") -> None:
     # Get player position
     player_x, player_y = game.overworld_map.get_player_position()
     
+    # Get mouse position for POI hover detection
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    hovered_poi = None
+    
+    # Get current zoom level
+    zoom = 1.0
+    if hasattr(game, "overworld_zoom"):
+        zoom = game.overworld_zoom  # It's a property, not a method
+    
+    # Calculate effective tile size with zoom
+    tile_size = int(BASE_OVERWORLD_TILE_SIZE * zoom)
+    tile_size = max(4, min(tile_size, 64))  # Clamp between 4 and 64 pixels
+    
     # Calculate viewport (center on player)
-    viewport_tiles_x = screen_w // OVERWORLD_TILE_SIZE
-    viewport_tiles_y = screen_h // OVERWORLD_TILE_SIZE
+    viewport_tiles_x = screen_w // tile_size
+    viewport_tiles_y = screen_h // tile_size
     
     start_x = max(0, player_x - viewport_tiles_x // 2)
     start_y = max(0, player_y - viewport_tiles_y // 2)
@@ -57,12 +72,12 @@ def draw_overworld(game: "Game") -> None:
     # Draw terrain tiles
     for y in range(start_y, end_y):
         for x in range(start_x, end_x):
-            # Calculate screen position
-            screen_x = (x - start_x) * OVERWORLD_TILE_SIZE
-            screen_y = (y - start_y) * OVERWORLD_TILE_SIZE
+            # Calculate screen position (using zoomed tile size)
+            screen_x = (x - start_x) * tile_size
+            screen_y = (y - start_y) * tile_size
             
             # Draw tile
-            rect = pygame.Rect(screen_x, screen_y, OVERWORLD_TILE_SIZE, OVERWORLD_TILE_SIZE)
+            rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
             
             # Check if explored
             if not game.overworld_map.is_explored(x, y):
@@ -103,13 +118,27 @@ def draw_overworld(game: "Game") -> None:
             
             pygame.draw.rect(screen, color, rect)
     
-    # Draw POI markers
+    # Draw POI markers and detect hover
     for poi in game.overworld_map.get_all_pois():
         px, py = poi.position
         
         # Only draw if in viewport
         if not (start_x <= px < end_x and start_y <= py < end_y):
             continue
+        
+        # Calculate screen position (using zoomed tile size)
+        screen_x = (px - start_x) * tile_size + tile_size // 2
+        screen_y = (py - start_y) * tile_size + tile_size // 2
+        
+        # Check if mouse is hovering over this POI (adjust hover radius with zoom)
+        hover_radius = max(8, int(8 * zoom))  # Scale hover detection with zoom
+        dx_mouse = abs(mouse_x - screen_x)
+        dy_mouse = abs(mouse_y - screen_y)
+        if dx_mouse <= hover_radius and dy_mouse <= hover_radius:
+            hovered_poi = poi
+        
+        # Check if player is standing on this POI
+        is_player_on_poi = (px == player_x and py == player_y)
         
         # Only show discovered POIs (unless they're in the viewport and nearby)
         if not poi.discovered:
@@ -118,16 +147,11 @@ def draw_overworld(game: "Game") -> None:
             dy = abs(py - player_y)
             if max(dx, dy) <= 5:  # Show POIs very close even if not discovered
                 # Show as a faint marker
-                screen_x = (px - start_x) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
-                screen_y = (py - start_y) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
-                pygame.draw.circle(screen, (100, 100, 100), (screen_x, screen_y), 3)
+                marker_radius = max(2, int(3 * zoom))
+                pygame.draw.circle(screen, (100, 100, 100), (screen_x, screen_y), marker_radius)
             continue
         
-        # Calculate screen position
-        screen_x = (px - start_x) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
-        screen_y = (py - start_y) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
-        
-        # Draw POI marker (colored circle)
+        # Draw POI marker (colored circle) - scale with zoom
         poi_colors = {
             "dungeon": (200, 50, 50),
             "village": (50, 200, 50),
@@ -135,31 +159,79 @@ def draw_overworld(game: "Game") -> None:
             "camp": (200, 200, 50),
         }
         color = poi_colors.get(poi.poi_type, (150, 150, 150))
-        radius = 4
         
-        pygame.draw.circle(screen, color, (screen_x, screen_y), radius)
+        # Calculate radius based on zoom and state
+        base_radius = 4
+        if is_player_on_poi:
+            # Player is here - draw larger, brighter circle
+            radius = max(5, int(base_radius * 1.75 * zoom))
+            highlight_color = tuple(min(255, c + 50) for c in color)
+            pygame.draw.circle(screen, highlight_color, (screen_x, screen_y), radius)
+            # Draw border
+            border_width = max(1, int(2 * zoom))
+            pygame.draw.circle(screen, (255, 255, 255), (screen_x, screen_y), radius, border_width)
+        elif hovered_poi == poi:
+            # Hovering - draw slightly larger circle
+            radius = max(4, int(base_radius * 1.5 * zoom))
+            hover_color = tuple(min(255, c + 30) for c in color)
+            pygame.draw.circle(screen, hover_color, (screen_x, screen_y), radius)
+            border_width = max(1, int(1 * zoom))
+            pygame.draw.circle(screen, (255, 255, 255), (screen_x, screen_y), radius, border_width)
+        else:
+            # Normal size - scale with zoom
+            radius = max(2, int(base_radius * zoom))
+            pygame.draw.circle(screen, color, (screen_x, screen_y), radius)
         
-        # Draw level indicator for dungeons
+        # Draw level indicator for dungeons (scale font with zoom)
         if poi.poi_type == "dungeon":
-            font = pygame.font.Font(None, 12)
+            font_size = max(8, int(12 * zoom))
+            font = pygame.font.Font(None, font_size)
             level_text = font.render(str(poi.level), True, (255, 255, 255))
             text_rect = level_text.get_rect(center=(screen_x, screen_y))
             screen.blit(level_text, text_rect)
     
-    # Draw player icon
+    # Draw player icon (scaled with zoom)
     if start_x <= player_x < end_x and start_y <= player_y < end_y:
-        screen_x = (player_x - start_x) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
-        screen_y = (player_y - start_y) * OVERWORLD_TILE_SIZE + OVERWORLD_TILE_SIZE // 2
+        screen_x = (player_x - start_x) * tile_size + tile_size // 2
+        screen_y = (player_y - start_y) * tile_size + tile_size // 2
         
-        # Draw player as a white circle with arrow
-        pygame.draw.circle(screen, (255, 255, 255), (screen_x, screen_y), 6)
-        # Simple arrow pointing up
-        points = [
-            (screen_x, screen_y - 6),
-            (screen_x - 4, screen_y + 2),
-            (screen_x + 4, screen_y + 2),
+        # Draw player as a white circle with arrow (scaled with zoom)
+        player_radius = max(3, int(6 * zoom))
+        pygame.draw.circle(screen, (255, 255, 255), (screen_x, screen_y), player_radius)
+        
+        # Get last movement direction (default to up if not available)
+        last_dir = (0, -1)  # Default: pointing up
+        if hasattr(game, "overworld") and hasattr(game.overworld, "last_direction"):
+            last_dir = game.overworld.last_direction
+        
+        # Calculate angle from direction vector (dx, dy)
+        # Direction (0, -1) = 0° (up), (1, 0) = 90° (right), etc.
+        dx, dy = last_dir
+        # Calculate angle in radians (atan2 gives angle from positive x-axis, we want from positive y-axis)
+        angle = math.atan2(dx, -dy)  # -dy because screen y increases downward
+        
+        # Arrow points in direction of movement (scaled with zoom)
+        # Base arrow shape (pointing up when angle=0)
+        arrow_length = max(3, int(6 * zoom))
+        arrow_width = max(2, int(4 * zoom))
+        base_points = [
+            (0, -arrow_length),  # Tip
+            (-arrow_width, max(1, int(2 * zoom))),   # Bottom left
+            (arrow_width, max(1, int(2 * zoom))),    # Bottom right
         ]
-        pygame.draw.polygon(screen, (0, 0, 0), points)
+        
+        # Rotate points around center
+        rotated_points = []
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        for px, py in base_points:
+            # Rotate point around origin
+            rx = px * cos_a - py * sin_a
+            ry = px * sin_a + py * cos_a
+            # Translate to player position
+            rotated_points.append((screen_x + int(rx), screen_y + int(ry)))
+        
+        pygame.draw.polygon(screen, (0, 0, 0), rotated_points)
     
     # Draw UI overlay
     _draw_overworld_ui(game, screen)
@@ -167,6 +239,22 @@ def draw_overworld(game: "Game") -> None:
     # Draw message log
     if hasattr(game, "last_message") and game.last_message:
         _draw_message(game, screen)
+    
+    # Draw POI tooltip if hovering
+    if hasattr(game, "tooltip") and game.tooltip:
+        if hovered_poi is not None and hovered_poi.discovered:
+            from ui.overworld.poi_tooltips import create_poi_tooltip_data
+            
+            tooltip_data = create_poi_tooltip_data(hovered_poi, game)
+            # Update tooltip with POI data
+            game.tooltip.current_tooltip = tooltip_data
+            game.tooltip.mouse_pos = (mouse_x, mouse_y)
+            # Use game's UI font for tooltip
+            if hasattr(game, "ui_font"):
+                game.tooltip.draw(screen, game.ui_font)
+        else:
+            # Clear tooltip if not hovering over a POI
+            game.tooltip.current_tooltip = None
 
 
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
@@ -187,9 +275,16 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
         screen.blit(pos_surface, (10, 40))
     
     # Instructions
-    help_text = "WASD: Move | E: Enter POI | I: Inventory | C: Character"
+    help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character"
     help_surface = font.render(help_text, True, (200, 200, 200))
     screen.blit(help_surface, (10, screen.get_height() - 30))
+    
+    # Show current zoom level
+    if hasattr(game, "overworld_zoom"):
+        zoom_value = game.overworld_zoom  # It's a property, not a method
+        zoom_text = f"Zoom: {int(zoom_value * 100)}%"
+        zoom_surface = font.render(zoom_text, True, (150, 200, 255))
+        screen.blit(zoom_surface, (screen.get_width() - zoom_surface.get_width() - 10, 10))
 
 
 def _draw_message(game: "Game", screen: pygame.Surface) -> None:

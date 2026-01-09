@@ -176,7 +176,7 @@ class ExplorationController:
                 game.exploration_tutorial_scroll_offset += 200
                 return
 
-        # Interact (chest / event / merchant / etc.)
+        # Interact (chest / event / merchant / stairs / etc.)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.INTERACT, event):
                 self.try_interact()
@@ -186,12 +186,8 @@ class ExplorationController:
                 self.try_interact()
                 return
 
-        # Stairs: go down / up (still raw for now)
-        if event.key == pygame.K_PERIOD:  # '.'
-            game.try_change_floor(+1)
-            return
-
-        if event.key == pygame.K_COMMA:  # ','
+        # Q key: go up stairs (except on first floor where it shows confirmation)
+        if event.key == pygame.K_q:
             game.try_change_floor(-1)
             return
 
@@ -975,6 +971,7 @@ class ExplorationController:
         - Else if an event node is nearby, trigger it.
         - Else if a merchant is nearby, open the merchant UI.
         - Else if a detected trap is nearby, attempt to disarm it.
+        - Else if standing on stairs, use them to go down (or up if on up stairs and not first floor).
         - Otherwise, show a soft 'nothing here' message.
         """
         game = self.game
@@ -1020,5 +1017,24 @@ class ExplorationController:
                 self._disarm_trap(trap)
                 return
 
-        # 5) Nothing
+        # 5) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
+        if game.current_map is not None and game.player is not None:
+            px, py = game.player.rect.center
+            player_tx, player_ty = game.current_map.world_to_tile(px, py)
+            
+            # Check if standing on down stairs (go down)
+            if game.current_map.down_stairs is not None:
+                if (player_tx, player_ty) == game.current_map.down_stairs:
+                    game.try_change_floor(+1)
+                    return
+            
+            # Check if standing on up stairs (go up) - but not on first floor (use Q instead)
+            if game.current_map.up_stairs is not None:
+                if (player_tx, player_ty) == game.current_map.up_stairs:
+                    # Only go up automatically if not on first floor (first floor needs confirmation via Q)
+                    if game.floor > 1:
+                        game.try_change_floor(-1)
+                        return
+
+        # 6) Nothing
         game.last_message = "There is nothing here to interact with."

@@ -89,39 +89,198 @@ class WorldGenerator:
     
     def _generate_terrain(self) -> List[List[TerrainType]]:
         """
-        Generate terrain for the overworld.
+        Generate terrain for the overworld with biome coherence.
         
-        For Phase 1, uses a simple random distribution.
-        Can be enhanced later with biomes, noise, etc.
+        Uses a two-pass approach:
+        1. Generate biome regions using cellular automata-like clustering
+        2. Smooth and refine terrain transitions
         
         Returns:
             2D list of TerrainType
         """
+        # Initialize with random terrain (seed for biome centers)
         tiles = []
-        
         for y in range(self.config.world_height):
             row = []
             for x in range(self.config.world_width):
-                # Simple random terrain distribution
+                # Initial random distribution (more varied for biome seeding)
                 rand = random.random()
-                
-                if rand < 0.4:
+                if rand < 0.35:
                     terrain = TERRAIN_GRASS
-                elif rand < 0.6:
+                elif rand < 0.55:
                     terrain = TERRAIN_PLAINS
-                elif rand < 0.75:
+                elif rand < 0.70:
                     terrain = TERRAIN_FOREST
-                elif rand < 0.85:
+                elif rand < 0.82:
                     terrain = TERRAIN_MOUNTAIN
-                elif rand < 0.95:
+                elif rand < 0.92:
                     terrain = TERRAIN_DESERT
                 else:
                     terrain = TERRAIN_WATER
-                
                 row.append(terrain)
             tiles.append(row)
         
+        # Apply cellular automata smoothing to create biome regions
+        # This creates clusters of similar terrain
+        tiles = self._smooth_terrain(tiles, iterations=3)
+        
+        # Add some variation and refine transitions
+        tiles = self._refine_terrain(tiles)
+        
         return tiles
+    
+    def _smooth_terrain(self, tiles: List[List[TerrainType]], iterations: int = 3) -> List[List[TerrainType]]:
+        """
+        Smooth terrain using cellular automata to create biome regions.
+        
+        For each tile, look at neighbors and if most neighbors are the same type,
+        convert the tile to match (with some randomness for variation).
+        """
+        width = len(tiles[0])
+        height = len(tiles)
+        
+        for _ in range(iterations):
+            new_tiles = [row[:] for row in tiles]  # Copy current state
+            
+            for y in range(height):
+                for x in range(width):
+                    # Count neighbors of each terrain type
+                    neighbor_counts = {}
+                    neighbor_radius = 1
+                    
+                    for dy in range(-neighbor_radius, neighbor_radius + 1):
+                        for dx in range(-neighbor_radius, neighbor_radius + 1):
+                            if dx == 0 and dy == 0:
+                                continue  # Skip center tile
+                            
+                            nx = x + dx
+                            ny = y + dy
+                            
+                            if 0 <= nx < width and 0 <= ny < height:
+                                neighbor_terrain = tiles[ny][nx]
+                                terrain_id = neighbor_terrain.id
+                                neighbor_counts[terrain_id] = neighbor_counts.get(terrain_id, 0) + 1
+                    
+                    # Find most common neighbor terrain type
+                    if neighbor_counts:
+                        most_common = max(neighbor_counts.items(), key=lambda x: x[1])
+                        most_common_id, count = most_common
+                        
+                        # If at least 4 neighbors are the same type, convert this tile
+                        # (with some randomness to avoid complete uniformity)
+                        if count >= 4 and random.random() < 0.6:
+                            from .terrain import get_terrain
+                            new_terrain = get_terrain(most_common_id)
+                            if new_terrain:
+                                new_tiles[y][x] = new_terrain
+                    
+                    # Special handling: prevent water from forming isolated lakes
+                    # (water should cluster in larger bodies)
+                    current_terrain = tiles[y][x]
+                    if current_terrain.id == "water":
+                        water_neighbors = neighbor_counts.get("water", 0)
+                        # If surrounded by mostly non-water, convert to adjacent terrain
+                        if water_neighbors < 2 and random.random() < 0.3:
+                            # Convert to most common non-water neighbor
+                            non_water = [(tid, cnt) for tid, cnt in neighbor_counts.items() if tid != "water"]
+                            if non_water:
+                                new_terrain_id = max(non_water, key=lambda x: x[1])[0]
+                                from .terrain import get_terrain
+                                new_terrain = get_terrain(new_terrain_id)
+                                if new_terrain:
+                                    new_tiles[y][x] = new_terrain
+            
+            tiles = new_tiles
+        
+        return tiles
+    
+    def _refine_terrain(self, tiles: List[List[TerrainType]]) -> List[List[TerrainType]]:
+        """
+        Refine terrain transitions and add some realistic placement rules.
+        
+        - Forests tend to be near water or grass
+        - Mountains tend to cluster and avoid water
+        - Deserts avoid water and forests
+        - Water should form coherent bodies
+        """
+        width = len(tiles[0])
+        height = len(tiles)
+        
+        for y in range(height):
+            for x in range(width):
+                current = tiles[y][x]
+                
+                # Skip water (already handled in smoothing)
+                if current.id == "water":
+                    continue
+                
+                # Count neighboring terrain types
+                neighbors = self._get_neighbor_terrain_types(tiles, x, y, width, height)
+                
+                # Realistic terrain placement rules
+                
+                # Forests prefer being near water or in grass/plains areas
+                if current.id == "forest":
+                    has_water = "water" in neighbors
+                    has_grass_plains = any(t in neighbors for t in ["grass", "plains"])
+                    # If isolated from water and in desert/mountain, might convert
+                    if not has_water and not has_grass_plains and random.random() < 0.15:
+                        # Convert to nearby terrain type
+                        if "grass" in neighbors or "plains" in neighbors:
+                            from .terrain import get_terrain
+                            tiles[y][x] = get_terrain(random.choice(["grass", "plains"])) or current
+                
+                # Deserts avoid water and forests
+                elif current.id == "desert":
+                    has_water = "water" in neighbors
+                    has_forest = "forest" in neighbors
+                    if (has_water or has_forest) and random.random() < 0.25:
+                        # Convert to plains or grass
+                        from .terrain import get_terrain
+                        tiles[y][x] = get_terrain(random.choice(["plains", "grass"])) or current
+                
+                # Mountains avoid water (but can be near it)
+                elif current.id == "mountain":
+                    has_water = neighbors.count("water") >= 3
+                    if has_water and random.random() < 0.2:
+                        # Convert to forest or grass (mountainous coast)
+                        from .terrain import get_terrain
+                        tiles[y][x] = get_terrain(random.choice(["forest", "grass"])) or current
+                
+                # Add some variation: occasionally add small features
+                # (e.g., small forest patches in plains)
+                if random.random() < 0.02:  # 2% chance
+                    if current.id == "plains" and "forest" in neighbors:
+                        from .terrain import get_terrain
+                        tiles[y][x] = get_terrain("forest") or current
+                    elif current.id == "grass" and "plains" in neighbors:
+                        from .terrain import get_terrain
+                        tiles[y][x] = get_terrain("plains") or current
+        
+        return tiles
+    
+    def _get_neighbor_terrain_types(
+        self, 
+        tiles: List[List[TerrainType]], 
+        x: int, 
+        y: int, 
+        width: int, 
+        height: int
+    ) -> List[str]:
+        """Get list of neighbor terrain type IDs."""
+        neighbors = []
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                if dx == 0 and dy == 0:
+                    continue
+                
+                nx = x + dx
+                ny = y + dy
+                
+                if 0 <= nx < width and 0 <= ny < height:
+                    neighbors.append(tiles[ny][nx].id)
+        
+        return neighbors
     
     def _place_pois(self, overworld: OverworldMap) -> List[PointOfInterest]:
         """

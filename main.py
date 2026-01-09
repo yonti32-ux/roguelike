@@ -141,8 +141,24 @@ def main() -> None:
         selected_class_id, hero_name = result
         telemetry.log("character_created", hero_class_id=selected_class_id, hero_name=hero_name)
 
-        # Start game with the chosen class
-        game = Game(screen, hero_class_id=selected_class_id)
+        # --- Overworld Configuration: customize world settings ---
+        from engine.scenes.overworld_config_scene import OverworldConfigScene
+        config_scene = OverworldConfigScene(screen)
+        overworld_config = config_scene.run()
+        
+        if overworld_config is None:
+            # User cancelled config, exit
+            telemetry.log("quit_during_overworld_config")
+            pygame.quit()
+            sys.exit()
+        
+        telemetry.log("overworld_configured", 
+                     world_size=f"{overworld_config.world_width}x{overworld_config.world_height}",
+                     poi_density=overworld_config.poi_density,
+                     seed=overworld_config.seed)
+
+        # Start game with the chosen class and overworld config
+        game = Game(screen, hero_class_id=selected_class_id, overworld_config=overworld_config)
 
         # Store the chosen name on hero_stats
         game.hero_stats.hero_name = hero_name
