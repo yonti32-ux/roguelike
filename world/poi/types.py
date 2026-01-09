@@ -130,10 +130,76 @@ class VillagePOI(PointOfInterest):
         self.merchants: list[str] = ["general_merchant"]
     
     def enter(self, game: "Game") -> None:
-        """Enter the village."""
+        """Enter the village and load village map."""
         game.current_poi = self
+        
+        # Generate village map if not already generated
+        if "village_map" not in self.state:
+            from world.village import generate_village
+            # Use POI position as seed for deterministic generation
+            seed = hash((self.poi_id, self.position[0], self.position[1]))
+            village_map = generate_village(self.level, self.name, seed=seed)
+            self.state["village_map"] = village_map
+            
+            # Generate available companions on first visit
+            # Scale companion level with player level, not village level
+            from systems.village.companion_generation import generate_village_companions
+            player_level = getattr(game.hero_stats, "level", 1) if game.hero_stats else 1
+            companion_count = min(3, max(1, player_level // 2 + 1))  # 1-3 companions based on player level
+            companions = generate_village_companions(
+                village_level=player_level,  # Use player level instead of village level
+                count=companion_count,
+                seed=seed + 10000,  # Different seed for companions
+            )
+            self.state["available_companions"] = companions
+        else:
+            village_map = self.state["village_map"]
+        
+        # Load the village map
+        game.current_map = village_map
+        
+        # Ensure player exists (create if needed, e.g., when entering from overworld)
+        if game.player is None:
+            from world.entities import Player
+            from settings import TILE_SIZE
+            # Create player at a default position (will be moved to entrance)
+            game.player = Player(
+                x=0.0,
+                y=0.0,
+                width=24,
+                height=24,
+            )
+            # Apply hero stats to the newly created player
+            from engine.managers.hero_manager import apply_hero_stats_to_player
+            apply_hero_stats_to_player(game, full_heal=True)
+        
+        # Place player at entrance
+        entrance_pos = getattr(village_map, "village_entrance", None)
+        if entrance_pos is not None:
+            entrance_x, entrance_y = entrance_pos
+            # Use GameMap's center_entity_on_tile to properly position player
+            player_width = game.player.width
+            player_height = game.player.height
+            world_x, world_y = village_map.center_entity_on_tile(
+                entrance_x,
+                entrance_y,
+                player_width,
+                player_height,
+            )
+            game.player.move_to(world_x, world_y)
+        
+        # Update camera to follow player
+        game.camera_x = game.player.x
+        game.camera_y = game.player.y
+        
+        # Initialize FOV for the village
+        if hasattr(game, "update_fov"):
+            game.update_fov()
+        
+        # Switch to exploration mode
         game.enter_exploration_mode()
-        # TODO: Load village map/interior
+        
+        # Better entry message with more detail
         buildings = ", ".join(b.title() for b in self.buildings[:2]) if self.buildings else "basic services"
         game.add_message(f"You enter {self.name} (Level {self.level}). A peaceful village with {buildings}.")
     

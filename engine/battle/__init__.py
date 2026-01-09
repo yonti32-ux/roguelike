@@ -9,14 +9,9 @@ This module contains all battle-related engine code, split into logical componen
 - terrain.py: Terrain generation and management
 - combat.py: Combat calculations (damage, crits, cover, flanking)
 - types.py: Battle dataclasses (BattleUnit, BattleTerrain)
-
-During refactoring, this module will gradually be populated.
-For now, BattleScene is still in engine/battle_scene.py.
 """
 
-# TODO: After refactoring, uncomment this:
-# from .scene import BattleScene
-# __all__ = ["BattleScene"]
+from .scene import BattleScene
 
-__all__ = []
+__all__ = ["BattleScene"]
 

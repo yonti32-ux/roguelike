@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 if TYPE_CHECKING:
-    from engine.scenes.battle_scene import BattleScene
+    from engine.battle import BattleScene
 
 
 def draw_combat_tutorial(surface: pygame.Surface, font: pygame.font.Font, battle_scene: "BattleScene") -> None:

@@ -11,6 +11,10 @@ from world.entities import Enemy, Chest
 from world.entities import EventNode  # NEW
 from world.entities import Merchant  # NEW merchant NPC
 from world.entities import Trap  # NEW: traps
+try:
+    from world.village.npcs import VillageNPC  # Village NPCs
+except ImportError:
+    VillageNPC = None  # Fallback if village system not available
 from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot, get_shop_stock_for_floor
@@ -652,6 +656,78 @@ class ExplorationController:
         Public wrapper so UI code can query nearby merchants if needed.
         """
         return self._find_merchant_near_player(max_distance_px=max_distance_px)
+    
+    # --- Village NPC helpers ------------------------------------------------
+    
+    def _find_village_npc_near_player(
+        self,
+        max_distance_px: int = TILE_SIZE,
+    ) -> Optional["VillageNPC"]:
+        """
+        Return a village NPC entity near/under the player, or None.
+        """
+        if VillageNPC is None:
+            return None
+        
+        game = self.game
+        
+        if game.current_map is None or game.player is None:
+            return None
+        
+        px, py = game.player.rect.center
+        max_dist_sq = max_distance_px * max_distance_px
+        
+        for entity in getattr(game.current_map, "entities", []):
+            if not isinstance(entity, VillageNPC):
+                continue
+            mx, my = entity.rect.center
+            dx = mx - px
+            dy = my - py
+            if dx * dx + dy * dy <= max_dist_sq:
+                return entity
+        
+        return None
+    
+    def _interact_with_village_npc(self, npc: "VillageNPC") -> None:
+        """
+        Interact with a village NPC based on their type.
+        
+        Args:
+            npc: The village NPC to interact with
+        """
+        game = self.game
+        
+        npc_type = getattr(npc, "npc_type", "villager")
+        
+        if npc_type == "merchant":
+            # Open shop
+            from systems.village.services import open_shop
+            # Get village level from current POI
+            village_level = 1
+            if game.current_poi is not None:
+                village_level = getattr(game.current_poi, "level", 1)
+            open_shop(game, merchant_id=getattr(npc, "npc_id", None), village_level=village_level)
+            
+        elif npc_type == "innkeeper":
+            # Show rest option
+            from systems.village.services import rest_at_inn
+            # For now, free rest (can add cost later)
+            rest_at_inn(game, cost=0)
+            
+        elif npc_type == "recruiter":
+            # Open recruitment screen
+            from systems.village.services import open_recruitment
+            open_recruitment(game, recruiter_id=getattr(npc, "npc_id", None))
+            
+        elif npc_type == "villager":
+            # Show dialogue (for now, just a message)
+            dialogue = getattr(npc, "dialogue", [])
+            if dialogue:
+                game.add_message(dialogue[0])
+            else:
+                game.add_message(f"{getattr(npc, 'name', 'Villager')} greets you warmly.")
+        else:
+            game.add_message(f"You talk to {getattr(npc, 'name', 'the NPC')}.")
 
     def _open_shop(self) -> None:
         """
@@ -992,13 +1068,20 @@ class ExplorationController:
             self._trigger_event_node(node)
             return
 
-        # 3) Merchant interaction (must be near a merchant entity)
+        # 3) Village NPC interaction (check before merchant, as village NPCs are more specific)
+        if VillageNPC is not None:
+            village_npc = self._find_village_npc_near_player(max_distance_px=TILE_SIZE)
+            if village_npc is not None:
+                self._interact_with_village_npc(village_npc)
+                return
+        
+        # 4) Merchant interaction (must be near a merchant entity)
         merchant = self._find_merchant_near_player(max_distance_px=TILE_SIZE)
         if merchant is not None:
             self._open_shop()
             return
 
-        # 4) Try trap detection/disarming
+        # 5) Try trap detection/disarming
         trap = self._find_trap_near_player(max_distance_px=TILE_SIZE // 2)
         if trap is not None:
             if trap.triggered or trap.disarmed:
@@ -1017,7 +1100,7 @@ class ExplorationController:
                 self._disarm_trap(trap)
                 return
 
-        # 5) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
+        # 6) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
         if game.current_map is not None and game.player is not None:
             px, py = game.player.rect.center
             player_tx, player_ty = game.current_map.world_to_tile(px, py)
@@ -1036,5 +1119,5 @@ class ExplorationController:
                         game.try_change_floor(-1)
                         return
 
-        # 6) Nothing
+        # 7) Nothing
         game.last_message = "There is nothing here to interact with."

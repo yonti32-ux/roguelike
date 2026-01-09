@@ -20,6 +20,7 @@ from ui.hud_screens import (
     draw_character_sheet_fullscreen,
     draw_shop_fullscreen,
     draw_skill_screen_fullscreen,
+    draw_recruitment_fullscreen,
 )
 from systems.input import InputAction
 

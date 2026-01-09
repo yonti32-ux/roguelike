@@ -19,7 +19,6 @@ class BossArchetype:
     Similar to EnemyArchetype but with higher base stats and special abilities.
     """
     id: str
-    name_template: str = ""  # Optional: if empty, uses name generation
     role: str  # "Brute", "Invoker", "Hybrid", etc.
     tier: int  # 1-3 for mini-bosses, 3+ for final bosses
     boss_type: str  # "mini_boss" or "final_boss"
@@ -37,12 +36,11 @@ class BossArchetype:
     skill_ids: List[str]  # Special boss abilities
     ai_profile: str
     
-    # Initiative (higher for bosses)
-    base_initiative: int = 12
+    # Optional fields (with defaults) must come after required fields
+    name_template: str = ""  # Optional: if empty, uses name generation
+    base_initiative: int = 12  # Initiative (higher for bosses)
     init_per_floor: float = 0.3
-    
-    # Name generation style (if name_template is empty)
-    name_style: str = "auto"  # "brutal", "mystical", "beast", "fantasy", "auto"
+    name_style: str = "auto"  # Name generation style: "brutal", "mystical", "beast", "fantasy", "auto"
 
 
 BOSS_ARCHETYPES: Dict[str, BossArchetype] = {}

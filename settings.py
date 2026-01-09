@@ -13,6 +13,7 @@ COLOR_ENEMY = (200, 80, 80)
 
 # World
 TILE_SIZE = 32
+FOV_RADIUS_TILES = 10  # How far the player can see in tiles
 
 # Battle settings
 BATTLE_GRID_WIDTH = 19  # Increased to accommodate speed-based movement and make high MP rare (was 17)

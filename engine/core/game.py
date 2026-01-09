@@ -14,7 +14,7 @@ from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
 from world.game_map import GameMap
 from world.entities import Player, Enemy, Merchant
-from ..scenes.battle_scene import BattleScene
+from ..battle import BattleScene
 from ..controllers.input import create_default_input_manager
 
 from ..controllers.exploration import ExplorationController
@@ -27,12 +27,17 @@ from ..managers.hero_manager import (
     gain_xp_from_event,
 )
 from ..managers.message_log import MessageLog
+from ..managers.floor_manager import FloorManager
+from ..managers.battle_orchestrator import BattleOrchestrator
+from ..managers.camera_manager import CameraManager
+from ..managers.ui_screen_manager import UIScreenManager
+from ..managers.equipment_manager import EquipmentManager
 from systems.progression import HeroStats
 
 from systems import perks as perk_system
 from systems.inventory import Inventory, get_item_def
 from systems.loot import roll_battle_loot
-from systems.party import CompanionState, get_companion, recalc_companion_stats_for_level
+from systems.party import CompanionState
 
 from ui.hud_exploration import (
     draw_exploration_ui,
@@ -53,9 +58,7 @@ except Exception:  # telemetry must never break the game
     telemetry = None
 
 
-# How far the player can see in tiles. Feel free to tweak.
-FOV_RADIUS_TILES = 10
-
+from settings import FOV_RADIUS_TILES
 
 class GameMode:
     OVERWORLD = "overworld"
@@ -71,6 +74,182 @@ class Game:
     - "exploration": dungeon movement, floors, enemies on the map
     - "battle": zoomed turn-based fight handled by BattleScene
     """
+    
+    @property
+    def floor(self) -> int:
+        """Current floor number (convenience property for FloorManager)."""
+        return self.floor_manager.floor
+    
+    @floor.setter
+    def floor(self, value: int) -> None:
+        """Set current floor number."""
+        self.floor_manager.floor = value
+    
+    @property
+    def floors(self) -> dict[int, GameMap]:
+        """Dictionary of generated floors (convenience property for FloorManager)."""
+        return self.floor_manager.floors
+    
+    @property
+    def awaiting_floor_start(self) -> bool:
+        """Whether we're waiting for the player to make the first move on a floor."""
+        return self.floor_manager.awaiting_floor_start
+    
+    @awaiting_floor_start.setter
+    def awaiting_floor_start(self, value: bool) -> None:
+        """Set whether we're awaiting floor start."""
+        self.floor_manager.awaiting_floor_start = value
+    
+    @property
+    def camera_x(self) -> float:
+        """Camera X position (convenience property for CameraManager)."""
+        return self.camera_manager.camera_x
+    
+    @camera_x.setter
+    def camera_x(self, value: float) -> None:
+        """Set camera X position."""
+        self.camera_manager.camera_x = value
+    
+    @property
+    def camera_y(self) -> float:
+        """Camera Y position (convenience property for CameraManager)."""
+        return self.camera_manager.camera_y
+    
+    @camera_y.setter
+    def camera_y(self, value: float) -> None:
+        """Set camera Y position."""
+        self.camera_manager.camera_y = value
+    
+    @property
+    def zoom_levels(self) -> List[float]:
+        """Zoom levels for exploration camera (convenience property)."""
+        return self.camera_manager.zoom_levels
+    
+    @property
+    def zoom_index(self) -> int:
+        """Current zoom level index (convenience property)."""
+        return self.camera_manager.zoom_index
+    
+    @zoom_index.setter
+    def zoom_index(self, value: int) -> None:
+        """Set current zoom level index."""
+        self.camera_manager.zoom_index = value
+    
+    @property
+    def overworld_zoom_levels(self) -> List[float]:
+        """Zoom levels for overworld camera (convenience property)."""
+        return self.camera_manager.overworld_zoom_levels
+    
+    @property
+    def overworld_zoom_index(self) -> int:
+        """Current overworld zoom level index (convenience property)."""
+        return self.camera_manager.overworld_zoom_index
+    
+    @overworld_zoom_index.setter
+    def overworld_zoom_index(self, value: int) -> None:
+        """Set current overworld zoom level index."""
+        self.camera_manager.overworld_zoom_index = value
+    
+    # UI Screen Manager properties (for backward compatibility)
+    @property
+    def show_inventory(self) -> bool:
+        """Whether inventory overlay is visible."""
+        return self.ui_screen_manager.show_inventory
+    
+    @show_inventory.setter
+    def show_inventory(self, value: bool) -> None:
+        """Set inventory overlay visibility."""
+        self.ui_screen_manager.show_inventory = value
+    
+    @property
+    def show_character_sheet(self) -> bool:
+        """Whether character sheet overlay is visible."""
+        return self.ui_screen_manager.show_character_sheet
+    
+    @show_character_sheet.setter
+    def show_character_sheet(self, value: bool) -> None:
+        """Set character sheet overlay visibility."""
+        self.ui_screen_manager.show_character_sheet = value
+    
+    @property
+    def show_skill_screen(self) -> bool:
+        """Whether skill screen overlay is visible."""
+        return self.ui_screen_manager.show_skill_screen
+    
+    @show_skill_screen.setter
+    def show_skill_screen(self, value: bool) -> None:
+        """Set skill screen overlay visibility."""
+        self.ui_screen_manager.show_skill_screen = value
+    
+    @property
+    def show_battle_log(self) -> bool:
+        """Whether battle log overlay is visible."""
+        return self.ui_screen_manager.show_battle_log
+    
+    @show_battle_log.setter
+    def show_battle_log(self, value: bool) -> None:
+        """Set battle log overlay visibility."""
+        self.ui_screen_manager.show_battle_log = value
+    
+    @property
+    def show_exploration_log(self) -> bool:
+        """Whether exploration log overlay is visible."""
+        return self.ui_screen_manager.show_exploration_log
+    
+    @show_exploration_log.setter
+    def show_exploration_log(self, value: bool) -> None:
+        """Set exploration log overlay visibility."""
+        self.ui_screen_manager.show_exploration_log = value
+    
+    @property
+    def character_sheet_focus_index(self) -> int:
+        """Index of character focused in character sheet (0=hero, 1+=companions)."""
+        return self.ui_screen_manager.character_sheet_focus_index
+    
+    @character_sheet_focus_index.setter
+    def character_sheet_focus_index(self, value: int) -> None:
+        """Set character sheet focus index."""
+        self.ui_screen_manager.character_sheet_focus_index = value
+    
+    @property
+    def inventory_focus_index(self) -> int:
+        """Index of character focused in inventory (0=hero, 1+=companions)."""
+        return self.ui_screen_manager.inventory_focus_index
+    
+    @inventory_focus_index.setter
+    def inventory_focus_index(self, value: int) -> None:
+        """Set inventory focus index."""
+        self.ui_screen_manager.inventory_focus_index = value
+    
+    @property
+    def skill_screen_focus_index(self) -> int:
+        """Focus index for skill screen."""
+        return self.ui_screen_manager.skill_screen_focus_index
+    
+    @skill_screen_focus_index.setter
+    def skill_screen_focus_index(self, value: int) -> None:
+        """Set skill screen focus index."""
+        self.ui_screen_manager.skill_screen_focus_index = value
+    
+    @property
+    def inventory_scroll_offset(self) -> int:
+        """Scroll offset for inventory list."""
+        return self.ui_screen_manager.inventory_scroll_offset
+    
+    @inventory_scroll_offset.setter
+    def inventory_scroll_offset(self, value: int) -> None:
+        """Set inventory scroll offset."""
+        self.ui_screen_manager.inventory_scroll_offset = value
+    
+    @property
+    def inventory_cursor(self) -> int:
+        """Cursor position for item selection in inventory."""
+        return self.ui_screen_manager.inventory_cursor
+    
+    @inventory_cursor.setter
+    def inventory_cursor(self, value: int) -> None:
+        """Set inventory cursor position."""
+        self.ui_screen_manager.inventory_cursor = value
 
     def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior", overworld_config: Optional["OverworldConfig"] = None) -> None:
         self.screen = screen
@@ -85,7 +264,7 @@ class Game:
 
         # Inventory & equipment (also set in _init_hero_for_class)
         self.inventory: Inventory = Inventory()
-        self.show_inventory: bool = False
+        # Note: show_inventory managed by ui_screen_manager (see property below)
 
         # Consumable items live in the same inventory list but have slot
         # "consumable". All gameplay effects are driven by systems.consumables.
@@ -93,15 +272,12 @@ class Game:
         # Party / companions: runtime CompanionState objects
         self.party: List[CompanionState] = []
 
-        # Floor index (current dungeon depth)
-        self.floor: int = 1
+        # Floor management
+        self.floor_manager = FloorManager(starting_floor=1)
 
         # Active map and player
         self.current_map: Optional[GameMap] = None
         self.player: Optional[Player] = None
-
-        # Store generated floors so layouts/enemies persist
-        self.floors: dict[int, GameMap] = {}
 
         # UI scaling - calculate based on screen size
         screen_w, screen_h = self.screen.get_size()
@@ -113,27 +289,16 @@ class Game:
 
         # --- Last battle log (for viewing in exploration) ---
         self.last_battle_log: List[str] = []
-        self.show_battle_log: bool = False
-
-        # --- Character sheet overlay ---
-        self.show_character_sheet: bool = False
-
-        # --- Skill screen overlay ---
-        self.show_skill_screen: bool = False
-        self.skill_screen_focus_index: int = 0
-
-        # Which character the sheet is currently focusing:
-        # 0 = hero, 1..N = companions in self.party order.
-        self.character_sheet_focus_index: int = 0
-
-        # Which character the inventory overlay is currently focusing:
-        # 0 = hero, 1..N = companions in self.party order.
-        self.inventory_focus_index: int = 0
+        # Note: UI state managed by ui_screen_manager (see properties below)
+        
+        # --- Recruitment screen overlay ---
+        self.show_recruitment: bool = False
+        self.recruitment_cursor: int = 0
+        self.available_companions: list = []
 
         # Inventory list paging / scrolling
         self.inventory_page_size: int = 20  # More items visible in fullscreen
-        self.inventory_scroll_offset: int = 0
-        self.inventory_cursor: int = 0  # Cursor position for item selection
+        # Note: inventory_scroll_offset, inventory_cursor managed by ui_screen_manager
         
         # Inventory enhancements: filtering, sorting, search
         from ui.inventory_enhancements import FilterMode, SortMode
@@ -153,15 +318,16 @@ class Game:
             print(f"Warning: Sprite system initialization failed: {e}")
             print("Falling back to color-based rendering.")
 
-        # --- Exploration log overlay (multi-line message history) ---
-        self.show_exploration_log: bool = False
+        # Note: show_exploration_log managed by ui_screen_manager (see property below)
 
-        # Inventory / character sheet / shop / skill screen overlays as screen objects.
+        # Inventory / character sheet / shop / skill screen / recruitment overlays as screen objects.
         self.inventory_screen = InventoryScreen()
         self.character_sheet_screen = CharacterSheetScreen()
         self.shop_screen = ShopScreen()
         self.skill_screen = SkillScreenCore(self)
         self.skill_screen_wrapper = SkillScreen()
+        from ui.village.recruitment_screen import RecruitmentScreen
+        self.recruitment_screen = RecruitmentScreen()
 
         # Currently active full-screen UI overlay (if any).
         # Used for perk choices, inventory, character sheet, shop, etc.
@@ -193,33 +359,11 @@ class Game:
         # Floor intro pause: enemies wait until the player makes the first move
         self.awaiting_floor_start: bool = True
 
-        # Camera & zoom (exploration view)
-        # Calculate default zoom based on screen size
-        # More aggressive zoom scaling to make maps fill the screen better
-        resolution_scale = min(screen_w / WINDOW_WIDTH, screen_h / WINDOW_HEIGHT)
-        if resolution_scale > 1.0:
-            # At higher resolutions, scale zoom more aggressively to keep game world visible
-            # Use 0.7 multiplier instead of 0.5 for more zoom
-            default_zoom = min(1.0 + (resolution_scale - 1.0) * 0.7, 3.0)  # Increased cap to 3.0x
-        else:
-            default_zoom = max(resolution_scale, 0.5)
+        # Camera & zoom management
+        self.camera_manager = CameraManager(screen)
         
-        # Set zoom levels around the default (wider range for more zoom options)
-        self.zoom_levels = [
-            default_zoom * 0.7,   # More zoomed out option
-            default_zoom,          # Default
-            default_zoom * 1.4     # More zoomed in option
-        ]
-        self.zoom_index: int = 1  # start at default zoom
-        
-        # Overworld zoom (separate from exploration zoom)
-        # Overworld uses tile-based rendering, so zoom is applied to tile size
-        # Base tile size for overworld is 16 pixels
-        self.overworld_zoom_levels = [0.5, 0.75, 1.0, 1.25, 1.5]  # 50% to 150% zoom
-        self.overworld_zoom_index: int = 1  # Start at 75% (0.75) - default
-        
-        self.camera_x: float = 0.0
-        self.camera_y: float = 0.0
+        # UI screen and overlay management
+        self.ui_screen_manager = UIScreenManager()
 
         # Debug flags
         self.debug_reveal_map: bool = False
@@ -262,10 +406,6 @@ class Game:
         
         # Initialize overworld system (use provided config if available)
         self._init_overworld(overworld_config)
-        
-        # Load initial floor (only if not starting in overworld mode)
-        # For now, we'll load floor 1 when entering a dungeon
-        # self.load_floor(self.floor, from_direction=None)
 
     def _init_starting_consumables(self) -> None:
         """
@@ -404,30 +544,7 @@ class Game:
 
     def toggle_inventory_overlay(self) -> None:
         """Toggle inventory overlay and manage its active screen."""
-        self.show_inventory = not self.show_inventory
-
-        if self.show_inventory:
-            # Inventory takes focus; hide character sheet & logs.
-            self.show_character_sheet = False
-            self.show_battle_log = False
-            if hasattr(self, "show_exploration_log"):
-                self.show_exploration_log = False
-            # When opening the inventory, default focus is the hero and reset scroll.
-            self.inventory_focus_index = 0
-            self.inventory_scroll_offset = 0
-            self.inventory_cursor = 0
-            self.inventory_cursor = 0
-            # Route input to the inventory screen while it's open.
-            if hasattr(self, "inventory_screen"):
-                self.active_screen = self.inventory_screen
-        else:
-            # Closing the inventory: if it owned the focus, clear active_screen.
-            if getattr(self, "active_screen", None) is getattr(self, "inventory_screen", None):
-                self.active_screen = None
-            # Clear tooltip when closing inventory
-            tooltip = getattr(self, "tooltip", None)
-            if tooltip:
-                tooltip.clear()
+        self.ui_screen_manager.toggle_inventory_overlay(self)
 
     def equip_item_for_inventory_focus(self, item_id: str) -> None:
         """
@@ -438,99 +555,11 @@ class Game:
         - Focus index 1..N: companions in self.party order (uses their
           per-companion equipment + stat recomputation).
         """
-        # Ensure we actually have an inventory and the item is known in it.
-        if self.inventory is None:
-            self.last_message = "You are not carrying anything."
-            return
-
-        if item_id not in self.inventory.items:
-            # Being strict here makes it easier to debug item flow.
-            self.last_message = "You do not own that item."
-            return
-
-        focus_index = int(getattr(self, "inventory_focus_index", 0))
-        party_list = getattr(self, "party", None) or []
-
-        # If focus is 0 or there are no companions, fall back to hero equip.
-        if focus_index <= 0 or not party_list:
-            msg = self.inventory.equip(item_id)
-            self.last_message = msg
-            # Re-apply hero stats so the new gear takes effect.
-            if self.player is not None:
-                apply_hero_stats_to_player(self, full_heal=False)
-            return
-
-        comp_idx = focus_index - 1
-        if comp_idx < 0 or comp_idx >= len(party_list):
-            # Defensive fallback: just treat as hero equip.
-            msg = self.inventory.equip(item_id)
-            self.last_message = msg
-            if self.player is not None:
-                apply_hero_stats_to_player(self, full_heal=False)
-            return
-
-        comp_state = party_list[comp_idx]
-        if not isinstance(comp_state, CompanionState):
-            # Shouldn't happen, but don't crash the game if it does.
-            msg = self.inventory.equip(item_id)
-            self.last_message = msg
-            if self.player is not None:
-                apply_hero_stats_to_player(self, full_heal=False)
-            return
-
-        # Lazy-init equipped map if needed.
-        if not hasattr(comp_state, "equipped") or comp_state.equipped is None:
-            comp_state.equipped = {
-                "weapon": None,
-                "armor": None,
-                "trinket": None,
-            }
-
-        item_def = get_item_def(item_id)
-        if item_def is None:
-            self.last_message = "That item cannot be equipped."
-            return
-
-        slot = getattr(item_def, "slot", None)
-        if not slot:
-            self.last_message = f"{item_def.name} cannot be equipped."
-            return
-
-        # For now we only support the same core slots as the hero.
-        if slot not in ("weapon", "armor", "trinket"):
-            self.last_message = f"{item_def.name} cannot be equipped by companions."
-            return
-
-        old_item_id = comp_state.equipped.get(slot)
-        comp_state.equipped[slot] = item_id
-
-        # Recalculate this companion's stats with the new gear.
-        template_id = getattr(comp_state, "template_id", None)
-        comp_template = None
-        if template_id:
-            try:
-                comp_template = get_companion(template_id)
-            except KeyError:
-                comp_template = None
-
-        if comp_template is not None:
-            recalc_companion_stats_for_level(comp_state, comp_template)
-
-        # Build a nice message.
-        # Name priority: explicit override -> template name -> generic label.
-        display_name = getattr(comp_state, "name_override", None)
-        if not display_name and comp_template is not None:
-            display_name = comp_template.name
-        if not display_name:
-            display_name = "Companion"
-
-        if old_item_id and old_item_id != item_id:
-            old_def = get_item_def(old_item_id)
-            if old_def is not None:
-                self.last_message = f"{display_name} swaps {old_def.name} for {item_def.name}."
-                return
-
-        self.last_message = f"{display_name} equips {item_def.name}."
+        self.last_message = EquipmentManager.equip_item_for_character(
+            game=self,
+            item_id=item_id,
+            focus_index=self.inventory_focus_index,
+        )
 
     def use_consumable_from_inventory(self, item_id: str) -> None:
         """
@@ -596,183 +625,43 @@ class Game:
 
     def get_available_screens(self) -> List[str]:
         """Get list of available screen names (shop only if vendor nearby)."""
-        screens = ["inventory", "character", "skills"]
-        if getattr(self, "show_shop", False):
-            screens.append("shop")
-        return screens
+        return self.ui_screen_manager.get_available_screens(self)
     
     def switch_to_screen(self, screen_name: str) -> None:
         """Switch to a different full-screen UI."""
-        # Close all screen flags
-        self.show_inventory = False
-        self.show_character_sheet = False
-        self.show_skill_screen = False
-        self.show_battle_log = False
-        if hasattr(self, "show_exploration_log"):
-            self.show_exploration_log = False
-        
-        # Open the requested screen
-        if screen_name == "inventory":
-            self.show_inventory = True
-            self.inventory_focus_index = 0
-            self.inventory_scroll_offset = 0
-            self.active_screen = self.inventory_screen
-        elif screen_name == "character":
-            self.show_character_sheet = True
-            self.character_sheet_focus_index = 0
-            self.active_screen = self.character_sheet_screen
-        elif screen_name == "skills":
-            self.show_skill_screen = True
-            self.skill_screen_focus_index = 0
-            if hasattr(self.skill_screen, "focus_index"):
-                self.skill_screen.focus_index = 0
-            if hasattr(self.skill_screen, "reset_selection"):
-                self.skill_screen.reset_selection()
-            self.active_screen = self.skill_screen_wrapper
-        elif screen_name == "shop" and getattr(self, "show_shop", False):
-            # Shop is already open (show_shop is True), just set active screen
-            self.active_screen = self.shop_screen
-        else:
-            # Invalid screen, clear active
-            self.active_screen = None
+        self.ui_screen_manager.switch_to_screen(self, screen_name)
     
     def cycle_to_next_screen(self, direction: int = 1) -> None:
         """Cycle to next/previous available screen. direction: 1 for next, -1 for previous."""
-        available = self.get_available_screens()
-        if not available:
-            return
-        
-        # Determine current screen
-        current = None
-        if self.show_inventory:
-            current = "inventory"
-        elif self.show_character_sheet:
-            current = "character"
-        elif self.show_skill_screen:
-            current = "skills"
-        elif getattr(self, "show_shop", False) and getattr(self, "active_screen", None) is self.shop_screen:
-            current = "shop"
-        
-        if current is None:
-            # No screen open, open first available
-            self.switch_to_screen(available[0])
-            return
-        
-        # Find current index and cycle
-        try:
-            current_idx = available.index(current)
-            next_idx = (current_idx + direction) % len(available)
-            self.switch_to_screen(available[next_idx])
-        except ValueError:
-            # Current screen not in available list, open first
-            self.switch_to_screen(available[0])
+        self.ui_screen_manager.cycle_to_next_screen(self, direction)
 
     def toggle_character_sheet_overlay(self) -> None:
         """Toggle character sheet overlay and manage its active screen."""
-        self.show_character_sheet = not self.show_character_sheet
-
-        if self.show_character_sheet:
-            # Whenever we open the sheet, default focus back to the hero.
-            self.character_sheet_focus_index = 0
-            self.show_battle_log = False
-            if hasattr(self, "show_exploration_log"):
-                self.show_exploration_log = False
-            # Route input to the character sheet screen while it's open.
-            if hasattr(self, "character_sheet_screen"):
-                self.active_screen = self.character_sheet_screen
-        else:
-            # Closing the sheet: if it owned the focus, clear active_screen.
-            if getattr(self, "active_screen", None) is getattr(self, "character_sheet_screen", None):
-                self.active_screen = None
+        self.ui_screen_manager.toggle_character_sheet_overlay(self)
 
     def toggle_skill_screen(self) -> None:
         """Toggle skill screen overlay and manage its active screen."""
-        if self.show_skill_screen:
-            # Closing the skill screen
-            self.show_skill_screen = False
-            if getattr(self, "active_screen", None) is self.skill_screen_wrapper:
-                self.active_screen = None
-        else:
-            # Opening the skill screen - use switch_to_screen for consistency
-            self.switch_to_screen("skills")
+        self.ui_screen_manager.toggle_skill_screen(self)
 
     def toggle_battle_log_overlay(self) -> None:
-        """
-        Toggle last battle log overlay ONLY if we actually have one.
-        If there is no log, keep it off.
-        """
-        if not self.last_battle_log:
-            self.show_battle_log = False
-            return
-        self.show_battle_log = not self.show_battle_log
-        if self.show_battle_log and hasattr(self, "show_exploration_log"):
-            # Don't stack both log overlays at once
-            self.show_exploration_log = False
+        """Toggle last battle log overlay ONLY if we actually have one."""
+        self.ui_screen_manager.toggle_battle_log_overlay(self)
 
     def toggle_exploration_log_overlay(self) -> None:
-        """
-        Toggle the exploration log overlay showing recent messages
-        in exploration mode.
-        """
-        if not hasattr(self, "show_exploration_log"):
-            self.show_exploration_log = False
-
-        self.show_exploration_log = not self.show_exploration_log
-        if self.show_exploration_log:
-            # Hide battle log when opening exploration log
-            self.show_battle_log = False
+        """Toggle the exploration log overlay showing recent messages in exploration mode."""
+        self.ui_screen_manager.toggle_exploration_log_overlay(self)
 
     def is_overlay_open(self) -> bool:
-        """
-        Return True if a major overlay (inventory, character sheet, skill screen) is open.
-        Used to pause exploration updates.
-        """
-        return self.show_inventory or self.show_character_sheet or self.show_skill_screen
+        """Return True if a major overlay (inventory, character sheet, skill screen) is open."""
+        return self.ui_screen_manager.is_overlay_open()
 
     def cycle_character_sheet_focus(self, direction: int) -> None:
-        """
-        Cycle which character the character sheet is focusing on.
-
-        0 = hero, 1..N = companions in self.party order.
-        direction: +1 (next) or -1 (previous).
-        """
-        if not hasattr(self, "character_sheet_focus_index"):
-            self.character_sheet_focus_index = 0
-
-        party_list = getattr(self, "party", None) or []
-        total_slots = 1 + len(party_list)  # hero + companions
-        if total_slots <= 1:
-            # Only the hero exists
-            self.character_sheet_focus_index = 0
-            return
-
-        cur = int(getattr(self, "character_sheet_focus_index", 0))
-        cur = cur % total_slots
-
-        direction = 1 if direction > 0 else -1
-        new_index = (cur + direction) % total_slots
-        self.character_sheet_focus_index = new_index
+        """Cycle which character the character sheet is focusing on."""
+        self.ui_screen_manager.cycle_character_sheet_focus(self, direction)
 
     def cycle_inventory_focus(self, direction: int) -> None:
-        """
-        Cycle which character the inventory overlay is focusing on.
-
-        0 = hero, 1..N = companions in self.party order.
-        """
-        # Make sure the index exists.
-        if not hasattr(self, "inventory_focus_index"):
-            self.inventory_focus_index = 0
-
-        party_list = getattr(self, "party", None) or []
-        total_slots = 1 + len(party_list)
-        if total_slots <= 1:
-            self.inventory_focus_index = 0
-            return
-
-        current = int(getattr(self, "inventory_focus_index", 0)) % total_slots
-        # Normalise direction to -1 / +1 so weird values still work.
-        step = -1 if direction < 0 else 1
-        self.inventory_focus_index = (current + step) % total_slots
+        """Cycle which character the inventory overlay is focusing on."""
+        self.ui_screen_manager.cycle_inventory_focus(self, direction)
 
     # ------------------------------------------------------------------
     # Message log helpers (exploration history)
@@ -846,26 +735,11 @@ class Game:
 
     def update_fov(self) -> None:
         """Recompute the map's FOV around the player."""
-        if self.current_map is None:
-            return
-
-        # Debug: reveal entire map if enabled
-        if getattr(self, "debug_reveal_map", False):
-            all_coords = {
-                (x, y)
-                for y in range(self.current_map.height)
-                for x in range(self.current_map.width)
-            }
-            self.current_map.visible = set(all_coords)
-            self.current_map.explored = set(all_coords)
-            return
-
-        if self.player is None:
-            return
-
-        px, py = self.player.rect.center
-        tx, ty = self.current_map.world_to_tile(px, py)
-        self.current_map.compute_fov(tx, ty, radius=FOV_RADIUS_TILES)
+        self.camera_manager.update_fov(
+            player=self.player,
+            current_map=self.current_map,
+            debug_reveal_map=getattr(self, "debug_reveal_map", False),
+        )
 
     # ------------------------------------------------------------------
     # Camera / zoom helpers
@@ -874,60 +748,20 @@ class Game:
     @property
     def zoom(self) -> float:
         """Current zoom scale for the exploration camera."""
-        levels = getattr(self, "zoom_levels", None)
-        if not levels:
-            return 1.0
-        idx = max(0, min(self.zoom_index, len(levels) - 1))
-        return float(levels[idx])
+        return self.camera_manager.zoom
     
     @property
     def overworld_zoom(self) -> float:
         """Current zoom scale for the overworld map."""
-        levels = getattr(self, "overworld_zoom_levels", [1.0])
-        idx = getattr(self, "overworld_zoom_index", 2)
-        if not levels:
-            return 1.0
-        idx = max(0, min(idx, len(levels) - 1))
-        return float(levels[idx])
-
+        return self.camera_manager.overworld_zoom
+    
     def _center_camera_on_player(self) -> None:
         """Center the camera around the player in world space before clamping."""
-        if self.player is None or self.current_map is None:
-            return
-
-        zoom = self.zoom
-        if zoom <= 0:
-            zoom = 1.0
-
-        screen_w, screen_h = self.screen.get_size()
-        view_w = screen_w / zoom
-        view_h = screen_h / zoom
-
-        px, py = self.player.rect.center
-        self.camera_x = px - view_w / 2
-        self.camera_y = py - view_h / 2
+        self.camera_manager.center_camera_on_player(self.player, self.current_map)
 
     def _clamp_camera_to_map(self) -> None:
         """Clamp the camera so it never shows outside the current map."""
-        if self.current_map is None:
-            return
-
-        zoom = self.zoom
-        if zoom <= 0:
-            zoom = 1.0
-
-        screen_w, screen_h = self.screen.get_size()
-        view_w = screen_w / zoom
-        view_h = screen_h / zoom
-
-        world_w = self.current_map.width * TILE_SIZE
-        world_h = self.current_map.height * TILE_SIZE
-
-        max_x = max(0.0, world_w - view_w)
-        max_y = max(0.0, world_h - view_h)
-
-        self.camera_x = max(0.0, min(self.camera_x, max_x))
-        self.camera_y = max(0.0, min(self.camera_y, max_y))
+        self.camera_manager.clamp_camera_to_map(self.current_map)
 
     def toggle_fullscreen(self) -> None:
         """
@@ -979,24 +813,8 @@ class Game:
         player_width = 24
         player_height = 24
 
-        # Try to reuse an existing GameMap instance for this floor
-        game_map = self.floors.get(floor_index)
-        newly_created = False
-
-        if game_map is None:
-            # Generate raw tiles + stair positions + high-level rooms
-            tiles, up_tx, up_ty, down_tx, down_ty, rooms = generate_floor(floor_index)
-
-            # Wrap them in a GameMap object
-            game_map = GameMap(
-                tiles,
-                up_stairs=(up_tx, up_ty),
-                down_stairs=(down_tx, down_ty),
-                entities=None,
-                rooms=rooms,
-            )
-            self.floors[floor_index] = game_map
-            newly_created = True
+        # Get or generate the floor using FloorManager
+        game_map, newly_created = self.floor_manager.get_or_generate_floor(floor_index)
 
         # From now on self.current_map is a GameMap, not a tuple
         self.current_map = game_map
@@ -1005,39 +823,10 @@ class Game:
         if newly_created:
             spawn_all_entities_for_floor(self, game_map, floor_index)
 
-        # Decide spawn position based on stair direction
-        if from_direction == "down" and game_map.up_stairs is not None:
-            spawn_x, spawn_y = game_map.center_entity_on_tile(
-                game_map.up_stairs[0],
-                game_map.up_stairs[1],
-                player_width,
-                player_height,
-            )
-        elif from_direction == "up" and game_map.down_stairs is not None:
-            spawn_x, spawn_y = game_map.center_entity_on_tile(
-                game_map.down_stairs[0],
-                game_map.down_stairs[1],
-                player_width,
-                player_height,
-            )
-        else:
-            # Starting game or fallback: up stairs if they exist, else center
-            if game_map.up_stairs is not None:
-                spawn_x, spawn_y = game_map.center_entity_on_tile(
-                    game_map.up_stairs[0],
-                    game_map.up_stairs[1],
-                    player_width,
-                    player_height,
-                )
-            else:
-                center_tx = game_map.width // 2
-                center_ty = game_map.height // 2
-                spawn_x, spawn_y = game_map.center_entity_on_tile(
-                    center_tx,
-                    center_ty,
-                    player_width,
-                    player_height,
-                )
+        # Calculate spawn position using FloorManager
+        spawn_x, spawn_y = self.floor_manager.calculate_spawn_position(
+            game_map, from_direction, player_width, player_height
+        )
 
         # (Re)create the Player on this floor
         self.player = Player(
@@ -1110,7 +899,8 @@ class Game:
                     self.confirmation_action = lambda: self._return_to_overworld_from_dungeon()
                     return
 
-        new_floor = self.floor + delta
+        # Calculate new floor using FloorManager
+        new_floor = self.floor_manager.change_floor(delta)
         if new_floor <= 0:
             self.last_message = "You cannot go any higher."
             return
@@ -1152,55 +942,34 @@ class Game:
         self.show_battle_log = False
         self.show_character_sheet = False
 
-        # 1) Build encounter group around the player
-        group: List[Enemy] = []
+        # Build encounter group using BattleOrchestrator
+        encounter_enemies = BattleOrchestrator.build_encounter_group(
+            trigger_enemy=enemy,
+            game_map=self.current_map,
+            player=self.player,
+            max_group_size=6,
+            radius=TILE_SIZE * 5,
+        )
 
-        # Always include the enemy that triggered the battle
-        if enemy in self.current_map.entities:
-            group.append(enemy)
-
-        # Add other nearby enemies within a radius
-        radius = TILE_SIZE * 5
-        px, py = self.player.rect.center
-
-        for entity in list(self.current_map.entities):
-            if not isinstance(entity, Enemy):
-                continue
-            if entity is enemy:
-                continue
-            ex, ey = entity.rect.center
-            dx = ex - px
-            dy = ey - py
-            if dx * dx + dy * dy <= radius * radius:
-                group.append(entity)
-
-        # Limit how many can join a single battle (for sanity)
-        max_group_size = 6
-        encounter_enemies = group[:max_group_size]
-
-        # 2) Remove all encounter enemies from the map so they can't be re-used
+        # Remove all encounter enemies from the map so they can't be re-used
         for e in encounter_enemies:
             try:
                 self.current_map.entities.remove(e)
             except ValueError:
                 pass
 
-        # 3) Remember XP for this encounter (sum of all enemies in the group)
-        xp_total = 0
-        for e in encounter_enemies:
-            xp_total += int(getattr(e, "xp_reward", 5))
-        self.pending_battle_xp = xp_total
+        # Calculate XP for this encounter using BattleOrchestrator
+        self.pending_battle_xp = BattleOrchestrator.calculate_encounter_xp(encounter_enemies)
 
         if telemetry is not None:
             telemetry.log(
                 "battle_start",
                 floor=getattr(self, "floor", None),
                 enemy_count=len(encounter_enemies),
-                xp_total=int(xp_total),
+                xp_total=int(self.pending_battle_xp),
             )
 
-
-        # 4) Create battle scene with the entire group + current party.
+        # Create battle scene with the entire group + current party.
         # Pass runtime CompanionState objects directly; BattleScene knows how
         # to use their own stats (HP / ATK / DEF / skill_power).
         party_list = getattr(self, "party", None) or []
@@ -1256,42 +1025,11 @@ class Game:
         Roll gold and items after a battle.
         Returns a list of message strings describing rewards.
         """
-        messages: List[str] = []
-
-        # --- Gold pouch ---
-        # Enemies on deeper floors give more gold
-        base_min_gold = 3 + self.floor
-        base_max_gold = 6 + self.floor * 2
-
-        gold_amount = random.randint(base_min_gold, base_max_gold)
-        if hasattr(self.hero_stats, "add_gold"):
-            gained_gold = self.hero_stats.add_gold(gold_amount)
-        else:
-            gained_gold = gold_amount
-
-        if gained_gold > 0:
-            messages.append(f"You pick up a pouch of {gained_gold} gold.")
-
-        # --- Item drop ---
-        # Roll for item loot (25-50% chance based on floor)
-        if self.inventory is not None:
-            item_id = roll_battle_loot(self.floor)
-            if item_id is not None:
-                # Add item to inventory (with randomization enabled)
-                self.inventory.add_item(item_id, randomized=True)
-                # Store floor index for randomization context
-                if not hasattr(self.inventory, "_current_floor"):
-                    self.inventory._current_floor = self.floor
-                else:
-                    self.inventory._current_floor = self.floor
-                
-                # Get item name for message
-                from systems.inventory import get_item_def
-                item_def = get_item_def(item_id)
-                item_name = item_def.name if item_def is not None else item_id
-                messages.append(f"You find {item_name} among the remains.")
-
-        return messages
+        return BattleOrchestrator.calculate_battle_rewards(
+            floor=self.floor,
+            hero_stats=self.hero_stats,
+            inventory=self.inventory,
+        )
 
     def _check_battle_finished(self) -> None:
         """
