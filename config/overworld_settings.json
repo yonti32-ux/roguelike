@@ -1,0 +1,42 @@
+{
+  "world": {
+    "width": 256,
+    "height": 256,
+    "region_size": 64,
+    "seed": null
+  },
+  "poi": {
+    "density": 0.1,
+    "min_distance": 8,
+    "distribution": {
+      "dungeon": 0.4,
+      "village": 0.3,
+      "town": 0.15,
+      "camp": 0.15
+    }
+  },
+  "difficulty": {
+    "scaling_type": "distance",
+    "base_level": 1,
+    "max_level": 20,
+    "level_per_distance": 0.5
+  },
+  "time": {
+    "movement_cost_base": 1.0,
+    "terrain_costs": {
+      "grass": 1.0,
+      "forest": 1.5,
+      "mountain": 2.0,
+      "water": 999.0
+    }
+  },
+  "starting_location": {
+    "x": null,
+    "y": null,
+    "type": "random"
+  },
+  "sight": {
+    "radius": 8
+  }
+}
+

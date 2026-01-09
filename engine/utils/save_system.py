@@ -165,9 +165,33 @@ def _serialize_game(game) -> Dict[str, Any]:
     # Consumables are stored as regular inventory items with slot==\"consumable\",
     # so they are already covered by the inventory serializer. No extra section
     # is required here for Phase 1.
+    
+    # Serialize overworld
+    overworld_data = None
+    if hasattr(game, "overworld_map") and game.overworld_map is not None:
+        overworld_data = _serialize_overworld(game.overworld_map)
+    
+    # Serialize POIs
+    pois_data = {}
+    if hasattr(game, "overworld_map") and game.overworld_map is not None:
+        pois_data = _serialize_pois(game.overworld_map)
+    
+    # Serialize time system
+    time_data = None
+    if hasattr(game, "time_system") and game.time_system is not None:
+        time_data = {
+            "days": game.time_system.days,
+            "hours": game.time_system.hours,
+            "minutes": game.time_system.minutes,
+        }
+    
+    # Current POI reference
+    current_poi_id = None
+    if hasattr(game, "current_poi") and game.current_poi is not None:
+        current_poi_id = game.current_poi.poi_id
 
     return {
-        "version": "1.0",  # Save format version
+        "version": "1.1",  # Save format version (bumped for overworld support)
         "floor": current_floor_num,
         "hero_stats": hero_stats_dict,
         "inventory": inventory_dict,
@@ -176,6 +200,10 @@ def _serialize_game(game) -> Dict[str, Any]:
         "player": player_data,
         "message_log": message_log_data,
         "camera": camera_data,
+        "overworld": overworld_data,
+        "pois": pois_data,
+        "time": time_data,
+        "current_poi": current_poi_id,
     }
 
 
@@ -288,6 +316,56 @@ def _serialize_map(game_map: GameMap) -> Dict[str, Any]:
     }
 
 
+def _serialize_overworld(overworld_map) -> Dict[str, Any]:
+    """Serialize OverworldMap to dict."""
+    # Serialize terrain tiles
+    tiles_data = []
+    for row in overworld_map.tiles:
+        row_data = []
+        for tile in row:
+            # Store terrain ID
+            row_data.append(tile.id if hasattr(tile, "id") else "grass")
+        tiles_data.append(row_data)
+    
+    # Serialize explored tiles
+    explored_list = [list(coord) for coord in overworld_map.explored_tiles]
+    
+    return {
+        "width": overworld_map.width,
+        "height": overworld_map.height,
+        "seed": overworld_map.seed,
+        "tiles": tiles_data,
+        "player_position": list(overworld_map.player_position),
+        "explored_tiles": explored_list,
+    }
+
+
+def _serialize_pois(overworld_map) -> Dict[str, Any]:
+    """Serialize all POIs to dict."""
+    pois_data = {}
+    
+    for poi in overworld_map.get_all_pois():
+        poi_data = {
+            "poi_id": poi.poi_id,
+            "poi_type": poi.poi_type,
+            "position": list(poi.position),
+            "level": poi.level,
+            "name": poi.name,
+            "discovered": poi.discovered,
+            "cleared": poi.cleared,
+            "state": poi.state,
+        }
+        
+        # Add type-specific data
+        if poi.poi_type == "dungeon" and hasattr(poi, "floor_count"):
+            poi_data["floor_count"] = poi.floor_count
+            poi_data["cleared_floors"] = list(poi.cleared_floors)
+        
+        pois_data[poi.poi_id] = poi_data
+    
+    return pois_data
+
+
 # -----------------------------------------------------------------------------
 # Deserialization helpers
 # -----------------------------------------------------------------------------
@@ -371,6 +449,38 @@ def _deserialize_game(screen, save_data: Dict[str, Any]) -> Any:
             recalc_companion_stats_for_level(companion, template)
         except KeyError:
             pass
+    
+    # Restore overworld
+    if "overworld" in save_data and save_data["overworld"] is not None:
+        game.overworld_map = _deserialize_overworld(save_data["overworld"])
+    
+    # Restore POIs
+    if "pois" in save_data and game.overworld_map is not None:
+        _deserialize_pois(game.overworld_map, save_data["pois"])
+    
+    # Restore time system
+    if "time" in save_data and save_data["time"] is not None:
+        from world.time import TimeSystem
+        time_data = save_data["time"]
+        game.time_system = TimeSystem(
+            days=time_data.get("days", 0),
+            hours=time_data.get("hours", 0),
+            minutes=time_data.get("minutes", 0),
+        )
+    
+    # Restore current POI reference
+    if "current_poi" in save_data and save_data["current_poi"] is not None:
+        if game.overworld_map is not None:
+            poi_id = save_data["current_poi"]
+            if poi_id in game.overworld_map.pois:
+                game.current_poi = game.overworld_map.pois[poi_id]
+    
+    # Set game mode based on current POI
+    from ..core.game import GameMode
+    if game.current_poi is not None:
+        game.mode = GameMode.EXPLORATION
+    elif game.overworld_map is not None:
+        game.mode = GameMode.OVERWORLD
     
     return game
 
@@ -485,4 +595,75 @@ def _deserialize_map(data: Dict[str, Any]) -> GameMap:
     game_map.visible = visible
     
     return game_map
+
+
+def _deserialize_overworld(data: Dict[str, Any]):
+    """Reconstruct OverworldMap from dict."""
+    from world.overworld.map import OverworldMap
+    from world.overworld.terrain import get_terrain, TERRAIN_GRASS
+    
+    # Reconstruct tiles
+    tiles_data = data.get("tiles", [])
+    tiles = []
+    for row_data in tiles_data:
+        row = []
+        for terrain_id in row_data:
+            terrain = get_terrain(terrain_id)
+            if terrain is None:
+                terrain = TERRAIN_GRASS
+            row.append(terrain)
+        tiles.append(row)
+    
+    # Create map
+    overworld = OverworldMap(
+        width=data.get("width", 512),
+        height=data.get("height", 512),
+        seed=data.get("seed"),
+        tiles=tiles,
+    )
+    
+    # Restore player position
+    player_pos = data.get("player_position", [0, 0])
+    overworld.set_player_position(player_pos[0], player_pos[1])
+    
+    # Restore explored tiles
+    explored_list = data.get("explored_tiles", [])
+    overworld.explored_tiles = {tuple(coord) for coord in explored_list}
+    
+    return overworld
+
+
+def _deserialize_pois(overworld_map, pois_data: Dict[str, Any]) -> None:
+    """Restore POIs to overworld map."""
+    from world.poi.types import DungeonPOI, VillagePOI, TownPOI, CampPOI
+    
+    for poi_id, poi_data in pois_data.items():
+        poi_type = poi_data.get("poi_type", "dungeon")
+        position = tuple(poi_data.get("position", [0, 0]))
+        level = poi_data.get("level", 1)
+        name = poi_data.get("name")
+        
+        # Create appropriate POI type
+        if poi_type == "dungeon":
+            floor_count = poi_data.get("floor_count", 5)
+            poi = DungeonPOI(poi_id, position, level, name, floor_count)
+            cleared_floors = poi_data.get("cleared_floors", [])
+            poi.cleared_floors = set(cleared_floors)
+        elif poi_type == "village":
+            poi = VillagePOI(poi_id, position, level, name)
+        elif poi_type == "town":
+            poi = TownPOI(poi_id, position, level, name)
+        elif poi_type == "camp":
+            poi = CampPOI(poi_id, position, level, name)
+        else:
+            # Default to dungeon
+            poi = DungeonPOI(poi_id, position, level, name)
+        
+        # Restore state
+        poi.discovered = poi_data.get("discovered", False)
+        poi.cleared = poi_data.get("cleared", False)
+        poi.state = poi_data.get("state", {})
+        
+        # Add to map
+        overworld_map.add_poi(poi)
 

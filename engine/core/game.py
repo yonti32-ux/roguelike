@@ -1,8 +1,13 @@
 import random
 import math
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, TYPE_CHECKING
 
 import pygame
+
+if TYPE_CHECKING:
+    from world.overworld.map import OverworldMap
+    from world.poi.base import PointOfInterest
+    from world.time.time_system import TimeSystem
 
 from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
@@ -51,6 +56,7 @@ FOV_RADIUS_TILES = 10
 
 
 class GameMode:
+    OVERWORLD = "overworld"
     EXPLORATION = "exploration"
     BATTLE = "battle"
 
@@ -160,8 +166,13 @@ class Game:
         self.active_screen: Optional[BaseScreen] = None
 
         # Mode handling
-        self.mode: str = GameMode.EXPLORATION
+        self.mode: str = GameMode.OVERWORLD  # Start in overworld mode
         self.battle_scene: Optional[BattleScene] = None
+        
+        # Overworld system
+        self.overworld_map: Optional["OverworldMap"] = None
+        self.current_poi: Optional["PointOfInterest"] = None
+        self.time_system: Optional["TimeSystem"] = None
 
         # XP from the current battle (set when we start it)
         self.pending_battle_xp: int = 0
@@ -231,9 +242,17 @@ class Game:
 
         # Exploration controller (handles map movement & interactions)
         self.exploration = ExplorationController(self)
-
-        # Load initial floor
-        self.load_floor(self.floor, from_direction=None)
+        
+        # Overworld controller (handles overworld movement & interactions)
+        from ..controllers.overworld import OverworldController
+        self.overworld = OverworldController(self)
+        
+        # Initialize overworld system
+        self._init_overworld()
+        
+        # Load initial floor (only if not starting in overworld mode)
+        # For now, we'll load floor 1 when entering a dungeon
+        # self.load_floor(self.floor, from_direction=None)
 
     def _init_starting_consumables(self) -> None:
         """
@@ -253,6 +272,45 @@ class Game:
         for cid in starter_ids:
             # Consumables are not randomized.
             self.inventory.add_item(cid, randomized=False)
+    
+    def _init_overworld(self) -> None:
+        """Initialize the overworld map and time system."""
+        try:
+            print("Initializing overworld system...")
+            from world.overworld import OverworldConfig, WorldGenerator
+            from world.time import TimeSystem
+            
+            # Load overworld configuration
+            print("Loading overworld config...")
+            config = OverworldConfig.load()
+            print(f"Config loaded: {config.world_width}x{config.world_height}, density={config.poi_density}")
+            
+            # Generate overworld
+            print("Generating world...")
+            generator = WorldGenerator(config)
+            self.overworld_map = generator.generate()
+            
+            # Initialize time system
+            self.time_system = TimeSystem()
+            
+            # Discover POIs near starting location (within sight radius)
+            from world.overworld import OverworldConfig
+            config = OverworldConfig.load()
+            start_x, start_y = self.overworld_map.get_player_position()
+            nearby_pois = self.overworld_map.get_pois_in_range(start_x, start_y, radius=config.sight_radius)
+            for poi in nearby_pois:
+                poi.discover()
+            
+            print(f"Overworld initialized! Found {len(nearby_pois)} nearby POIs")
+            
+        except Exception as e:
+            print(f"ERROR initializing overworld: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback: create a minimal overworld or handle error gracefully
+            self.overworld_map = None
+            self.time_system = None
+            print("Overworld initialization failed - game may not work correctly")
 
     # ------------------------------------------------------------------
     # Mode & overlay helpers
@@ -273,6 +331,29 @@ class Game:
         self.active_screen = None
         if telemetry is not None:
             telemetry.log("mode_change", frm=prev, to=self.mode)
+    
+    def enter_overworld_mode(self) -> None:
+        """Switch to overworld mode."""
+        prev = getattr(self, "mode", None)
+        self.mode = GameMode.OVERWORLD
+        self.active_screen = None
+        if telemetry is not None:
+            telemetry.log("mode_change", frm=prev, to=self.mode)
+    
+    def enter_poi(self, poi: "PointOfInterest") -> None:
+        """
+        Enter a Point of Interest.
+        
+        Args:
+            poi: The POI to enter
+        """
+        if poi.can_enter(self):
+            poi.enter(self)
+    
+    def exit_poi(self) -> None:
+        """Exit the current POI and return to overworld."""
+        if self.current_poi is not None:
+            self.current_poi.exit(self)
 
     def run_perk_selection(self, entries: List[tuple[str, Optional[int]]]) -> None:
         """
@@ -1252,7 +1333,9 @@ class Game:
         from ..utils.save_system import save_game, load_game
         
         # Draw current game state first (so it's visible behind pause overlay)
-        if self.mode == GameMode.EXPLORATION:
+        if self.mode == GameMode.OVERWORLD:
+            self.draw_overworld()
+        elif self.mode == GameMode.EXPLORATION:
             self.draw_exploration()
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
@@ -1322,7 +1405,12 @@ class Game:
             mouse_pos = pygame.mouse.get_pos()
             tooltip.update(dt, mouse_pos, tooltip.hover_target)
         
-        if self.mode == GameMode.EXPLORATION:
+        if self.mode == GameMode.OVERWORLD:
+            # Overworld updates
+            if hasattr(self, "overworld"):
+                self.overworld.update(dt)
+        
+        elif self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
                 self.post_battle_grace = max(0.0, self.post_battle_grace - dt)
 
@@ -1428,14 +1516,20 @@ class Game:
                 return  # Event consumed by debug console
         
         # Mode-specific handling.
-        if self.mode == GameMode.EXPLORATION:
+        if self.mode == GameMode.OVERWORLD:
+            # If a modal screen is active, route input to it
+            if getattr(self, "active_screen", None) is not None:
+                self.active_screen.handle_event(self, event)
+            elif hasattr(self, "overworld"):
+                self.overworld.handle_event(event)
+        
+        elif self.mode == GameMode.EXPLORATION:
             # If a modal screen is active (inventory, character sheet, etc.),
             # route input to it instead of the exploration controller.
             if getattr(self, "active_screen", None) is not None:
                 self.active_screen.handle_event(self, event)
             else:
                 self.exploration.handle_event(event)
-
 
         elif self.mode == GameMode.BATTLE:
             # In battle mode, a modal screen (inventory, character sheet, etc.)
@@ -1457,7 +1551,9 @@ class Game:
         full-screen overlay (perk choice, inventory, character sheet, etc.),
         and finally flip the display once.
         """
-        if self.mode == GameMode.EXPLORATION:
+        if self.mode == GameMode.OVERWORLD:
+            self.draw_overworld()
+        elif self.mode == GameMode.EXPLORATION:
             self.draw_exploration()
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
@@ -1524,6 +1620,11 @@ class Game:
         # HUD + overlays
         draw_exploration_ui(self)
 
+    def draw_overworld(self) -> None:
+        """Draw the overworld map."""
+        from ui.overworld import draw_overworld
+        draw_overworld(self)
+    
     def draw_battle(self) -> None:
         if self.battle_scene is None:
             return
