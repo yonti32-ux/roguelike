@@ -109,6 +109,33 @@ class GameMap:
                 return room
         return None
 
+    def get_building_at(self, tile_x: int, tile_y: int):
+        """
+        Return the Building whose interior contains this tile, or None if
+        this tile is not inside any building.
+        Only works for village maps that have village_buildings stored.
+        Includes the entrance tile for better detection.
+        """
+        buildings = getattr(self, "village_buildings", None)
+        if buildings is None:
+            return None
+        
+        for building in buildings:
+            # Check if tile is inside building interior (exclude outer walls)
+            # Building interior starts at x+1, y+1 and ends at x2-1, y2-1
+            is_inside = (building.x + 1 <= tile_x < building.x2 - 1 and 
+                        building.y + 1 <= tile_y < building.y2 - 1)
+            
+            # Also check if we're on the entrance tile (which is on the wall)
+            is_entrance = (building.entrance_x is not None and 
+                          building.entrance_y is not None and
+                          tile_x == building.entrance_x and 
+                          tile_y == building.entrance_y)
+            
+            if is_inside or is_entrance:
+                return building
+        return None
+
     # ------------------------------------------------------------------
     # FOV helpers
     # ------------------------------------------------------------------

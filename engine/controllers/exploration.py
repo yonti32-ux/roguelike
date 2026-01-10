@@ -107,6 +107,16 @@ class ExplorationController:
         if event.key == pygame.K_t:
             game.toggle_skill_screen()
             return
+        
+        # Toggle quest screen (J for Journal/Quests)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_QUEST_SCREEN, event):
+                game.toggle_quest_screen()
+                return
+        else:
+            if event.key == pygame.K_j:
+                game.toggle_quest_screen()
+                return
 
         # Zoom controls (exploration view) – still raw key based for now
         if event.key == pygame.K_z:
@@ -248,8 +258,8 @@ class ExplorationController:
             new_x = game.player.x + move_vector.x
             new_y = game.player.y + move_vector.y
 
-            def _can_player_move_to(x: float, y: float) -> tuple[bool, list[Enemy], list[Merchant]]:
-                """Check if player can move to position, returns (can_move, blocking_enemies, blocking_merchants)."""
+            def _can_player_move_to(x: float, y: float) -> tuple[bool, list[Enemy], list[Merchant], list]:
+                """Check if player can move to position, returns (can_move, blocking_enemies, blocking_merchants, blocking_village_npcs)."""
                 test_rect = pygame.Rect(
                     int(x),
                     int(y),
@@ -277,59 +287,76 @@ class ExplorationController:
                     and m.rect.colliderect(test_rect)
                 ]
 
-                can_move = not blocked_by_tiles and not blocking_enemies and not blocking_merchants
-                return can_move, blocking_enemies, blocking_merchants
+                # Village NPCs block movement in villages
+                blocking_village_npcs = []
+                if VillageNPC is not None:
+                    blocking_village_npcs = [
+                        n
+                        for n in game.current_map.entities
+                        if isinstance(n, VillageNPC)
+                        and getattr(n, "blocks_movement", True)
+                        and n.rect.colliderect(test_rect)
+                    ]
+
+                can_move = not blocked_by_tiles and not blocking_enemies and not blocking_merchants and not blocking_village_npcs
+                return can_move, blocking_enemies, blocking_merchants, blocking_village_npcs
 
             # Try full diagonal movement first
-            can_move, blocking_enemies, blocking_merchants = _can_player_move_to(new_x, new_y)
+            can_move, blocking_enemies, blocking_merchants, blocking_village_npcs = _can_player_move_to(new_x, new_y)
             
             if can_move:
                 game.player.move_to(new_x, new_y)
                 # Check for trap triggers after movement
                 self._check_trap_triggers(game)
+                # Check for building entry/exit and show hints
+                self._check_building_transitions(game)
             elif blocking_enemies:
                 # Blocked by enemies - try sliding to see if we can go around them
                 # Try X-axis movement (horizontal sliding)
-                can_move_x, blocking_enemies_x, blocking_merchants_x = _can_player_move_to(
+                can_move_x, blocking_enemies_x, blocking_merchants_x, blocking_village_npcs_x = _can_player_move_to(
                     game.player.x + move_vector.x, game.player.y
                 )
                 if can_move_x:
                     game.player.move_to(game.player.x + move_vector.x, game.player.y)
                     self._check_trap_triggers(game)
+                    self._check_building_transitions(game)
                 elif blocking_enemies_x and game.post_battle_grace <= 0.0:
                     # Can't slide past enemy on X axis, trigger battle
                     game.start_battle(blocking_enemies_x[0])
                 else:
                     # Try Y-axis movement (vertical sliding)
-                    can_move_y, blocking_enemies_y, blocking_merchants_y = _can_player_move_to(
+                    can_move_y, blocking_enemies_y, blocking_merchants_y, blocking_village_npcs_y = _can_player_move_to(
                         game.player.x, game.player.y + move_vector.y
                     )
                     if can_move_y:
                         game.player.move_to(game.player.x, game.player.y + move_vector.y)
                         self._check_trap_triggers(game)
+                        self._check_building_transitions(game)
                     elif blocking_enemies_y and game.post_battle_grace <= 0.0:
                         # Can't slide past enemy on Y axis either, trigger battle
                         game.start_battle(blocking_enemies_y[0])
                     # If completely blocked and no battle triggered, do nothing
             else:
-                # Blocked by tiles or merchants - try sliding along one axis
+                # Blocked by tiles, merchants, or village NPCs - try sliding along one axis
                 # Try X-axis movement (horizontal sliding)
-                can_move_x, blocking_enemies_x, blocking_merchants_x = _can_player_move_to(
+                can_move_x, blocking_enemies_x, blocking_merchants_x, blocking_village_npcs_x = _can_player_move_to(
                     game.player.x + move_vector.x, game.player.y
                 )
                 if can_move_x:
                     game.player.move_to(game.player.x + move_vector.x, game.player.y)
                     self._check_trap_triggers(game)
+                    self._check_building_transitions(game)
                 elif blocking_enemies_x and game.post_battle_grace <= 0.0:
                     game.start_battle(blocking_enemies_x[0])
                 else:
                     # Try Y-axis movement (vertical sliding)
-                    can_move_y, blocking_enemies_y, blocking_merchants_y = _can_player_move_to(
+                    can_move_y, blocking_enemies_y, blocking_merchants_y, blocking_village_npcs_y = _can_player_move_to(
                         game.player.x, game.player.y + move_vector.y
                     )
                     if can_move_y:
                         game.player.move_to(game.player.x, game.player.y + move_vector.y)
                         self._check_trap_triggers(game)
+                        self._check_building_transitions(game)
                     elif blocking_enemies_y and game.post_battle_grace <= 0.0:
                         game.start_battle(blocking_enemies_y[0])
                     # If completely blocked, do nothing
@@ -719,6 +746,12 @@ class ExplorationController:
             from systems.village.services import open_recruitment
             open_recruitment(game, recruiter_id=getattr(npc, "npc_id", None))
             
+        elif npc_type == "elder":
+            # Open quest screen
+            from systems.village.services import open_quest_screen
+            npc_id = getattr(npc, "npc_id", "elder")
+            open_quest_screen(game, elder_id=npc_id)
+            
         elif npc_type == "villager":
             # Show dialogue (for now, just a message)
             dialogue = getattr(npc, "dialogue", [])
@@ -941,6 +974,41 @@ class ExplorationController:
                 # Player stepped on trap - trigger it
                 self._trigger_trap(entity)
                 break  # Only trigger one trap per movement
+
+    def _check_building_transitions(self, game: "Game") -> None:
+        """
+        Check if player has entered or exited a building and show hints for service buildings.
+        Called after player movement.
+        """
+        if game.current_map is None or game.player is None:
+            return
+
+        # Get current building
+        px, py = game.player.rect.center
+        tile_x, tile_y = game.current_map.world_to_tile(px, py)
+        current_building = game.current_map.get_building_at(tile_x, tile_y)
+
+        # Get previous building from last check
+        last_building = getattr(game, "_last_building_id", None)
+        current_building_id = id(current_building) if current_building is not None else None
+
+        # Only show hint when entering a new building (not when staying in the same one)
+        if current_building_id != last_building and current_building is not None:
+            # Player entered a building - show hint based on building type
+            building_type = getattr(current_building, "building_type", None)
+            
+            if building_type == "shop":
+                game.add_message("You enter a shop. Press E near the merchant to browse their wares.")
+            elif building_type == "inn":
+                game.add_message("You enter an inn. Press E near the innkeeper to rest and recover.")
+            elif building_type == "tavern":
+                game.add_message("You enter a tavern. Press E near the recruiter to find companions.")
+            elif building_type == "town_hall" or building_type == "elder_hall":
+                game.add_message("You enter the town hall. Press E near the elder to view available quests.")
+            # Houses don't need hints as they're just decorative
+
+        # Update last building tracking
+        game._last_building_id = current_building_id
 
     def _trigger_trap(self, trap: Trap) -> None:
         """

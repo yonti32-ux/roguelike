@@ -4,10 +4,11 @@ Base Point of Interest (POI) class.
 All POI types inherit from this base class.
 """
 
-from typing import Dict, Any, Tuple, Optional, TYPE_CHECKING
+from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.core.game import Game
+    from ui.tooltip import TooltipData
 
 
 class PointOfInterest:
@@ -94,6 +95,60 @@ class PointOfInterest:
     def clear(self) -> None:
         """Mark this POI as cleared/completed."""
         self.cleared = True
+    
+    # -------------------------------------------------------------------------
+    # Extensibility methods (optional overrides for subclasses)
+    # -------------------------------------------------------------------------
+    
+    def get_tooltip_lines(self, game: Optional["Game"] = None) -> List[str]:
+        """
+        Get additional tooltip lines specific to this POI type.
+        
+        Override this method in subclasses to provide custom tooltip information.
+        Base implementation returns empty list.
+        
+        Args:
+            game: Optional game instance for context-dependent information
+            
+        Returns:
+            List of strings to append to tooltip
+        """
+        return []
+    
+    def get_display_label(self) -> str:
+        """
+        Get the display label/type name for this POI.
+        
+        Override to provide custom type names. Default uses capitalized poi_type.
+        
+        Returns:
+            Display label string (e.g., "Dungeon", "Village")
+        """
+        return self.poi_type.capitalize()
+    
+    def serialize_state(self) -> Dict[str, Any]:
+        """
+        Serialize POI-specific state for saving.
+        
+        Override this method in subclasses to include type-specific data.
+        Base implementation returns empty dict (common state is handled separately).
+        
+        Returns:
+            Dictionary of POI-specific state to save
+        """
+        return {}
+    
+    def deserialize_state(self, data: Dict[str, Any]) -> None:
+        """
+        Deserialize POI-specific state from save data.
+        
+        Override this method in subclasses to restore type-specific data.
+        Base implementation does nothing (common state is handled separately).
+        
+        Args:
+            data: Dictionary of POI-specific state to restore
+        """
+        pass
     
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(id={self.poi_id}, pos={self.position}, level={self.level})>"

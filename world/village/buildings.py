@@ -75,6 +75,13 @@ class HouseBuilding(Building):
         super().__init__("house", x, y, width, height, npc_id)
 
 
+@dataclass
+class TownHallBuilding(Building):
+    """Town hall building containing the village elder."""
+    def __init__(self, x: int, y: int, width: int = 10, height: int = 10, npc_id: Optional[str] = None):
+        super().__init__("town_hall", x, y, width, height, npc_id)
+
+
 def place_buildings(
     map_width: int,
     map_height: int,
@@ -99,23 +106,25 @@ def place_buildings(
     buildings: List[Building] = []
     
     # Determine building count based on level
-    # Small village (1-3): 3-4 buildings
-    # Medium village (4-7): 5-7 buildings
-    # Large village (8+): 8-10 buildings
+    # Adjusted for larger villages - more buildings to fill the space
+    # Small village (1-3): 4-6 buildings
+    # Medium village (4-7): 6-9 buildings
+    # Large village (8+): 9-12 buildings
     if level <= 3:
-        min_buildings = 3
-        max_buildings = 4
+        min_buildings = 4
+        max_buildings = 6
     elif level <= 7:
-        min_buildings = 5
-        max_buildings = 7
+        min_buildings = 6
+        max_buildings = 9
     else:
-        min_buildings = 8
-        max_buildings = 10
+        min_buildings = 9
+        max_buildings = 12
     
     num_buildings = random.randint(min_buildings, max_buildings)
     
     # Ensure we have at least one of each essential building
-    essential_buildings = ["shop", "inn", "tavern"]
+    # Town hall is essential (contains elder for quests)
+    essential_buildings = ["town_hall", "shop", "inn", "tavern"]
     building_types = essential_buildings.copy()
     
     # Add houses for remaining slots
@@ -141,7 +150,10 @@ def place_buildings(
             break
         
         # Determine building size based on type (increased sizes for better visibility)
-        if building_type == "shop":
+        if building_type == "town_hall":
+            w, h = 10, 10  # Larger, important building for elder
+            building_class = TownHallBuilding
+        elif building_type == "shop":
             w, h = 8, 8  # Increased from 5x5
             building_class = ShopBuilding
         elif building_type == "inn":

@@ -21,6 +21,7 @@ from ui.hud_screens import (
     draw_shop_fullscreen,
     draw_skill_screen_fullscreen,
     draw_recruitment_fullscreen,
+    draw_quest_fullscreen,
 )
 from systems.input import InputAction
 

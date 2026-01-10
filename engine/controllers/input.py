@@ -41,6 +41,7 @@ def create_default_input_manager() -> InputManager:
     # ------------------------------------------------------------------
     mgr.bind_key(InputAction.TOGGLE_INVENTORY, pygame.K_i)
     mgr.bind_key(InputAction.TOGGLE_CHARACTER_SHEET, pygame.K_c)
+    mgr.bind_key(InputAction.TOGGLE_QUEST_SCREEN, pygame.K_j)  # J for Journal/Quests
 
     # Logs – match HUD hints: K = exploration log, L = battle log.
     mgr.bind_key(InputAction.TOGGLE_BATTLE_LOG, pygame.K_l)

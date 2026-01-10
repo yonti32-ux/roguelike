@@ -2,10 +2,13 @@
 POI type implementations.
 
 Specific POI types: Dungeons, Villages, Towns, Camps, etc.
+
+All POI types are automatically registered with the global registry on import.
 """
 
-from typing import Set, Optional, TYPE_CHECKING
+from typing import Set, Optional, Dict, Any, List, TYPE_CHECKING
 from .base import PointOfInterest
+from .registry import register_poi_type
 
 if TYPE_CHECKING:
     from engine.core.game import Game
@@ -109,6 +112,66 @@ class DungeonPOI(PointOfInterest):
             return f"{self.name} (Level {self.level}, Cleared - {self.floor_count} floors)"
         floors_cleared = len(self.cleared_floors)
         return f"{self.name} (Level {self.level}, {floors_cleared}/{self.floor_count} floors)"
+    
+    def serialize_state(self) -> Dict[str, Any]:
+        """Serialize dungeon-specific state."""
+        return {
+            "floor_count": self.floor_count,
+            "cleared_floors": list(self.cleared_floors),
+        }
+    
+    def deserialize_state(self, data: Dict[str, Any]) -> None:
+        """Deserialize dungeon-specific state."""
+        if "floor_count" in data:
+            self.floor_count = data["floor_count"]
+        if "cleared_floors" in data:
+            self.cleared_floors = set(data["cleared_floors"])
+    
+    def get_tooltip_lines(self, game: Optional["Game"] = None) -> List[str]:
+        """Get dungeon-specific tooltip lines."""
+        lines = []
+        floors_cleared = len(self.cleared_floors)
+        
+        lines.append(f"Floors: {self.floor_count}")
+        
+        if self.cleared:
+            lines.append(f"Progress: {self.floor_count}/{self.floor_count} floors cleared (100%)")
+        else:
+            lines.append(f"Progress: {floors_cleared}/{self.floor_count} floors")
+            if self.floor_count > 0:
+                progress_pct = int((floors_cleared / self.floor_count) * 100)
+                lines.append(f"Completion: {progress_pct}%")
+        
+        if game is not None:
+            # Calculate difficulty estimation
+            hero_level = getattr(game.hero_stats, "level", 1) if hasattr(game, "hero_stats") else 1
+            party = getattr(game, "party", []) if hasattr(game, "party") else []
+            companion_levels = [comp.level for comp in party if hasattr(comp, "level")]
+            total_level = hero_level + sum(companion_levels)
+            total_count = 1 + len(companion_levels)
+            party_level = total_level / total_count if total_count > 0 else 1.0
+            
+            level_diff = self.level - party_level
+            if level_diff <= -3:
+                difficulty = "Very Easy"
+            elif level_diff <= -2:
+                difficulty = "Easy"
+            elif level_diff <= -1:
+                difficulty = "Fairly Easy"
+            elif level_diff <= 0:
+                difficulty = "Appropriate"
+            elif level_diff <= 1:
+                difficulty = "Challenging"
+            elif level_diff <= 2:
+                difficulty = "Hard"
+            elif level_diff <= 3:
+                difficulty = "Very Hard"
+            else:
+                difficulty = "Extreme"
+            
+            lines.append(f"Difficulty: {difficulty} (Party Lv: {party_level:.1f})")
+        
+        return lines
 
 
 class VillagePOI(PointOfInterest):
@@ -209,6 +272,20 @@ class VillagePOI(PointOfInterest):
             game.current_poi = None
             game.enter_overworld_mode()
             game.add_message(f"You leave {self.name} and return to the overworld.")
+    
+    def get_tooltip_lines(self, game: Optional["Game"] = None) -> List[str]:
+        """Get village-specific tooltip lines."""
+        lines = []
+        if hasattr(self, "buildings") and self.buildings:
+            building_list = ", ".join(b.title() for b in self.buildings[:3])
+            if len(self.buildings) > 3:
+                building_list += "..."
+            lines.append(f"Services: {building_list}")
+        return lines
+    
+    def get_display_label(self) -> str:
+        """Get display label for village."""
+        return "Village"
 
 
 class TownPOI(PointOfInterest):
@@ -243,6 +320,20 @@ class TownPOI(PointOfInterest):
             game.current_poi = None
             game.enter_overworld_mode()
             game.add_message(f"You leave {self.name} and return to the overworld.")
+    
+    def get_tooltip_lines(self, game: Optional["Game"] = None) -> List[str]:
+        """Get town-specific tooltip lines."""
+        lines = []
+        if hasattr(self, "buildings") and self.buildings:
+            building_list = ", ".join(b.title() for b in self.buildings[:3])
+            if len(self.buildings) > 3:
+                building_list += "..."
+            lines.append(f"Services: {building_list}")
+        return lines
+    
+    def get_display_label(self) -> str:
+        """Get display label for town."""
+        return "Town"
 
 
 class CampPOI(PointOfInterest):
@@ -274,4 +365,30 @@ class CampPOI(PointOfInterest):
             game.current_poi = None
             game.enter_overworld_mode()
             game.add_message(f"You leave {self.name} and return to the overworld.")
+    
+    def get_display_label(self) -> str:
+        """Get display label for camp."""
+        return "Camp"
+
+
+# -----------------------------------------------------------------------------
+# Register all POI types with the global registry
+# -----------------------------------------------------------------------------
+
+def _register_poi_types() -> None:
+    """Register all POI types with the global registry."""
+    
+    # Register DungeonPOI with custom factory (needs floor_count)
+    def create_dungeon(poi_id: str, position: tuple, level: int = 1, name: Optional[str] = None, **kwargs):
+        floor_count = kwargs.pop("floor_count", 5)  # Default floor count
+        return DungeonPOI(poi_id, position, level=level, name=name, floor_count=floor_count)
+    
+    register_poi_type("dungeon", factory=create_dungeon, poi_class=DungeonPOI)
+    register_poi_type("village", poi_class=VillagePOI)
+    register_poi_type("town", poi_class=TownPOI)
+    register_poi_type("camp", poi_class=CampPOI)
+
+
+# Auto-register on import
+_register_poi_types()
 

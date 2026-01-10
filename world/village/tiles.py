@@ -54,3 +54,11 @@ BUILDING_ENTRANCE_TILE = Tile(
     color=BUILDING_ENTRANCE_COLOR,
 )
 
+# Tree - decorative, blocks movement and sight
+TREE_COLOR = (40, 80, 40)  # Dark green for trees
+TREE_TILE = Tile(
+    walkable=False,
+    blocks_sight=True,
+    color=TREE_COLOR,
+)
+

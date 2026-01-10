@@ -328,6 +328,8 @@ class Game:
         self.skill_screen_wrapper = SkillScreen()
         from ui.village.recruitment_screen import RecruitmentScreen
         self.recruitment_screen = RecruitmentScreen()
+        from ui.village.quest_screen import QuestScreen
+        self.quest_screen = QuestScreen()
 
         # Currently active full-screen UI overlay (if any).
         # Used for perk choices, inventory, character sheet, shop, etc.
@@ -642,6 +644,10 @@ class Game:
     def toggle_skill_screen(self) -> None:
         """Toggle skill screen overlay and manage its active screen."""
         self.ui_screen_manager.toggle_skill_screen(self)
+    
+    def toggle_quest_screen(self) -> None:
+        """Toggle quest screen overlay and manage its active screen."""
+        self.ui_screen_manager.toggle_quest_screen(self)
 
     def toggle_battle_log_overlay(self) -> None:
         """Toggle last battle log overlay ONLY if we actually have one."""

@@ -186,3 +186,108 @@ def recruit_companion(
     
     return True
 
+
+def open_quest_screen(game: "Game", elder_id: Optional[str] = None) -> None:
+    """
+    Open the quest screen to view and accept quests from the elder.
+    
+    Args:
+        game: Game instance
+        elder_id: Optional elder NPC ID
+    """
+    # Check if we're in a village
+    if game.current_poi is None or game.current_poi.poi_type != "village":
+        game.add_message("You can only receive quests in villages.")
+        return
+    
+    # Initialize quests if needed
+    if not hasattr(game, "active_quests"):
+        game.active_quests = {}
+    if not hasattr(game, "available_quests"):
+        game.available_quests = {}
+    if not hasattr(game, "completed_quests"):
+        game.completed_quests = {}
+    
+    # Initialize elder quests if needed (first time talking to elder)
+    elder_id = elder_id or "elder"
+    quest_key = f"elder_quests_{game.current_poi.poi_id}"
+    
+    if quest_key not in game.current_poi.state:
+        # Generate initial quests for this elder
+        from systems.quests import initialize_elder_quests
+        available_quests = initialize_elder_quests(game, elder_id)
+        game.current_poi.state[quest_key] = available_quests
+        
+        # Add to available quests
+        for quest in available_quests:
+            game.available_quests[quest.quest_id] = quest
+    else:
+        # Load existing quests
+        from systems.quests import QuestStatus
+        available_quests = game.current_poi.state[quest_key]
+        for quest in available_quests:
+            # Handle both Quest objects and serialized dicts
+            if isinstance(quest, dict):
+                from systems.quests import Quest
+                quest = Quest.deserialize(quest)
+            if quest.quest_id not in game.active_quests and quest.quest_id not in game.available_quests:
+                if quest.status == QuestStatus.AVAILABLE:
+                    game.available_quests[quest.quest_id] = quest
+    
+    # Set quest screen data
+    game.show_quests = True
+    game.quest_cursor = 0
+    game.current_elder_id = elder_id  # Set elder ID so quests are filtered to this elder
+    
+    # Open quest screen via UI manager
+    game.ui_screen_manager.show_quest_screen = True
+    game.ui_screen_manager.switch_to_screen(game, "quests")
+    
+    available_count = len([q for q in game.available_quests.values() if q.quest_giver_id == elder_id])
+    active_count = len([q for q in game.active_quests.values() if q.quest_giver_id == elder_id and q.status.value == "active"])
+    completed_count = len([q for q in game.active_quests.values() if q.quest_giver_id == elder_id and q.status.value == "completed"])
+    
+    if available_count > 0:
+        game.add_message(f"The elder has {available_count} quest(s) available for you.")
+    elif active_count > 0:
+        game.add_message(f"You have {active_count} active quest(s) from the elder.")
+    elif completed_count > 0:
+        game.add_message(f"You have {completed_count} completed quest(s) to turn in.")
+    else:
+        game.add_message("The elder greets you warmly but has no tasks at the moment.")
+
+
+def accept_quest(game: "Game", quest_id: str) -> bool:
+    """
+    Accept a quest from available quests.
+    
+    Args:
+        game: Game instance
+        quest_id: Quest ID to accept
+        
+    Returns:
+        True if quest was accepted, False otherwise
+    """
+    if quest_id not in game.available_quests:
+        return False
+    
+    quest = game.available_quests[quest_id]
+    return quest.accept(game)
+
+
+def turn_in_quest(game: "Game", quest_id: str) -> bool:
+    """
+    Turn in a completed quest.
+    
+    Args:
+        game: Game instance
+        quest_id: Quest ID to turn in
+        
+    Returns:
+        True if quest was turned in, False otherwise
+    """
+    if quest_id not in game.active_quests:
+        return False
+    
+    quest = game.active_quests[quest_id]
+    return quest.turn_in(game)

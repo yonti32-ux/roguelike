@@ -2,10 +2,10 @@
   "terrain": {
     "initial_distribution": {
       "grass": 0.35,
-      "plains": 0.20,
+      "plains": 0.2,
       "forest": 0.15,
       "mountain": 0.12,
-      "desert": 0.10,
+      "desert": 0.1,
       "water": 0.08
     },
     "smoothing": {
@@ -30,10 +30,20 @@
     "max_pois": 200,
     "max_placement_attempts": 200,
     "max_consecutive_failures": 50,
-    "terrain_blacklist": ["water"],
-    "preferred_starting_terrain": ["grass", "plains"],
+    "terrain_blacklist": [
+      "water"
+    ],
+    "preferred_starting_terrain": [
+      "grass",
+      "plains"
+    ],
     "placement_rules": {
-      "placement_order": ["town", "village", "dungeon", "camp"],
+      "placement_order": [
+        "town",
+        "village",
+        "dungeon",
+        "camp"
+      ],
       "spatial_rules": {
         "village": {
           "near_town": {
@@ -78,28 +88,76 @@
   "floor": {
     "size_scaling": {
       "1": {
-        "scales": [0.9, 1.0, 1.1],
-        "weights": [0.3, 0.4, 0.3]
+        "scales": [
+          0.9,
+          1.0,
+          1.1
+        ],
+        "weights": [
+          0.3,
+          0.4,
+          0.3
+        ]
       },
       "2": {
-        "scales": [1.0, 1.1, 1.25],
-        "weights": [0.3, 0.4, 0.3]
+        "scales": [
+          1.0,
+          1.1,
+          1.25
+        ],
+        "weights": [
+          0.3,
+          0.4,
+          0.3
+        ]
       },
       "3-4": {
-        "scales": [1.1, 1.25, 1.5],
-        "weights": [0.2, 0.5, 0.3]
+        "scales": [
+          1.1,
+          1.25,
+          1.5
+        ],
+        "weights": [
+          0.2,
+          0.5,
+          0.3
+        ]
       },
       "5-6": {
-        "scales": [1.25, 1.5, 1.75],
-        "weights": [0.3, 0.4, 0.3]
+        "scales": [
+          1.25,
+          1.5,
+          1.75
+        ],
+        "weights": [
+          0.3,
+          0.4,
+          0.3
+        ]
       },
       "7-8": {
-        "scales": [1.5, 1.75, 2.0],
-        "weights": [0.2, 0.5, 0.3]
+        "scales": [
+          1.5,
+          1.75,
+          2.0
+        ],
+        "weights": [
+          0.2,
+          0.5,
+          0.3
+        ]
       },
       "9+": {
-        "scales": [1.75, 2.0, 2.25],
-        "weights": [0.3, 0.4, 0.3]
+        "scales": [
+          1.75,
+          2.0,
+          2.25
+        ],
+        "weights": [
+          0.3,
+          0.4,
+          0.3
+        ]
       }
     },
     "min_scale": 0.9,
@@ -180,4 +238,3 @@
     }
   }
 }
-

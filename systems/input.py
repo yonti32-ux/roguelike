@@ -29,6 +29,7 @@ class InputAction(str, Enum):
     # Meta / overlays
     TOGGLE_INVENTORY = "toggle_inventory"
     TOGGLE_CHARACTER_SHEET = "toggle_character_sheet"
+    TOGGLE_QUEST_SCREEN = "toggle_quest_screen"
     TOGGLE_BATTLE_LOG = "toggle_battle_log"
     TOGGLE_EXPLORATION_LOG = "toggle_exploration_log"
 

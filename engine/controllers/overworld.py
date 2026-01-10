@@ -110,6 +110,16 @@ class OverworldController:
                 game.toggle_character_sheet_overlay()
                 return
         
+        # Toggle quest screen (J for Journal/Quests)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.TOGGLE_QUEST_SCREEN, event):
+                game.toggle_quest_screen()
+                return
+        else:
+            if event.key == pygame.K_j:
+                game.toggle_quest_screen()
+                return
+        
         # Zoom controls
         if event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS or event.key == pygame.K_KP_PLUS:
             self.zoom_in()

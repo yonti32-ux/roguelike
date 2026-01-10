@@ -136,14 +136,6 @@ class OverworldConfigScene:
         self.zoom_index = self.config.default_zoom_index if hasattr(self.config, "default_zoom_index") else 1
         # Clamp zoom index to valid range
         self.zoom_index = max(0, min(self.zoom_index, len(self.zoom_levels) - 1))
-        
-        # Preset world sizes
-        self.world_size_presets = [
-            ("small", 128, 128, "Small (128x128)"),
-            ("medium", 256, 256, "Medium (256x256)"),
-            ("large", 512, 512, "Large (512x512)"),
-            ("huge", 1024, 1024, "Huge (1024x1024)"),
-        ]
     
     def run(self) -> Optional["OverworldConfig"]:
         """
@@ -273,10 +265,12 @@ class OverworldConfigScene:
                     self.zoom_index = (self.zoom_index + 1) % len(self.zoom_levels)
                     return None
                 elif field == "gen_preset":
-                    # Cycle through generation presets
-                    preset_list = list(self.gen_presets.keys())
+                    # Cycle through generation presets (uses terrain_presets)
+                    preset_list = list(self.terrain_presets.keys())
                     current_idx = preset_list.index(self.gen_preset) if self.gen_preset in preset_list else 0
                     self.gen_preset = preset_list[(current_idx + 1) % len(preset_list)]
+                    # Also update terrain_preset to match
+                    self.terrain_preset = self.gen_preset
                     return None
                 elif field == "room_count_preset":
                     # Cycle through room count presets
@@ -395,7 +389,7 @@ class OverworldConfigScene:
             return self.sight_radius
         elif field == "default_zoom":
             return f"{int(self.zoom_levels[self.zoom_index] * 100)}%"
-            elif field == "gen_preset":
+        elif field == "gen_preset":
             return self.terrain_presets.get(self.gen_preset, "Normal")
         elif field == "room_count_preset":
             return self.room_count_presets[self.room_count_preset][0]

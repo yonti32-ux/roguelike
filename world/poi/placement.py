@@ -2,6 +2,7 @@
 POI placement algorithms.
 
 Handles the placement of POIs on the overworld according to configuration.
+Uses registry pattern for extensible POI creation.
 """
 
 import random
@@ -12,8 +13,12 @@ from ..overworld.map import OverworldMap
 from ..overworld.config import OverworldConfig
 from ..overworld.terrain import TERRAIN_WATER, get_terrain
 from .base import PointOfInterest
-from .types import DungeonPOI, VillagePOI, TownPOI, CampPOI
+from .registry import get_registry
 from ..generation.config import load_generation_config
+
+# Import types to ensure POI types are registered before use
+# This ensures auto-registration happens even if placement is imported directly
+from . import types  # noqa: F401
 
 
 def place_pois(overworld: OverworldMap, config: OverworldConfig) -> List[PointOfInterest]:
@@ -69,6 +74,7 @@ def place_pois(overworld: OverworldMap, config: OverworldConfig) -> List[PointOf
                 config=config,
                 existing_pois=pois,
                 placement_rules=placement_rules,
+                gen_config=gen_config,
             )
             
             if poi is not None:
@@ -148,9 +154,15 @@ def _place_single_poi(
     config: OverworldConfig,
     existing_pois: List[PointOfInterest],
     placement_rules: dict = None,
+    gen_config = None,
 ) -> PointOfInterest | None:
     """
     Attempt to place a single POI with spatial placement rules.
+    
+    Uses multiple strategies with progressively relaxed constraints:
+    1. First pass: Full constraints and spatial rules
+    2. Second pass: Relaxed minimum distance
+    3. Third pass: Minimal constraints (just walkable and terrain)
     
     Args:
         overworld: The overworld map
@@ -163,7 +175,8 @@ def _place_single_poi(
     Returns:
         Placed POI, or None if placement failed
     """
-    gen_config = load_generation_config()
+    if gen_config is None:
+        gen_config = load_generation_config()
     max_attempts = gen_config.poi.max_placement_attempts
     
     if placement_rules is None:
@@ -171,10 +184,83 @@ def _place_single_poi(
     
     spatial_rules = placement_rules.get("spatial_rules", {}).get(poi_type, {})
     
-    # Generate candidate positions with weighted scoring
+    # Strategy 1: Full constraints with spatial rules
+    poi = _try_place_with_constraints(
+        overworld, poi_type, poi_id, config, existing_pois,
+        spatial_rules, gen_config, min_distance=config.poi_min_distance,
+        use_spatial_rules=True, attempts=max_attempts
+    )
+    if poi is not None:
+        return poi
+    
+    # Strategy 2: Relaxed minimum distance (75% of original)
+    relaxed_distance = max(4, int(config.poi_min_distance * 0.75))
+    poi = _try_place_with_constraints(
+        overworld, poi_type, poi_id, config, existing_pois,
+        spatial_rules, gen_config, min_distance=relaxed_distance,
+        use_spatial_rules=True, attempts=max_attempts // 2
+    )
+    if poi is not None:
+        return poi
+    
+    # Strategy 3: Further relaxed distance (50% of original) with lenient scoring
+    very_relaxed_distance = max(3, int(config.poi_min_distance * 0.5))
+    poi = _try_place_with_constraints(
+        overworld, poi_type, poi_id, config, existing_pois,
+        spatial_rules, gen_config, min_distance=very_relaxed_distance,
+        use_spatial_rules=False, attempts=max_attempts // 2, min_score=0.1
+    )
+    if poi is not None:
+        return poi
+    
+    # Strategy 4: Minimal constraints - just walkable and terrain, ignore distance
+    poi = _try_place_with_constraints(
+        overworld, poi_type, poi_id, config, existing_pois,
+        spatial_rules, gen_config, min_distance=0,
+        use_spatial_rules=False, attempts=max_attempts // 4, min_score=0.0
+    )
+    if poi is not None:
+        return poi
+    
+    # All strategies failed
+    return None
+
+
+def _try_place_with_constraints(
+    overworld: OverworldMap,
+    poi_type: str,
+    poi_id: str,
+    config: OverworldConfig,
+    existing_pois: List[PointOfInterest],
+    spatial_rules: dict,
+    gen_config,
+    min_distance: int,
+    use_spatial_rules: bool,
+    attempts: int,
+    min_score: float = 0.5,
+) -> PointOfInterest | None:
+    """
+    Attempt to place a POI with specific constraints.
+    
+    Args:
+        overworld: The overworld map
+        poi_type: Type of POI to place
+        poi_id: Unique identifier
+        config: Configuration
+        existing_pois: Already placed POIs
+        spatial_rules: Spatial rules to apply (if use_spatial_rules is True)
+        gen_config: Generation config
+        min_distance: Minimum distance from existing POIs (0 = no constraint)
+        use_spatial_rules: Whether to apply spatial rule scoring
+        attempts: Number of attempts to make
+        min_score: Minimum score to accept (lower = more lenient)
+        
+    Returns:
+        Placed POI, or None if placement failed
+    """
     candidates = []
     
-    for attempt in range(max_attempts):
+    for attempt in range(attempts):
         # Random position
         x = random.randint(0, overworld.width - 1)
         y = random.randint(0, overworld.height - 1)
@@ -193,49 +279,78 @@ def _place_single_poi(
         if tile.id in terrain_blacklist:
             continue
         
-        # Check minimum distance from existing POIs (base constraint)
-        too_close = False
-        for existing_poi in existing_pois:
-            ex, ey = existing_poi.position
-            dx = x - ex
-            dy = y - ey
-            distance = math.sqrt(dx * dx + dy * dy)
+        # Check minimum distance from existing POIs (if constraint applies)
+        if min_distance > 0:
+            too_close = False
+            for existing_poi in existing_pois:
+                ex, ey = existing_poi.position
+                dx = x - ex
+                dy = y - ey
+                distance = math.sqrt(dx * dx + dy * dy)
+                
+                if distance < min_distance:
+                    too_close = True
+                    break
             
-            if distance < config.poi_min_distance:
-                too_close = True
-                break
+            if too_close:
+                continue
         
-        if too_close:
-            continue
+        # Evaluate position based on spatial rules (if enabled)
+        if use_spatial_rules:
+            score = _evaluate_poi_position(
+                x, y, poi_type, existing_pois, spatial_rules, overworld
+            )
+        else:
+            # Simple base score if spatial rules disabled
+            score = 1.0
         
-        # Evaluate position based on spatial rules
-        score = _evaluate_poi_position(
-            x, y, poi_type, existing_pois, spatial_rules, overworld
-        )
-        
-        if score > 0:  # Valid position
+        # Accept positions meeting minimum score threshold
+        if score >= min_score:
             candidates.append((x, y, score))
     
-    # If we have candidates, choose one based on score (weighted random)
+    # If we have candidates, choose one using weighted random selection
     if candidates:
         # Sort by score (higher is better)
         candidates.sort(key=lambda c: c[2], reverse=True)
         
-        # Use weighted random selection (higher score = higher chance)
-        # Take top candidates and randomly select from them
-        top_candidates = candidates[:max(1, len(candidates) // 3)]  # Top third
-        if top_candidates:
-            selected = random.choice(top_candidates)
-            x, y, _ = selected
+        # Use weighted random selection from candidates
+        # Consider more candidates (top 50% instead of top 33%)
+        candidate_pool_size = max(1, len(candidates) // 2)
+        candidate_pool = candidates[:candidate_pool_size]
+        
+        # Weighted random: higher scores have better chance, but all valid candidates can be chosen
+        if len(candidate_pool) == 1:
+            selected = candidate_pool[0]
+        else:
+            # Calculate weights based on scores (normalize to sum to 1)
+            scores = [c[2] for c in candidate_pool]
+            min_score_val = min(scores)
+            max_score_val = max(scores)
             
-            # Calculate POI level
-            poi_level = _calculate_poi_level(poi_type, x, y, overworld, existing_pois)
+            if max_score_val > min_score_val:
+                # Normalize scores to [0, 1] range
+                normalized = [(s - min_score_val) / (max_score_val - min_score_val) for s in scores]
+                # Add small base weight to ensure even low scores have a chance
+                weights = [n + 0.1 for n in normalized]
+                # Normalize weights to sum to 1
+                total_weight = sum(weights)
+                weights = [w / total_weight for w in weights]
+            else:
+                # All scores equal, use uniform distribution
+                weights = [1.0 / len(candidate_pool)] * len(candidate_pool)
             
-            # Create POI
-            poi = _create_poi(poi_type, poi_id, (x, y), level=poi_level)
-            return poi
+            selected = random.choices(candidate_pool, weights=weights, k=1)[0]
+        
+        x, y, _ = selected
+        
+        # Calculate POI level
+        poi_level = _calculate_poi_level(poi_type, x, y, overworld, existing_pois)
+        
+        # Create POI (pass gen_config for dungeon floor calculation)
+        poi = _create_poi(poi_type, poi_id, (x, y), level=poi_level, gen_config=gen_config)
+        return poi
     
-    # Failed to place after max attempts
+    # No valid candidates found
     return None
 
 
@@ -250,7 +365,16 @@ def _evaluate_poi_position(
     """
     Evaluate a position for POI placement based on spatial rules.
     
-    Returns a score (0.0 = invalid, higher = better).
+    This function is fully config-driven and generic. It evaluates spatial rules
+    defined in the configuration without hardcoding POI type-specific logic.
+    
+    Rule types supported (from config):
+    - "near_{type}": Prefer being within min/max distance of specific POI type
+    - "avoid_{type}": Penalize being too close to specific POI type
+    - "prefer_remote": Bonus for being far from all existing POIs
+    - Custom rules can be added by extending this function
+    
+    Returns a score (higher = better, always >= 0.1 to ensure position is considered).
     """
     score = 1.0  # Base score
     
@@ -258,7 +382,8 @@ def _evaluate_poi_position(
         # First POI, no rules apply
         return score
     
-    # Check distances to existing POIs
+    # Calculate distances to all existing POIs
+    distances_by_type: Dict[str, List[float]] = {}
     for existing_poi in existing_pois:
         ex, ey = existing_poi.position
         dx = x - ex
@@ -266,80 +391,91 @@ def _evaluate_poi_position(
         distance = math.sqrt(dx * dx + dy * dy)
         existing_type = existing_poi.poi_type
         
-        # Apply spatial rules based on POI type
-        if poi_type == "village":
-            # Villages should be near towns
-            near_town_rule = spatial_rules.get("near_town", {})
-            if near_town_rule.get("enabled", False) and existing_type == "town":
-                min_dist = near_town_rule.get("min_distance", 10)
-                max_dist = near_town_rule.get("max_distance", 30)
-                chance = near_town_rule.get("chance", 0.7)
-                
-                if min_dist <= distance <= max_dist:
-                    # Good distance from town
-                    if random.random() < chance:
-                        score += 2.0  # Strong preference
-                    else:
-                        score += 0.5  # Still acceptable
-                elif distance < min_dist:
-                    score -= 1.0  # Too close
-                else:
-                    score -= 0.5  # Too far
-            
-            # Villages should avoid dungeons
-            avoid_dungeon_rule = spatial_rules.get("avoid_dungeon", {})
-            if avoid_dungeon_rule.get("enabled", False) and existing_type == "dungeon":
-                min_dist = avoid_dungeon_rule.get("min_distance", 15)
-                if distance < min_dist:
-                    score -= 2.0  # Strong penalty
-        
-        elif poi_type == "dungeon":
-            # Dungeons should avoid towns
-            avoid_town_rule = spatial_rules.get("avoid_town", {})
-            if avoid_town_rule.get("enabled", False) and existing_type == "town":
-                min_dist = avoid_town_rule.get("min_distance", 25)
-                if distance < min_dist:
-                    score -= 3.0  # Strong penalty for being too close to town
-                else:
-                    score += 0.3  # Bonus for being far from town
-            
-            # Dungeons should avoid villages
-            avoid_village_rule = spatial_rules.get("avoid_village", {})
-            if avoid_village_rule.get("enabled", False) and existing_type == "village":
-                min_dist = avoid_village_rule.get("min_distance", 20)
-                if distance < min_dist:
-                    score -= 2.0  # Penalty for being too close to village
-                else:
-                    score += 0.2  # Bonus for being far from village
-            
-            # Dungeons prefer remote locations
-            prefer_remote_rule = spatial_rules.get("prefer_remote", {})
-            if prefer_remote_rule.get("enabled", False):
-                distance_threshold = prefer_remote_rule.get("distance_threshold", 30)
-                bonus_weight = prefer_remote_rule.get("bonus_weight", 1.5)
-                if distance >= distance_threshold:
-                    score += bonus_weight  # Bonus for being remote
-        
-        elif poi_type == "camp":
-            # Camps should avoid towns
-            avoid_town_rule = spatial_rules.get("avoid_town", {})
-            if avoid_town_rule.get("enabled", False) and existing_type == "town":
-                min_dist = avoid_town_rule.get("min_distance", 12)
-                if distance < min_dist:
-                    score -= 1.5  # Penalty
-            
-            # Camps should avoid villages
-            avoid_village_rule = spatial_rules.get("avoid_village", {})
-            if avoid_village_rule.get("enabled", False) and existing_type == "village":
-                min_dist = avoid_village_rule.get("min_distance", 10)
-                if distance < min_dist:
-                    score -= 1.0  # Penalty
+        if existing_type not in distances_by_type:
+            distances_by_type[existing_type] = []
+        distances_by_type[existing_type].append(distance)
     
-    # Return score (must be > 0 to be valid)
-    return max(0.0, score)
+    # Apply configured spatial rules generically
+    for rule_name, rule_config in spatial_rules.items():
+        if not rule_config.get("enabled", False):
+            continue
+        
+        # Handle "near_{type}" rules (e.g., "near_town")
+        if rule_name.startswith("near_"):
+            target_type = rule_name[5:]  # Remove "near_" prefix
+            if target_type not in distances_by_type:
+                # No target type present - apply small penalty or neutral
+                # Don't penalize too heavily, allow placement anyway
+                continue
+            
+            # Use minimum distance to target type
+            min_distance_to_target = min(distances_by_type[target_type])
+            
+            min_dist = rule_config.get("min_distance", 10)
+            max_dist = rule_config.get("max_distance", 30)
+            chance = rule_config.get("chance", 0.7)
+            bonus = rule_config.get("bonus", 2.0)
+            close_penalty = rule_config.get("close_penalty", 0.5)  # Reduced default penalty
+            far_penalty = rule_config.get("far_penalty", 0.2)  # Reduced default penalty
+            
+            if min_dist <= min_distance_to_target <= max_dist:
+                # Good distance - apply chance-based bonus
+                if random.random() < chance:
+                    score += bonus  # Strong preference
+                else:
+                    score += bonus * 0.25  # Still acceptable
+            elif min_distance_to_target < min_dist:
+                # Too close - apply reduced penalty (don't eliminate position)
+                score -= close_penalty
+            else:
+                # Too far - apply small penalty (still acceptable)
+                score -= far_penalty
+        
+        # Handle "avoid_{type}" rules (e.g., "avoid_town")
+        elif rule_name.startswith("avoid_"):
+            target_type = rule_name[6:]  # Remove "avoid_" prefix
+            if target_type not in distances_by_type:
+                # No target type to avoid - this is good, small bonus
+                score += 0.2
+                continue
+            
+            # Use minimum distance to target type
+            min_distance_to_target = min(distances_by_type[target_type])
+            
+            min_dist = rule_config.get("min_distance", 15)
+            penalty = rule_config.get("penalty", 0.8)  # Reduced default penalty
+            bonus_when_far = rule_config.get("bonus_when_far", 0.3)
+            far_threshold = rule_config.get("far_threshold", min_dist * 1.5)
+            
+            if min_distance_to_target < min_dist:
+                # Too close, apply penalty (but don't eliminate)
+                score -= penalty
+            elif min_distance_to_target >= far_threshold:
+                # Far enough, small bonus
+                score += bonus_when_far
+            # If in between, no change (neutral)
+        
+        # Handle "prefer_remote" rule (bonus for being far from everything)
+        elif rule_name == "prefer_remote":
+            # Use minimum distance to any existing POI
+            all_distances = [d for dist_list in distances_by_type.values() for d in dist_list]
+            if not all_distances:
+                continue
+            
+            min_distance_to_any = min(all_distances)
+            distance_threshold = rule_config.get("distance_threshold", 30)
+            bonus_weight = rule_config.get("bonus_weight", 1.5)
+            
+            if min_distance_to_any >= distance_threshold:
+                score += bonus_weight  # Bonus for being remote
+            # If closer, no penalty - this is a preference, not a requirement
+    
+    # Ensure score is always positive (minimum 0.1) to allow position consideration
+    # This makes the system more lenient - positions are only eliminated if truly impossible
+    return max(0.1, score)
 
 
-def _calculate_dungeon_floor_count(dungeon_level: int) -> int:
+def _calculate_dungeon_floor_count(dungeon_level: int, gen_config = None) -> int:
     """
     Calculate the number of floors for a dungeon based on its level.
     
@@ -348,11 +484,13 @@ def _calculate_dungeon_floor_count(dungeon_level: int) -> int:
     
     Args:
         dungeon_level: The level/difficulty of the dungeon
+        gen_config: Optional generation config (loaded if not provided)
         
     Returns:
         Number of floors (based on config)
     """
-    gen_config = load_generation_config()
+    if gen_config is None:
+        gen_config = load_generation_config()
     floor_config = gen_config.dungeon.floor_count
     
     # Calculate base floor count that scales with level
@@ -402,30 +540,36 @@ def _get_min_floors_for_level(level: int, min_floors_config: Dict[str, int]) -> 
         return min_floors_config.get("1-3", 3)
 
 
-def _create_poi(poi_type: str, poi_id: str, position: tuple[int, int], level: int = 1) -> PointOfInterest:
+def _create_poi(
+    poi_type: str,
+    poi_id: str,
+    position: tuple[int, int],
+    level: int = 1,
+    gen_config = None,
+) -> PointOfInterest:
     """
-    Create a POI instance of the given type.
+    Create a POI instance of the given type using the registry.
     
     Args:
         poi_type: Type of POI
         poi_id: Unique identifier
         position: Overworld position
         level: Difficulty level of the POI
+        gen_config: Optional generation config (for dungeon floor calculation)
         
     Returns:
         PointOfInterest instance
+        
+    Raises:
+        ValueError: If poi_type is not registered
     """
+    registry = get_registry()
+    
+    # Special handling for dungeon (needs floor_count)
     if poi_type == "dungeon":
-        floor_count = _calculate_dungeon_floor_count(level)
-        return DungeonPOI(poi_id, position, level=level, floor_count=floor_count)
-    elif poi_type == "village":
-        return VillagePOI(poi_id, position, level=level)
-    elif poi_type == "town":
-        return TownPOI(poi_id, position, level=level)
-    elif poi_type == "camp":
-        return CampPOI(poi_id, position, level=level)
+        floor_count = _calculate_dungeon_floor_count(level, gen_config)
+        return registry.create(poi_type, poi_id, position, level=level, floor_count=floor_count)
     else:
-        # Default to dungeon
-        floor_count = _calculate_dungeon_floor_count(level)
-        return DungeonPOI(poi_id, position, level=level, floor_count=floor_count)
+        # For other types, use standard creation
+        return registry.create(poi_type, poi_id, position, level=level)
 

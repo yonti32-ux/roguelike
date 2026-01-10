@@ -29,6 +29,7 @@ class UIScreenManager:
         self.show_inventory: bool = False
         self.show_character_sheet: bool = False
         self.show_skill_screen: bool = False
+        self.show_quest_screen: bool = False
         self.show_battle_log: bool = False
         self.show_exploration_log: bool = False
         
@@ -98,6 +99,46 @@ class UIScreenManager:
             # Opening skill screen - use switch_to_screen for consistency
             self.switch_to_screen(game, "skills")
     
+    def toggle_quest_screen(self, game: "Game") -> None:
+        """Toggle quest screen overlay and manage its active screen."""
+        self.show_quest_screen = not self.show_quest_screen
+        
+        if self.show_quest_screen:
+            # When opening quest screen, hide other overlays
+            self.show_inventory = False
+            self.show_character_sheet = False
+            self.show_skill_screen = False
+            self.show_battle_log = False
+            self.show_exploration_log = False
+            
+            # Initialize quest data if needed
+            if not hasattr(game, "active_quests"):
+                game.active_quests = {}
+            if not hasattr(game, "available_quests"):
+                game.available_quests = {}
+            if not hasattr(game, "completed_quests"):
+                game.completed_quests = {}
+            
+            # Initialize quest screen state
+            if not hasattr(game, "quest_tab"):
+                game.quest_tab = "available"
+            if not hasattr(game, "quest_cursor"):
+                game.quest_cursor = 0
+            if not hasattr(game, "current_elder_id"):
+                game.current_elder_id = None  # None means show all quests
+            
+            # Route input to quest screen while open
+            if hasattr(game, "quest_screen"):
+                game.active_screen = game.quest_screen
+                # Set flag for rendering
+                game.show_quests = True
+        else:
+            # Closing quest screen
+            if getattr(game, "active_screen", None) is getattr(game, "quest_screen", None):
+                game.active_screen = None
+            if hasattr(game, "show_quests"):
+                game.show_quests = False
+    
     def toggle_battle_log_overlay(self, game: "Game") -> None:
         """
         Toggle last battle log overlay ONLY if we actually have one.
@@ -121,7 +162,7 @@ class UIScreenManager:
     
     def get_available_screens(self, game: "Game") -> List[str]:
         """Get list of available screen names (shop only if vendor nearby)."""
-        screens = ["inventory", "character", "skills"]
+        screens = ["inventory", "character", "skills", "quests"]
         if getattr(game, "show_shop", False):
             screens.append("shop")
         if getattr(game, "show_recruitment", False):
@@ -134,6 +175,7 @@ class UIScreenManager:
         self.show_inventory = False
         self.show_character_sheet = False
         self.show_skill_screen = False
+        self.show_quest_screen = False
         self.show_battle_log = False
         self.show_exploration_log = False
         
@@ -161,6 +203,24 @@ class UIScreenManager:
         elif screen_name == "recruitment" and getattr(game, "show_recruitment", False):
             # Recruitment is already open, just set active screen
             game.active_screen = game.recruitment_screen
+        elif screen_name == "quests":
+            # Open quest screen
+            self.show_quest_screen = True
+            if not hasattr(game, "active_quests"):
+                game.active_quests = {}
+            if not hasattr(game, "available_quests"):
+                game.available_quests = {}
+            if not hasattr(game, "completed_quests"):
+                game.completed_quests = {}
+            if not hasattr(game, "quest_tab"):
+                game.quest_tab = "available"
+            if not hasattr(game, "quest_cursor"):
+                game.quest_cursor = 0
+            # Only set current_elder_id to None if not already set (preserves elder context when opened from village)
+            if not hasattr(game, "current_elder_id"):
+                game.current_elder_id = None
+            game.show_quests = True
+            game.active_screen = game.quest_screen
         else:
             # Invalid screen, clear active
             game.active_screen = None
@@ -179,9 +239,11 @@ class UIScreenManager:
             current = "character"
         elif self.show_skill_screen:
             current = "skills"
-        elif getattr(game, "show_shop", False) and getattr(game, "active_screen", None) is game.shop_screen:
+        elif self.show_quest_screen:
+            current = "quests"
+        elif getattr(game, "show_shop", False) and getattr(game, "active_screen", None) is getattr(game, "shop_screen", None):
             current = "shop"
-        elif getattr(game, "show_recruitment", False) and getattr(game, "active_screen", None) is game.recruitment_screen:
+        elif getattr(game, "show_recruitment", False) and getattr(game, "active_screen", None) is getattr(game, "recruitment_screen", None):
             current = "recruitment"
         
         if current is None:
@@ -238,8 +300,8 @@ class UIScreenManager:
     
     def is_overlay_open(self) -> bool:
         """
-        Return True if a major overlay (inventory, character sheet, skill screen) is open.
+        Return True if a major overlay (inventory, character sheet, skill screen, quest screen) is open.
         Used to pause exploration updates.
         """
-        return self.show_inventory or self.show_character_sheet or self.show_skill_screen
+        return self.show_inventory or self.show_character_sheet or self.show_skill_screen or self.show_quest_screen
 

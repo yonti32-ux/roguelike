@@ -369,10 +369,15 @@ def _serialize_pois(overworld_map) -> Dict[str, Any]:
             "state": poi.state,
         }
         
-        # Add type-specific data
+        # Add type-specific data using extensibility method
+        poi_specific_data = poi.serialize_state()
+        poi_data.update(poi_specific_data)
+        
+        # Legacy handling for dungeon-specific fields (backwards compatibility)
         if poi.poi_type == "dungeon" and hasattr(poi, "floor_count"):
             poi_data["floor_count"] = poi.floor_count
-            poi_data["cleared_floors"] = list(poi.cleared_floors)
+            if hasattr(poi, "cleared_floors"):
+                poi_data["cleared_floors"] = list(poi.cleared_floors)
         
         pois_data[poi.poi_id] = poi_data
     
@@ -663,8 +668,10 @@ def _deserialize_overworld(data: Dict[str, Any]):
 
 
 def _deserialize_pois(overworld_map, pois_data: Dict[str, Any]) -> None:
-    """Restore POIs to overworld map."""
-    from world.poi.types import DungeonPOI, VillagePOI, TownPOI, CampPOI
+    """Restore POIs to overworld map using the registry."""
+    from world.poi.registry import get_registry
+    
+    registry = get_registry()
     
     for poi_id, poi_data in pois_data.items():
         poi_type = poi_data.get("poi_type", "dungeon")
@@ -672,26 +679,36 @@ def _deserialize_pois(overworld_map, pois_data: Dict[str, Any]) -> None:
         level = poi_data.get("level", 1)
         name = poi_data.get("name")
         
-        # Create appropriate POI type
+        # Extract type-specific data for creation
+        kwargs = {}
         if poi_type == "dungeon":
-            floor_count = poi_data.get("floor_count", 5)
-            poi = DungeonPOI(poi_id, position, level, name, floor_count)
+            kwargs["floor_count"] = poi_data.get("floor_count", 5)
+        
+        # Create POI using registry
+        try:
+            poi = registry.create(poi_type, poi_id, position, level=level, name=name, **kwargs)
+        except ValueError:
+            # Fallback: try to create as dungeon if type not registered
+            print(f"Warning: POI type '{poi_type}' not registered, defaulting to dungeon")
+            kwargs.setdefault("floor_count", poi_data.get("floor_count", 5))
+            poi = registry.create("dungeon", poi_id, position, level=level, name=name, **kwargs)
+        
+        # Restore type-specific state
+        if poi_type == "dungeon" and hasattr(poi, "cleared_floors"):
             cleared_floors = poi_data.get("cleared_floors", [])
             poi.cleared_floors = set(cleared_floors)
-        elif poi_type == "village":
-            poi = VillagePOI(poi_id, position, level, name)
-        elif poi_type == "town":
-            poi = TownPOI(poi_id, position, level, name)
-        elif poi_type == "camp":
-            poi = CampPOI(poi_id, position, level, name)
-        else:
-            # Default to dungeon
-            poi = DungeonPOI(poi_id, position, level, name)
         
-        # Restore state
+        # Restore common state
         poi.discovered = poi_data.get("discovered", False)
         poi.cleared = poi_data.get("cleared", False)
         poi.state = poi_data.get("state", {})
+        
+        # Restore POI-specific state using extensibility method
+        poi_specific_data = {k: v for k, v in poi_data.items() 
+                            if k not in ["poi_id", "poi_type", "position", "level", "name", 
+                                        "discovered", "cleared", "state", "floor_count", "cleared_floors"]}
+        if poi_specific_data:
+            poi.deserialize_state(poi_specific_data)
         
         # Add to map
         overworld_map.add_poi(poi)

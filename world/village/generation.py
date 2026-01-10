@@ -16,6 +16,7 @@ from .tiles import (
     BUILDING_FLOOR_TILE,
     BUILDING_WALL_TILE,
     BUILDING_ENTRANCE_TILE,
+    TREE_TILE,
 )
 from .buildings import Building, place_buildings
 from .npcs import VillageNPC, create_npc_for_building
@@ -44,23 +45,23 @@ def generate_village(
     base_tiles_x = WINDOW_WIDTH // TILE_SIZE
     base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
     
-    # Village size scaling
+    # Village size scaling - made larger with more variety
     if level <= 3:
-        # Small village
-        scale = random.uniform(0.9, 1.1)
+        # Small village - now larger
+        scale = random.uniform(1.2, 1.6)
     elif level <= 7:
-        # Medium village
-        scale = random.uniform(1.1, 1.4)
+        # Medium village - significantly larger
+        scale = random.uniform(1.6, 2.2)
     else:
-        # Large village
-        scale = random.uniform(1.4, 1.8)
+        # Large village - very large with good variety
+        scale = random.uniform(2.0, 2.8)
     
     map_width = int(base_tiles_x * scale)
     map_height = int(base_tiles_y * scale)
     
-    # Ensure minimum size
-    map_width = max(30, map_width)
-    map_height = max(30, map_height)
+    # Ensure minimum size (increased from 30)
+    map_width = max(40, map_width)
+    map_height = max(40, map_height)
     
     # Create empty map (all walls initially)
     tiles = [[WALL_TILE for _ in range(map_width)] for _ in range(map_height)]
@@ -68,6 +69,10 @@ def generate_village(
     # Place central plaza
     plaza_x, plaza_y, plaza_w, plaza_h = _place_plaza(map_width, map_height, level)
     _carve_area(tiles, plaza_x, plaza_y, plaza_w, plaza_h, VILLAGE_PLAZA_TILE)
+    
+    # Calculate plaza center coordinates (needed for building placement)
+    plaza_center_x = plaza_x + plaza_w // 2
+    plaza_center_y = plaza_y + plaza_h // 2
     
     # Place buildings
     buildings = place_buildings(map_width, map_height, level, seed)
@@ -115,9 +120,7 @@ def generate_village(
     if 0 <= entrance_x < map_width and 0 <= entrance_y < map_height:
         tiles[entrance_y][entrance_x] = VILLAGE_PATH_TILE
     
-    # Path from entrance to plaza
-    plaza_center_x = plaza_x + plaza_w // 2
-    plaza_center_y = plaza_y + plaza_h // 2
+    # Path from entrance to plaza (plaza_center_x and plaza_center_y already calculated above)
     _create_path(tiles, entrance_x, entrance_y, plaza_center_x, plaza_center_y)
     
     # Paths from plaza to each building entrance
@@ -149,6 +152,12 @@ def generate_village(
             if tiles[y][x] == WALL_TILE:
                 tiles[y][x] = VILLAGE_GRASS_TILE
     
+    # Add decorative elements: trees, rocks, etc.
+    _place_decorative_elements(tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
+    
+    # Add some wandering villagers outside buildings
+    _add_wandering_villagers(npcs, tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
+    
     # Create GameMap
     village_map = GameMap(
         tiles=tiles,
@@ -160,6 +169,9 @@ def generate_village(
     
     # Store entrance position for player placement
     village_map.village_entrance = (entrance_x, entrance_y)
+    
+    # Store buildings for building detection and room hints
+    village_map.village_buildings = buildings
     
     return village_map
 
@@ -175,19 +187,19 @@ def _place_plaza(
     Returns:
         (x, y, width, height) of plaza
     """
-    # Plaza size based on level
+    # Plaza size based on level - made larger to match larger villages
     if level <= 3:
-        # Small plaza
-        min_size = 6
-        max_size = 8
-    elif level <= 7:
-        # Medium plaza
+        # Small plaza (larger than before)
         min_size = 8
-        max_size = 10
-    else:
-        # Large plaza
-        min_size = 10
         max_size = 12
+    elif level <= 7:
+        # Medium plaza (significantly larger)
+        min_size = 12
+        max_size = 16
+    else:
+        # Large plaza (very large)
+        min_size = 14
+        max_size = 20
     
     plaza_w = random.randint(min_size, max_size)
     plaza_h = random.randint(min_size, max_size)
@@ -323,4 +335,156 @@ def _create_path(
     # Mark destination
     if 0 <= current_x < len(tiles[0]) and 0 <= current_y < len(tiles):
         tiles[current_y][current_x] = VILLAGE_PATH_TILE
+
+
+def _place_decorative_elements(
+    tiles: List[List],
+    map_width: int,
+    map_height: int,
+    buildings: List[Building],
+    plaza_x: int,
+    plaza_y: int,
+    plaza_w: int,
+    plaza_h: int,
+) -> None:
+    """
+    Place trees and other decorative elements around the village.
+    Avoids paths, buildings, and plaza.
+    """
+    # Calculate safe areas (don't place trees here)
+    safe_tiles = set()
+    
+    # Mark plaza as safe
+    for dy in range(plaza_h):
+        for dx in range(plaza_w):
+            tx = plaza_x + dx
+            ty = plaza_y + dy
+            if 0 <= tx < map_width and 0 <= ty < map_height:
+                safe_tiles.add((tx, ty))
+    
+    # Mark buildings and their immediate surroundings as safe (3 tiles around)
+    for building in buildings:
+        for dy in range(-3, building.height + 3):
+            for dx in range(-3, building.width + 3):
+                tx = building.x + dx
+                ty = building.y + dy
+                if 0 <= tx < map_width and 0 <= ty < map_height:
+                    safe_tiles.add((tx, ty))
+    
+    # Mark paths as safe (check all tiles and mark path tiles + 1 tile buffer)
+    for y in range(map_height):
+        for x in range(map_width):
+            if tiles[y][x] == VILLAGE_PATH_TILE:
+                # Mark path tile and adjacent tiles
+                for dy in range(-1, 2):
+                    for dx in range(-1, 2):
+                        tx = x + dx
+                        ty = y + dy
+                        if 0 <= tx < map_width and 0 <= ty < map_height:
+                            safe_tiles.add((tx, ty))
+    
+    # Place trees in grass areas
+    # Number of trees based on map size (density: ~2-3% of grass tiles)
+    total_grass_tiles = map_width * map_height - len(safe_tiles)
+    num_trees = max(5, int(total_grass_tiles * random.uniform(0.02, 0.03)))
+    
+    placed_trees = 0
+    attempts = 0
+    max_attempts = num_trees * 10  # Give up after many failed attempts
+    
+    while placed_trees < num_trees and attempts < max_attempts:
+        attempts += 1
+        x = random.randint(0, map_width - 1)
+        y = random.randint(0, map_height - 1)
+        
+        # Check if this tile is safe and is grass
+        if (x, y) in safe_tiles:
+            continue
+        if tiles[y][x] != VILLAGE_GRASS_TILE:
+            continue
+        
+        # Avoid clustering - check if there's already a tree nearby (3 tile radius)
+        too_close = False
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                tx = x + dx
+                ty = y + dy
+                if 0 <= tx < map_width and 0 <= ty < map_height:
+                    if tiles[ty][tx] == TREE_TILE:
+                        too_close = True
+                        break
+            if too_close:
+                break
+        
+        if too_close:
+            continue
+        
+        # Place tree
+        tiles[y][x] = TREE_TILE
+        placed_trees += 1
+
+
+def _add_wandering_villagers(
+    npcs: List[VillageNPC],
+    tiles: List[List],
+    map_width: int,
+    map_height: int,
+    buildings: List[Building],
+    plaza_x: int,
+    plaza_y: int,
+    plaza_w: int,
+    plaza_h: int,
+) -> None:
+    """
+    Add some wandering villagers outside buildings for atmosphere.
+    They'll be placed in the plaza and on paths.
+    """
+    from .npcs import create_wandering_villager
+    
+    # Number of wandering villagers: 2-4
+    num_villagers = random.randint(2, 4)
+    
+    valid_positions = []
+    
+    # Find valid positions (plaza and paths, but not too close to buildings)
+    for y in range(map_height):
+        for x in range(map_width):
+            tile = tiles[y][x]
+            if tile not in (VILLAGE_PATH_TILE, VILLAGE_PLAZA_TILE):
+                continue
+            
+            # Check if too close to any building entrance (at least 2 tiles away)
+            too_close = False
+            for building in buildings:
+                if building.entrance_x is not None and building.entrance_y is not None:
+                    dist = abs(x - building.entrance_x) + abs(y - building.entrance_y)
+                    if dist < 2:
+                        too_close = True
+                        break
+            
+            if not too_close:
+                valid_positions.append((x, y))
+    
+    # Place villagers
+    placed = 0
+    for _ in range(min(num_villagers, len(valid_positions))):
+        if not valid_positions:
+            break
+        
+        x, y = random.choice(valid_positions)
+        valid_positions.remove((x, y))
+        
+        # Convert to world coordinates
+        world_x = x * TILE_SIZE + (TILE_SIZE - 24) / 2
+        world_y = y * TILE_SIZE + (TILE_SIZE - 24) / 2
+        
+        # Create wandering villager with generated name
+        villager = create_wandering_villager(
+            world_x,
+            world_y,
+            npc_id=f"wandering_villager_{placed}",
+        )
+        if villager:
+            npcs.append(villager)
+            placed += 1
 
