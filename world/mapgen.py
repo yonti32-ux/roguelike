@@ -1,6 +1,6 @@
 import random
 import math
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TILE_SIZE
 from world.tiles import (
@@ -10,6 +10,7 @@ from world.tiles import (
     UP_STAIRS_TILE,
     DOWN_STAIRS_TILE,
 )
+from world.generation.config import load_generation_config
 
 
 class RectRoom:
@@ -80,61 +81,57 @@ def generate_floor(
     """
 
     # --- Decide overall map dimensions in tiles, based on depth ---
+    gen_config = load_generation_config()
     base_tiles_x = WINDOW_WIDTH // TILE_SIZE
     base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
     base_area = base_tiles_x * base_tiles_y
 
-    # Progressive scaling: start smaller, get bigger as you go deeper
-    # Increased minimum scales to make maps bigger overall
-    if floor_index == 1:
-        # First floor: slightly bigger starting maps
-        scales = [0.9, 1.0, 1.1]
-        weights = [0.3, 0.4, 0.3]
-    elif floor_index == 2:
-        # Second floor: normal to slightly bigger
-        scales = [1.0, 1.1, 1.25]
-        weights = [0.3, 0.4, 0.3]
-    elif floor_index <= 4:
-        # Floors 3-4: normal to bigger
-        scales = [1.1, 1.25, 1.5]
-        weights = [0.2, 0.5, 0.3]
-    elif floor_index <= 6:
-        # Floors 5-6: bigger maps
-        scales = [1.25, 1.5, 1.75]
-        weights = [0.3, 0.4, 0.3]
-    elif floor_index <= 8:
-        # Floors 7-8: large maps
-        scales = [1.5, 1.75, 2.0]
-        weights = [0.2, 0.5, 0.3]
+    # Progressive scaling: use config-based scaling rules
+    size_scaling = gen_config.floor.size_scaling
+    scale_config = _get_scale_config_for_floor(floor_index, size_scaling)
+    
+    if scale_config:
+        scales = scale_config["scales"]
+        weights = scale_config["weights"]
+        scale = random.choices(scales, weights=weights, k=1)[0]
     else:
-        # Deep floors (9+): very large maps
-        scales = [1.75, 2.0, 2.25]
-        weights = [0.3, 0.4, 0.3]
-
-    scale = random.choices(scales, weights=weights, k=1)[0]
+        # Fallback: use default scale
+        scale = 1.0
 
     tiles_x = int(base_tiles_x * scale)
     tiles_y = int(base_tiles_y * scale)
 
-    # Safety clamp: minimum 0.9x (not too small), maximum 2.5x (allow bigger maps)
-    tiles_x = max(int(base_tiles_x * 0.9), min(tiles_x, int(base_tiles_x * 2.5)))
-    tiles_y = max(int(base_tiles_y * 0.9), min(tiles_y, int(base_tiles_y * 2.5)))
+    # Safety clamp: use config-based min/max
+    min_scale = gen_config.floor.min_scale
+    max_scale = gen_config.floor.max_scale
+    tiles_x = max(int(base_tiles_x * min_scale), min(tiles_x, int(base_tiles_x * max_scale)))
+    tiles_y = max(int(base_tiles_y * min_scale), min(tiles_y, int(base_tiles_y * max_scale)))
 
     tiles = _create_empty_map(tiles_x, tiles_y)
 
     # --- Decide how many rooms to try for, based on map area ---
+    room_count_config = gen_config.floor.room_count
     floor_area = tiles_x * tiles_y
     area_ratio = floor_area / base_area if base_area > 0 else 1.0
-    # Use sqrt so 2× area ≈ 1.41× rooms (not double)
-    density_factor = math.sqrt(area_ratio)
+    
+    # Use configured density formula
+    if room_count_config.get("density_formula") == "sqrt":
+        density_factor = math.sqrt(area_ratio)
+    else:
+        # Default to linear
+        density_factor = area_ratio
 
-    base_rooms = 10
+    base_rooms = room_count_config["base"]
     max_rooms = int(round(base_rooms * density_factor))
     # Clamp so tiny floors still have a few rooms and huge floors don't explode
-    max_rooms = max(6, min(max_rooms, 22))
+    min_rooms = room_count_config["min"]
+    max_room_limit = room_count_config["max"]
+    max_rooms = max(min_rooms, min(max_rooms, max_room_limit))
 
-    room_min_size = 4
-    room_max_size = 9
+    room_size_config = gen_config.floor.room_size
+    room_min_size = room_size_config["min"]
+    room_max_size = room_size_config["max"]
+    wall_border = gen_config.floor.wall_border
 
     rooms: List[RectRoom] = []
 
@@ -142,12 +139,13 @@ def generate_floor(
         w = random.randint(room_min_size, room_max_size)
         h = random.randint(room_min_size, room_max_size)
 
-        # Keep at least a 1-tile wall border around the outside
-        if w + 2 >= tiles_x or h + 2 >= tiles_y:
+        # Keep configured wall border around the outside
+        border_size = wall_border + 1  # +1 for room boundary
+        if w + border_size >= tiles_x or h + border_size >= tiles_y:
             continue
 
-        x = random.randint(1, tiles_x - w - 2)
-        y = random.randint(1, tiles_y - h - 2)
+        x = random.randint(1, tiles_x - w - border_size)
+        y = random.randint(1, tiles_y - h - border_size)
 
         new_room = RectRoom(x, y, w, h)
 
@@ -206,40 +204,77 @@ def generate_floor(
                 event_room = random.choice(event_candidates)
                 event_room.tag = "event"
 
-            # 5) Shop room = another remaining generic room, not guaranteed every floor
+            # Apply room tags using config
+            gen_config = load_generation_config()
+            room_tags_config = gen_config.room_tags
+            
+            # Track how many of each tag type we've placed this floor
+            tags_placed: Dict[str, int] = {}
+            
+            # Shop room
+            shop_config = room_tags_config.shop
             shop_candidates = [r for r in rooms if r.tag == "generic"]
-            if shop_candidates and random.random() < 0.7:
+            if (shop_candidates and 
+                tags_placed.get("shop", 0) < shop_config.get("max_per_floor", 1) and
+                random.random() < shop_config.get("chance", 0.7)):
                 shop_room = random.choice(shop_candidates)
                 shop_room.tag = "shop"
+                tags_placed["shop"] = tags_placed.get("shop", 0) + 1
 
-            # 6) Graveyard room: themed undead encounter room (mid+ floors preferred)
+            # Graveyard room
+            graveyard_config = room_tags_config.graveyard
             graveyard_candidates = [r for r in rooms if r.tag == "generic"]
-            if graveyard_candidates and floor_index >= 2 and random.random() < 0.8:
+            if (graveyard_candidates and 
+                floor_index >= graveyard_config.get("min_floor", 2) and
+                tags_placed.get("graveyard", 0) < graveyard_config.get("max_per_floor", 1) and
+                random.random() < graveyard_config.get("chance", 0.8)):
                 graveyard_room = random.choice(graveyard_candidates)
                 graveyard_room.tag = "graveyard"
+                tags_placed["graveyard"] = tags_placed.get("graveyard", 0) + 1
 
-            # 7) Sanctum room: safe-ish room for boons / healing (rarer)
+            # Sanctum room
+            sanctum_config = room_tags_config.sanctum
             sanctum_candidates = [r for r in rooms if r.tag == "generic"]
-            if sanctum_candidates and floor_index >= 3 and random.random() < 0.5:
+            if (sanctum_candidates and 
+                floor_index >= sanctum_config.get("min_floor", 3) and
+                tags_placed.get("sanctum", 0) < sanctum_config.get("max_per_floor", 1) and
+                random.random() < sanctum_config.get("chance", 0.5)):
                 sanctum_room = random.choice(sanctum_candidates)
                 sanctum_room.tag = "sanctum"
+                tags_placed["sanctum"] = tags_placed.get("sanctum", 0) + 1
 
-            # 8) Extra future room tags: armory, library, arena
-            # These are mostly for later content hooks; for now they just mark rooms.
+            # Armory room
+            armory_config = room_tags_config.armory
             armory_candidates = [r for r in rooms if r.tag == "generic"]
-            if armory_candidates and floor_index >= 2 and random.random() < 0.5:
+            if (armory_candidates and 
+                floor_index >= armory_config.get("min_floor", 2) and
+                tags_placed.get("armory", 0) < armory_config.get("max_per_floor", 1) and
+                random.random() < armory_config.get("chance", 0.5)):
                 armory_room = random.choice(armory_candidates)
                 armory_room.tag = "armory"
+                tags_placed["armory"] = tags_placed.get("armory", 0) + 1
 
+            # Library room
+            library_config = room_tags_config.library
             library_candidates = [r for r in rooms if r.tag == "generic"]
-            if library_candidates and floor_index >= 2 and random.random() < 0.5:
+            if (library_candidates and 
+                floor_index >= library_config.get("min_floor", 2) and
+                tags_placed.get("library", 0) < library_config.get("max_per_floor", 1) and
+                random.random() < library_config.get("chance", 0.5)):
                 library_room = random.choice(library_candidates)
                 library_room.tag = "library"
+                tags_placed["library"] = tags_placed.get("library", 0) + 1
 
+            # Arena room
+            arena_config = room_tags_config.arena
             arena_candidates = [r for r in rooms if r.tag == "generic"]
-            if arena_candidates and floor_index >= 3 and random.random() < 0.4:
+            if (arena_candidates and 
+                floor_index >= arena_config.get("min_floor", 3) and
+                tags_placed.get("arena", 0) < arena_config.get("max_per_floor", 1) and
+                random.random() < arena_config.get("chance", 0.4)):
                 arena_room = random.choice(arena_candidates)
                 arena_room.tag = "arena"
+                tags_placed["arena"] = tags_placed.get("arena", 0) + 1
 
     # Decide stair tiles (still using first/last room centers)
     if rooms:
@@ -255,3 +290,44 @@ def generate_floor(
     tiles[down_ty][down_tx] = DOWN_STAIRS_TILE
 
     return tiles, up_tx, up_ty, down_tx, down_ty, rooms
+
+
+def _get_scale_config_for_floor(floor_index: int, size_scaling: Dict[str, Dict[str, Any]]) -> Dict[str, Any] | None:
+    """
+    Get scale configuration for a given floor index.
+    
+    Args:
+        floor_index: Floor number (1-based)
+        size_scaling: Size scaling configuration dictionary
+        
+    Returns:
+        Scale config dict with 'scales' and 'weights', or None if not found
+    """
+    # Check exact floor match first
+    floor_key = str(floor_index)
+    if floor_key in size_scaling:
+        return size_scaling[floor_key]
+    
+    # Check range matches (e.g., "3-4", "5-6", "9+")
+    for key, config in size_scaling.items():
+        if "-" in key:
+            # Range like "3-4"
+            parts = key.split("-")
+            if len(parts) == 2:
+                try:
+                    min_floor = int(parts[0])
+                    max_floor = int(parts[1])
+                    if min_floor <= floor_index <= max_floor:
+                        return config
+                except ValueError:
+                    continue
+        elif key.endswith("+"):
+            # Range like "9+"
+            try:
+                min_floor = int(key[:-1])
+                if floor_index >= min_floor:
+                    return config
+            except ValueError:
+                continue
+    
+    return None

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 
 from systems.inventory import get_item_def
 from systems.party import CompanionState, get_companion, recalc_companion_stats_for_level
-from systems.stats import apply_hero_stats_to_player
+from .hero_manager import apply_hero_stats_to_player
 
 if TYPE_CHECKING:
     from ..core.game import Game

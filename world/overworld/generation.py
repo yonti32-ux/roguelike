@@ -9,10 +9,11 @@ import math
 from typing import List, Tuple, Optional, Dict
 
 from .map import OverworldMap
-from .terrain import TerrainType, TERRAIN_GRASS, TERRAIN_FOREST, TERRAIN_MOUNTAIN, TERRAIN_WATER, TERRAIN_PLAINS, TERRAIN_DESERT
+from .terrain import TerrainType, TERRAIN_GRASS, TERRAIN_FOREST, TERRAIN_MOUNTAIN, TERRAIN_WATER, TERRAIN_PLAINS, TERRAIN_DESERT, get_terrain
 from .config import OverworldConfig
 from ..poi.base import PointOfInterest
 from ..poi.types import DungeonPOI, VillagePOI, TownPOI, CampPOI
+from ..generation.config import load_generation_config
 
 
 class WorldGenerator:
@@ -29,6 +30,7 @@ class WorldGenerator:
             seed: Random seed (if None, uses config seed or generates new)
         """
         self.config = config
+        self.gen_config = load_generation_config()  # Load generation settings
         
         # Use provided seed, config seed, or generate new
         if seed is not None:
@@ -103,26 +105,16 @@ class WorldGenerator:
         for y in range(self.config.world_height):
             row = []
             for x in range(self.config.world_width):
-                # Initial random distribution (more varied for biome seeding)
+                # Use config-based terrain distribution
                 rand = random.random()
-                if rand < 0.35:
-                    terrain = TERRAIN_GRASS
-                elif rand < 0.55:
-                    terrain = TERRAIN_PLAINS
-                elif rand < 0.70:
-                    terrain = TERRAIN_FOREST
-                elif rand < 0.82:
-                    terrain = TERRAIN_MOUNTAIN
-                elif rand < 0.92:
-                    terrain = TERRAIN_DESERT
-                else:
-                    terrain = TERRAIN_WATER
+                terrain = self._pick_terrain_from_config(rand, self.gen_config.terrain.initial_distribution)
                 row.append(terrain)
             tiles.append(row)
         
         # Apply cellular automata smoothing to create biome regions
         # This creates clusters of similar terrain
-        tiles = self._smooth_terrain(tiles, iterations=3)
+        smoothing = self.gen_config.terrain.smoothing
+        tiles = self._smooth_terrain(tiles, iterations=smoothing["iterations"])
         
         # Add some variation and refine transitions
         tiles = self._refine_terrain(tiles)
@@ -138,6 +130,11 @@ class WorldGenerator:
         """
         width = len(tiles[0])
         height = len(tiles)
+        smoothing = self.gen_config.terrain.smoothing
+        water_clustering = self.gen_config.terrain.water_clustering
+        neighbor_radius = smoothing["neighbor_radius"]
+        conversion_threshold = smoothing["conversion_threshold"]
+        conversion_chance = smoothing["conversion_chance"]
         
         for _ in range(iterations):
             new_tiles = [row[:] for row in tiles]  # Copy current state
@@ -146,7 +143,6 @@ class WorldGenerator:
                 for x in range(width):
                     # Count neighbors of each terrain type
                     neighbor_counts = {}
-                    neighbor_radius = 1
                     
                     for dy in range(-neighbor_radius, neighbor_radius + 1):
                         for dx in range(-neighbor_radius, neighbor_radius + 1):
@@ -166,10 +162,8 @@ class WorldGenerator:
                         most_common = max(neighbor_counts.items(), key=lambda x: x[1])
                         most_common_id, count = most_common
                         
-                        # If at least 4 neighbors are the same type, convert this tile
-                        # (with some randomness to avoid complete uniformity)
-                        if count >= 4 and random.random() < 0.6:
-                            from .terrain import get_terrain
+                        # Use config-based conversion threshold and chance
+                        if count >= conversion_threshold and random.random() < conversion_chance:
                             new_terrain = get_terrain(most_common_id)
                             if new_terrain:
                                 new_tiles[y][x] = new_terrain
@@ -179,13 +173,14 @@ class WorldGenerator:
                     current_terrain = tiles[y][x]
                     if current_terrain.id == "water":
                         water_neighbors = neighbor_counts.get("water", 0)
+                        min_neighbors = water_clustering["min_neighbors"]
+                        isolation_chance = water_clustering["isolation_conversion_chance"]
                         # If surrounded by mostly non-water, convert to adjacent terrain
-                        if water_neighbors < 2 and random.random() < 0.3:
+                        if water_neighbors < min_neighbors and random.random() < isolation_chance:
                             # Convert to most common non-water neighbor
                             non_water = [(tid, cnt) for tid, cnt in neighbor_counts.items() if tid != "water"]
                             if non_water:
                                 new_terrain_id = max(non_water, key=lambda x: x[1])[0]
-                                from .terrain import get_terrain
                                 new_terrain = get_terrain(new_terrain_id)
                                 if new_terrain:
                                     new_tiles[y][x] = new_terrain
@@ -217,44 +212,45 @@ class WorldGenerator:
                 # Count neighboring terrain types
                 neighbors = self._get_neighbor_terrain_types(tiles, x, y, width, height)
                 
-                # Realistic terrain placement rules
+                # Realistic terrain placement rules (using config)
+                refinement = self.gen_config.terrain.refinement
                 
                 # Forests prefer being near water or in grass/plains areas
                 if current.id == "forest":
                     has_water = "water" in neighbors
                     has_grass_plains = any(t in neighbors for t in ["grass", "plains"])
                     # If isolated from water and in desert/mountain, might convert
-                    if not has_water and not has_grass_plains and random.random() < 0.15:
+                    isolation_chance = refinement["forest_isolation_chance"]
+                    if not has_water and not has_grass_plains and random.random() < isolation_chance:
                         # Convert to nearby terrain type
                         if "grass" in neighbors or "plains" in neighbors:
-                            from .terrain import get_terrain
                             tiles[y][x] = get_terrain(random.choice(["grass", "plains"])) or current
                 
                 # Deserts avoid water and forests
                 elif current.id == "desert":
                     has_water = "water" in neighbors
                     has_forest = "forest" in neighbors
-                    if (has_water or has_forest) and random.random() < 0.25:
+                    conversion_chance = refinement["desert_conversion_chance"]
+                    if (has_water or has_forest) and random.random() < conversion_chance:
                         # Convert to plains or grass
-                        from .terrain import get_terrain
                         tiles[y][x] = get_terrain(random.choice(["plains", "grass"])) or current
                 
                 # Mountains avoid water (but can be near it)
                 elif current.id == "mountain":
-                    has_water = neighbors.count("water") >= 3
-                    if has_water and random.random() < 0.2:
+                    water_threshold = refinement["mountain_water_threshold"]
+                    conversion_chance = refinement["mountain_conversion_chance"]
+                    has_water = neighbors.count("water") >= water_threshold
+                    if has_water and random.random() < conversion_chance:
                         # Convert to forest or grass (mountainous coast)
-                        from .terrain import get_terrain
                         tiles[y][x] = get_terrain(random.choice(["forest", "grass"])) or current
                 
                 # Add some variation: occasionally add small features
                 # (e.g., small forest patches in plains)
-                if random.random() < 0.02:  # 2% chance
+                variation_chance = refinement["variation_chance"]
+                if random.random() < variation_chance:
                     if current.id == "plains" and "forest" in neighbors:
-                        from .terrain import get_terrain
                         tiles[y][x] = get_terrain("forest") or current
                     elif current.id == "grass" and "plains" in neighbors:
-                        from .terrain import get_terrain
                         tiles[y][x] = get_terrain("plains") or current
         
         return tiles
@@ -281,6 +277,28 @@ class WorldGenerator:
                     neighbors.append(tiles[ny][nx].id)
         
         return neighbors
+    
+    def _pick_terrain_from_config(self, rand: float, distribution: Dict[str, float]) -> TerrainType:
+        """
+        Pick terrain type based on random value and distribution config.
+        
+        Args:
+            rand: Random value between 0.0 and 1.0
+            distribution: Dictionary mapping terrain IDs to cumulative weights
+            
+        Returns:
+            TerrainType instance
+        """
+        cumulative = 0.0
+        for terrain_id, weight in distribution.items():
+            cumulative += weight
+            if rand < cumulative:
+                terrain = get_terrain(terrain_id)
+                if terrain:
+                    return terrain
+        
+        # Fallback to grass if distribution doesn't cover 1.0
+        return TERRAIN_GRASS
     
     def _place_pois(self, overworld: OverworldMap) -> List[PointOfInterest]:
         """
@@ -344,16 +362,17 @@ class WorldGenerator:
                     return (x, y)
         
         # Random starting location
-        # Try to find a walkable tile (prefer grass/plains)
+        # Try to find a walkable tile (prefer configured terrain types)
         max_attempts = 100
+        preferred_terrain = self.gen_config.poi.preferred_starting_terrain
         for _ in range(max_attempts):
             x = random.randint(0, overworld.width - 1)
             y = random.randint(0, overworld.height - 1)
             
             if overworld.is_walkable(x, y):
                 tile = overworld.get_tile(x, y)
-                # Prefer starting on grass or plains
-                if tile and tile.id in ("grass", "plains"):
+                # Prefer starting on configured terrain types
+                if tile and tile.id in preferred_terrain:
                     return (x, y)
         
         # Fallback: any walkable tile
