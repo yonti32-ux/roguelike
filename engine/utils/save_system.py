@@ -13,6 +13,7 @@ from systems.progression import HeroStats
 from systems.inventory import Inventory
 from systems.party import CompanionState
 from systems.stats import StatBlock
+from systems.character_creation import AppearanceConfig, StatDistribution
 from world.game_map import GameMap
 from world.entities import Player
 from world.tiles import Tile, FLOOR_TILE, WALL_TILE, UP_STAIRS_TILE, DOWN_STAIRS_TILE
@@ -203,7 +204,7 @@ def _serialize_game(game) -> Dict[str, Any]:
         }
 
     return {
-        "version": "1.2",  # Save format version (bumped for world_name support)
+        "version": "1.3",  # Save format version (bumped for character creation enhancements)
         "floor": current_floor_num,
         "hero_stats": hero_stats_dict,
         "inventory": inventory_dict,
@@ -222,7 +223,7 @@ def _serialize_game(game) -> Dict[str, Any]:
 
 def _serialize_hero_stats(hero_stats: HeroStats) -> Dict[str, Any]:
     """Serialize HeroStats to dict."""
-    return {
+    result = {
         "level": hero_stats.level,
         "xp": hero_stats.xp,
         "gold": hero_stats.gold,
@@ -234,6 +235,20 @@ def _serialize_hero_stats(hero_stats: HeroStats) -> Dict[str, Any]:
         "skill_points": hero_stats.skill_points,
         "skill_ranks": dict(hero_stats.skill_ranks),
     }
+    
+    # New fields (version 1.3+)
+    if hero_stats.background_id is not None:
+        result["background_id"] = hero_stats.background_id
+    if hero_stats.traits:
+        result["traits"] = list(hero_stats.traits)
+    if hero_stats.trait_points_available != 5:  # Only save if not default
+        result["trait_points_available"] = hero_stats.trait_points_available
+    if hero_stats.stat_distribution is not None:
+        result["stat_distribution"] = _serialize_stat_distribution(hero_stats.stat_distribution)
+    if hero_stats.appearance is not None:
+        result["appearance"] = _serialize_appearance(hero_stats.appearance)
+    
+    return result
 
 
 def _serialize_stat_block(stat_block: StatBlock) -> Dict[str, Any]:
@@ -411,7 +426,8 @@ def _deserialize_game(screen, save_data: Dict[str, Any]) -> Any:
     
     # Restore hero stats
     if "hero_stats" in save_data:
-        _deserialize_hero_stats(game.hero_stats, save_data["hero_stats"])
+        version = save_data.get("version", "1.0")  # Default to 1.0 for very old saves
+        _deserialize_hero_stats(game.hero_stats, save_data["hero_stats"], version=version)
     
     # Restore inventory
     if "inventory" in save_data:
@@ -514,7 +530,7 @@ def _deserialize_game(screen, save_data: Dict[str, Any]) -> Any:
     return game
 
 
-def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any]) -> None:
+def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any], version: str = "1.3") -> None:
     """Restore HeroStats from dict."""
     hero_stats.level = data.get("level", 1)
     hero_stats.xp = data.get("xp", 0)
@@ -528,6 +544,23 @@ def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any]) -> None
     
     if "base" in data:
         _deserialize_stat_block(hero_stats.base, data["base"])
+    
+    # New fields (version 1.3+) - use defaults for older saves
+    if version >= "1.3":
+        hero_stats.background_id = data.get("background_id")
+        hero_stats.traits = list(data.get("traits", []))
+        hero_stats.trait_points_available = data.get("trait_points_available", 5)
+        if "stat_distribution" in data and data["stat_distribution"] is not None:
+            hero_stats.stat_distribution = _deserialize_stat_distribution(data["stat_distribution"])
+        if "appearance" in data and data["appearance"] is not None:
+            hero_stats.appearance = _deserialize_appearance(data["appearance"])
+    else:
+        # Default values for old saves
+        hero_stats.background_id = None
+        hero_stats.traits = []
+        hero_stats.trait_points_available = 5
+        hero_stats.stat_distribution = None
+        hero_stats.appearance = None
 
 
 def _deserialize_stat_block(stat_block: StatBlock, data: Dict[str, Any]) -> None:
@@ -551,11 +584,98 @@ def _deserialize_stat_block(stat_block: StatBlock, data: Dict[str, Any]) -> None
 def _deserialize_inventory(inventory: Inventory, data: Dict[str, Any]) -> None:
     """Restore Inventory from dict."""
     inventory.items = list(data.get("items", []))
-    inventory.equipped = dict(data.get("equipped", {"weapon": None, "armor": None, "trinket": None}))
+    
+    # Get equipped items from save data
+    equipped_data = data.get("equipped", {})
+    
+    # Backwards compatibility: migrate old "trinket" slot to "ring" or "amulet"
+    if "trinket" in equipped_data and "ring" not in equipped_data:
+        trinket_item_id = equipped_data.get("trinket")
+        if trinket_item_id:
+            # Try to determine if it's a ring or amulet based on the item
+            from systems.inventory import get_item_def
+            item = get_item_def(trinket_item_id)
+            if item:
+                item_name_lower = item.name.lower()
+                item_id_lower = trinket_item_id.lower()
+                if "ring" in item_id_lower or "ring" in item_name_lower:
+                    equipped_data["ring"] = trinket_item_id
+                elif "amulet" in item_id_lower or "amulet" in item_name_lower or "locket" in item_id_lower or "locket" in item_name_lower:
+                    equipped_data["amulet"] = trinket_item_id
+                else:
+                    # Default to ring
+                    equipped_data["ring"] = trinket_item_id
+        # Remove old trinket key
+        del equipped_data["trinket"]
+    
+    # Default equipped slots (new system)
+    default_equipped = {
+        "weapon": None,
+        "helmet": None,
+        "armor": None,
+        "gloves": None,
+        "boots": None,
+        "shield": None,
+        "cloak": None,
+        "ring": None,
+        "amulet": None,
+    }
+    
+    # Merge saved equipped data with defaults
+    equipped = dict(default_equipped)
+    equipped.update(equipped_data)
+    
+    # Remove any keys that aren't in the new slot system
+    equipped = {k: v for k, v in equipped.items() if k in default_equipped}
+    
+    inventory.equipped = equipped
 
 
 def _deserialize_companion(data: Dict[str, Any]) -> CompanionState:
     """Reconstruct CompanionState from dict."""
+    # Get equipped items from save data
+    equipped_data = dict(data.get("equipped", {}))
+    
+    # Backwards compatibility: migrate old "trinket" slot to "ring" or "amulet"
+    if "trinket" in equipped_data and "ring" not in equipped_data:
+        trinket_item_id = equipped_data.get("trinket")
+        if trinket_item_id:
+            # Try to determine if it's a ring or amulet based on the item
+            from systems.inventory import get_item_def
+            item = get_item_def(trinket_item_id)
+            if item:
+                item_name_lower = item.name.lower()
+                item_id_lower = trinket_item_id.lower()
+                if "ring" in item_id_lower or "ring" in item_name_lower:
+                    equipped_data["ring"] = trinket_item_id
+                elif "amulet" in item_id_lower or "amulet" in item_name_lower or "locket" in item_id_lower or "locket" in item_name_lower:
+                    equipped_data["amulet"] = trinket_item_id
+                else:
+                    # Default to ring
+                    equipped_data["ring"] = trinket_item_id
+        # Remove old trinket key
+        del equipped_data["trinket"]
+    
+    # Default equipped slots (new system)
+    default_equipped = {
+        "weapon": None,
+        "helmet": None,
+        "armor": None,
+        "gloves": None,
+        "boots": None,
+        "shield": None,
+        "cloak": None,
+        "ring": None,
+        "amulet": None,
+    }
+    
+    # Merge saved equipped data with defaults
+    equipped = dict(default_equipped)
+    equipped.update(equipped_data)
+    
+    # Remove any keys that aren't in the new slot system
+    equipped = {k: v for k, v in equipped.items() if k in default_equipped}
+    
     companion = CompanionState(
         template_id=data["template_id"],
         name_override=data.get("name_override"),
@@ -563,7 +683,7 @@ def _deserialize_companion(data: Dict[str, Any]) -> CompanionState:
         xp=data.get("xp", 0),
         class_id=data.get("class_id"),
         perks=list(data.get("perks", [])),
-        equipped=dict(data.get("equipped", {"weapon": None, "armor": None, "trinket": None})),
+        equipped=equipped,
         skill_slots=list(data.get("skill_slots", [None, None, None, None])),
         skill_points=data.get("skill_points", 0),
         skill_ranks=dict(data.get("skill_ranks", {})),

@@ -75,8 +75,14 @@ class CompanionState:
     equipped: Dict[str, Optional[str]] = field(
         default_factory=lambda: {
             "weapon": None,
+            "helmet": None,
             "armor": None,
-            "trinket": None,
+            "gloves": None,
+            "boots": None,
+            "shield": None,
+            "cloak": None,
+            "ring": None,
+            "amulet": None,
         }
     )
 

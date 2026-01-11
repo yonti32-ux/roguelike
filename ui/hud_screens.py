@@ -395,7 +395,14 @@ def _draw_equipment_section(
     screen.blit(equipped_title, (x, y))
     y += LINE_HEIGHT_TITLE
     
-    slots = ["weapon", "armor", "trinket"]
+    # Use all equipment slots from the inventory (new system has 9 slots)
+    # Order them logically: weapon, then armor pieces, then accessories
+    slot_order = ["weapon", "helmet", "armor", "gloves", "boots", "shield", "cloak", "ring", "amulet"]
+    # Filter to only show slots that exist in equipped_map (or show all if equipped_map is None)
+    if equipped_map is not None:
+        slots = [slot for slot in slot_order if slot in equipped_map]
+    else:
+        slots = slot_order
     for slot in slots:
         item_def = None
         if equipped_map:
@@ -649,7 +656,7 @@ def _process_inventory_items(
     
     # Build flat list with category markers: (item_id or None for category header, slot_name)
     flat_list: List[Tuple[Optional[str], str]] = []
-    slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
+    slot_order = ["weapon", "helmet", "armor", "gloves", "boots", "shield", "cloak", "ring", "amulet", "consumable", "misc"]
     
     # If sorting is not default, don't show category headers
     from ui.inventory_enhancements import SortMode

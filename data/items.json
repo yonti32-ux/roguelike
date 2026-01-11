@@ -521,6 +521,130 @@
     }
   },
   {
+    "id": "makeshift_helm",
+    "name": "Makeshift Helm",
+    "slot": "helmet",
+    "rarity": "common",
+    "value": 2,
+    "description": "A dented pot-helm with straps that almost fit.",
+    "stats": {
+      "max_hp": 3,
+      "defense": 1
+    }
+  },
+  {
+    "id": "leather_cap",
+    "name": "Leather Cap",
+    "slot": "helmet",
+    "rarity": "common",
+    "value": 3,
+    "description": "A simple cap that turns worse luck into mere headaches.",
+    "stats": {
+      "max_hp": 3,
+      "defense": 1
+    }
+  },
+  {
+    "id": "rusted_helm",
+    "name": "Rusted Helm",
+    "slot": "helmet",
+    "rarity": "common",
+    "value": 4,
+    "description": "Old iron that still catches the edge of a blade.",
+    "stats": {
+      "defense": 1,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "iron_helm",
+    "name": "Iron Helm",
+    "slot": "helmet",
+    "rarity": "uncommon",
+    "value": 11,
+    "description": "A proper helm with a narrow slit and a stubborn weight.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "warded_hood",
+    "name": "Warded Hood",
+    "slot": "helmet",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "Runes stitched into the lining dampen harmful magic.",
+    "stats": {
+      "max_hp": 10,
+      "defense": 1,
+      "skill_power": 0.05
+    }
+  },
+  {
+    "id": "houndskull_helm",
+    "name": "Houndskull Helm",
+    "slot": "helmet",
+    "rarity": "uncommon",
+    "value": 14,
+    "description": "A visor shaped like a snarling beast's jaw.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "seers_cowl",
+    "name": "Seer's Cowl",
+    "slot": "helmet",
+    "rarity": "uncommon",
+    "value": 15,
+    "description": "A hood lined with symbols that sharpen inner sight.",
+    "stats": {
+      "skill_power": 0.12,
+      "defense": 1,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "knights_helmet",
+    "name": "Knight's Helmet",
+    "slot": "helmet",
+    "rarity": "rare",
+    "value": 25,
+    "description": "Polished steel that turns fear into background noise.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "rune_etched_helm",
+    "name": "Rune-Etched Helm",
+    "slot": "helmet",
+    "rarity": "rare",
+    "value": 30,
+    "description": "Etched runes flare faintly when danger commits.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 8,
+      "skill_power": 0.08
+    }
+  },
+  {
+    "id": "crown_of_embers",
+    "name": "Crown of Embers",
+    "slot": "helmet",
+    "rarity": "epic",
+    "value": 55,
+    "description": "A smoldering circlet that burns away hesitation.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 10,
+      "skill_power": 0.2
+    }
+  },
+  {
     "id": "cloth_tunic",
     "name": "Cloth Tunic",
     "slot": "armor",
@@ -529,28 +653,6 @@
     "description": "Simple cloth. Better than nothing, worse than hope.",
     "stats": {
       "max_hp": 6
-    }
-  },
-  {
-    "id": "reed_cape",
-    "name": "Reed Cape",
-    "slot": "armor",
-    "rarity": "common",
-    "value": 1,
-    "description": "Lightweight and flimsy, but it breaks up silhouettes.",
-    "stats": {
-      "max_hp": 4
-    }
-  },
-  {
-    "id": "tattered_cloak",
-    "name": "Tattered Cloak",
-    "slot": "armor",
-    "rarity": "common",
-    "value": 1,
-    "description": "Offers a whisper of protection.",
-    "stats": {
-      "max_hp": 5
     }
   },
   {
@@ -565,18 +667,6 @@
     }
   },
   {
-    "id": "makeshift_helm",
-    "name": "Makeshift Helm",
-    "slot": "armor",
-    "rarity": "common",
-    "value": 2,
-    "description": "A dented pot-helm with straps that almost fit.",
-    "stats": {
-      "max_hp": 3,
-      "defense": 1
-    }
-  },
-  {
     "id": "travelers_vest",
     "name": "Traveler's Vest",
     "slot": "armor",
@@ -585,18 +675,6 @@
     "description": "Pockets everywhere. Armor nowhere. Still, it helps.",
     "stats": {
       "max_hp": 5
-    }
-  },
-  {
-    "id": "wooden_shield",
-    "name": "Wooden Shield",
-    "slot": "armor",
-    "rarity": "common",
-    "value": 2,
-    "description": "A rough plank shield that can catch a lucky blow.",
-    "stats": {
-      "max_hp": 4,
-      "defense": 1
     }
   },
   {
@@ -633,18 +711,6 @@
     }
   },
   {
-    "id": "iron_greaves",
-    "name": "Iron Greaves",
-    "slot": "armor",
-    "rarity": "uncommon",
-    "value": 8,
-    "description": "Leg guards that keep you standing after nasty hits.",
-    "stats": {
-      "max_hp": 6,
-      "defense": 1
-    }
-  },
-  {
     "id": "leather_armor",
     "name": "Leather Armor",
     "slot": "armor",
@@ -669,18 +735,6 @@
     }
   },
   {
-    "id": "kite_shield",
-    "name": "Kite Shield",
-    "slot": "armor",
-    "rarity": "uncommon",
-    "value": 10,
-    "description": "A broad shield that forgives bad footwork.",
-    "stats": {
-      "max_hp": 6,
-      "defense": 2
-    }
-  },
-  {
     "id": "reinforced_coat",
     "name": "Reinforced Coat",
     "slot": "armor",
@@ -702,19 +756,6 @@
     "stats": {
       "max_hp": 16,
       "defense": 2
-    }
-  },
-  {
-    "id": "warded_hood",
-    "name": "Warded Hood",
-    "slot": "armor",
-    "rarity": "uncommon",
-    "value": 12,
-    "description": "Runes stitched into the lining dampen harmful magic.",
-    "stats": {
-      "max_hp": 10,
-      "defense": 1,
-      "skill_power": 0.05
     }
   },
   {
@@ -754,19 +795,6 @@
     }
   },
   {
-    "id": "shadow_cloak",
-    "name": "Shadow Cloak",
-    "slot": "armor",
-    "rarity": "rare",
-    "value": 18,
-    "description": "Light armor that muffles movement and dulls incoming force.",
-    "stats": {
-      "max_hp": 12,
-      "defense": 2,
-      "skill_power": 0.12
-    }
-  },
-  {
     "id": "plate_armor",
     "name": "Plate Armor",
     "slot": "armor",
@@ -789,18 +817,6 @@
       "max_hp": 14,
       "defense": 2,
       "skill_power": 0.1
-    }
-  },
-  {
-    "id": "tower_shield",
-    "name": "Tower Shield",
-    "slot": "armor",
-    "rarity": "rare",
-    "value": 22,
-    "description": "A wall of wood and iron—slow, but very convincing.",
-    "stats": {
-      "max_hp": 10,
-      "defense": 4
     }
   },
   {
@@ -874,18 +890,6 @@
       "max_hp": 22,
       "defense": 3,
       "skill_power": 0.08
-    }
-  },
-  {
-    "id": "aegis_shield",
-    "name": "Aegis Shield",
-    "slot": "armor",
-    "rarity": "epic",
-    "value": 42,
-    "description": "A legendary shield that turns aside the worst of a strike.",
-    "stats": {
-      "max_hp": 16,
-      "defense": 5
     }
   },
   {
@@ -963,9 +967,562 @@
     }
   },
   {
+    "id": "workmans_wrappings",
+    "name": "Workman's Wrappings",
+    "slot": "gloves",
+    "rarity": "common",
+    "value": 2,
+    "description": "Rag wraps that soak blood better than they stop blades.",
+    "stats": {
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "leather_gloves",
+    "name": "Leather Gloves",
+    "slot": "gloves",
+    "rarity": "common",
+    "value": 3,
+    "description": "Supple leather that keeps your knuckles intact.",
+    "stats": {
+      "defense": 1
+    }
+  },
+  {
+    "id": "bruisers_grips",
+    "name": "Bruiser's Grips",
+    "slot": "gloves",
+    "rarity": "common",
+    "value": 5,
+    "description": "Weighted grips that make every punch feel meaner.",
+    "stats": {
+      "attack": 2
+    }
+  },
+  {
+    "id": "iron_gauntlets",
+    "name": "Iron Gauntlets",
+    "slot": "gloves",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "Cold iron plates that turn cuts into bruises.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "duelists_gloves",
+    "name": "Duelist's Gloves",
+    "slot": "gloves",
+    "rarity": "uncommon",
+    "value": 11,
+    "description": "Tight gloves that favor quick, controlled strikes.",
+    "stats": {
+      "attack": 1,
+      "speed": 1
+    }
+  },
+  {
+    "id": "spellstitch_gloves",
+    "name": "Spellstitch Gloves",
+    "slot": "gloves",
+    "rarity": "uncommon",
+    "value": 14,
+    "description": "Threaded with runes that steady your hands in casting.",
+    "stats": {
+      "skill_power": 0.12,
+      "defense": 1
+    }
+  },
+  {
+    "id": "brawlers_gauntlets",
+    "name": "Brawler's Gauntlets",
+    "slot": "gloves",
+    "rarity": "rare",
+    "value": 24,
+    "description": "Cuffed steel that rewards aggression in close quarters.",
+    "stats": {
+      "attack": 3,
+      "defense": 1
+    }
+  },
+  {
+    "id": "warded_gauntlets",
+    "name": "Warded Gauntlets",
+    "slot": "gloves",
+    "rarity": "rare",
+    "value": 28,
+    "description": "Etched wards dull the sting of steel and spite.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 8
+    }
+  },
+  {
+    "id": "voidweave_grips",
+    "name": "Voidweave Grips",
+    "slot": "gloves",
+    "rarity": "epic",
+    "value": 48,
+    "description": "Black weave that drinks light and channels intent.",
+    "stats": {
+      "skill_power": 0.3,
+      "defense": 2
+    }
+  },
+  {
+    "id": "gauntlets_of_the_pyre",
+    "name": "Gauntlets of the Pyre",
+    "slot": "gloves",
+    "rarity": "epic",
+    "value": 55,
+    "description": "Warm metal that turns effort into violent force.",
+    "stats": {
+      "attack": 3,
+      "skill_power": 0.18,
+      "defense": 1
+    }
+  },
+  {
+    "id": "travelers_shoes",
+    "name": "Traveler's Shoes",
+    "slot": "boots",
+    "rarity": "common",
+    "value": 2,
+    "description": "Thin soles meant for roads that no longer exist.",
+    "stats": {
+      "speed": 1
+    }
+  },
+  {
+    "id": "leather_boots",
+    "name": "Leather Boots",
+    "slot": "boots",
+    "rarity": "common",
+    "value": 3,
+    "description": "Sturdy boots that keep your feet from splitting open.",
+    "stats": {
+      "max_hp": 3,
+      "speed": 1
+    }
+  },
+  {
+    "id": "muddy_treads",
+    "name": "Muddy Treads",
+    "slot": "boots",
+    "rarity": "common",
+    "value": 4,
+    "description": "Caked with old mire, they hold their ground well.",
+    "stats": {
+      "defense": 1
+    }
+  },
+  {
+    "id": "iron_greaves",
+    "name": "Iron Greaves",
+    "slot": "boots",
+    "rarity": "uncommon",
+    "value": 8,
+    "description": "Leg guards that keep you standing after nasty hits.",
+    "stats": {
+      "max_hp": 6,
+      "defense": 1
+    }
+  },
+  {
+    "id": "iron_boots",
+    "name": "Iron Boots",
+    "slot": "boots",
+    "rarity": "uncommon",
+    "value": 11,
+    "description": "Heavy boots that make you harder to knock down.",
+    "stats": {
+      "defense": 1,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "wanderers_boots",
+    "name": "Wanderer's Boots",
+    "slot": "boots",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "Built for long marches and sudden sprints.",
+    "stats": {
+      "speed": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "froststep_boots",
+    "name": "Froststep Boots",
+    "slot": "boots",
+    "rarity": "uncommon",
+    "value": 15,
+    "description": "Cold leather that keeps your stride steady under pressure.",
+    "stats": {
+      "speed": 1,
+      "defense": 1,
+      "max_hp": 3
+    }
+  },
+  {
+    "id": "mercenary_greaves",
+    "name": "Mercenary Greaves",
+    "slot": "boots",
+    "rarity": "rare",
+    "value": 24,
+    "description": "Battered legplates that have seen too many contracts.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 8,
+      "speed": 1
+    }
+  },
+  {
+    "id": "windrunner_boots",
+    "name": "Windrunner Boots",
+    "slot": "boots",
+    "rarity": "rare",
+    "value": 30,
+    "description": "Light boots that seem to borrow speed from the air.",
+    "stats": {
+      "speed": 3,
+      "defense": 1
+    }
+  },
+  {
+    "id": "gravewalkers_boots",
+    "name": "Gravewalker's Boots",
+    "slot": "boots",
+    "rarity": "epic",
+    "value": 52,
+    "description": "Soles that tread quietly where others panic and slip.",
+    "stats": {
+      "speed": 2,
+      "defense": 2,
+      "max_hp": 10
+    }
+  },
+  {
+    "id": "boots_of_the_black_march",
+    "name": "Boots of the Black March",
+    "slot": "boots",
+    "rarity": "epic",
+    "value": 58,
+    "description": "Worn by a dead general who never learned retreat.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 12,
+      "speed": 1
+    }
+  },
+  {
+    "id": "buckler",
+    "name": "Buckler",
+    "slot": "shield",
+    "rarity": "common",
+    "value": 2,
+    "description": "A small shield that rewards quick reactions.",
+    "stats": {
+      "defense": 1
+    }
+  },
+  {
+    "id": "wooden_shield",
+    "name": "Wooden Shield",
+    "slot": "shield",
+    "rarity": "common",
+    "value": 2,
+    "description": "A rough plank shield that can catch a lucky blow.",
+    "stats": {
+      "max_hp": 4,
+      "defense": 1
+    }
+  },
+  {
+    "id": "round_shield",
+    "name": "Round Shield",
+    "slot": "shield",
+    "rarity": "common",
+    "value": 3,
+    "description": "A round board shield reinforced with iron nails.",
+    "stats": {
+      "defense": 1,
+      "max_hp": 3
+    }
+  },
+  {
+    "id": "kite_shield",
+    "name": "Kite Shield",
+    "slot": "shield",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "A broad shield that forgives bad footwork.",
+    "stats": {
+      "max_hp": 6,
+      "defense": 2
+    }
+  },
+  {
+    "id": "heater_shield",
+    "name": "Heater Shield",
+    "slot": "shield",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "A classic shield shape that protects more than it weighs.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "ironbound_shield",
+    "name": "Ironbound Shield",
+    "slot": "shield",
+    "rarity": "uncommon",
+    "value": 15,
+    "description": "Wood and iron bands that refuse to splinter.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "spiked_targe",
+    "name": "Spiked Targe",
+    "slot": "shield",
+    "rarity": "uncommon",
+    "value": 16,
+    "description": "A shield with teeth, for when defense isn't enough.",
+    "stats": {
+      "defense": 1,
+      "max_hp": 4,
+      "attack": 1
+    }
+  },
+  {
+    "id": "tower_shield",
+    "name": "Tower Shield",
+    "slot": "shield",
+    "rarity": "rare",
+    "value": 22,
+    "description": "A wall of wood and iron—slow, but very convincing.",
+    "stats": {
+      "max_hp": 10,
+      "defense": 4
+    }
+  },
+  {
+    "id": "steel_shield",
+    "name": "Steel Shield",
+    "slot": "shield",
+    "rarity": "rare",
+    "value": 26,
+    "description": "Solid steel that turns cleavers into complaints.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "wardens_wall",
+    "name": "Warden's Wall",
+    "slot": "shield",
+    "rarity": "rare",
+    "value": 32,
+    "description": "Broad and thick—built to hold a doorway alone.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 8
+    }
+  },
+  {
+    "id": "aegis_shield",
+    "name": "Aegis Shield",
+    "slot": "shield",
+    "rarity": "epic",
+    "value": 42,
+    "description": "A legendary shield that turns aside the worst of a strike.",
+    "stats": {
+      "max_hp": 16,
+      "defense": 5
+    }
+  },
+  {
+    "id": "mirror_aegis",
+    "name": "Mirror Aegis",
+    "slot": "shield",
+    "rarity": "epic",
+    "value": 60,
+    "description": "A mirrored faceplate that confuses aim and intent.",
+    "stats": {
+      "defense": 4,
+      "max_hp": 10,
+      "skill_power": 0.12
+    }
+  },
+  {
+    "id": "reed_cape",
+    "name": "Reed Cape",
+    "slot": "cloak",
+    "rarity": "common",
+    "value": 1,
+    "description": "Lightweight and flimsy, but it breaks up silhouettes.",
+    "stats": {
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "tattered_cloak",
+    "name": "Tattered Cloak",
+    "slot": "cloak",
+    "rarity": "common",
+    "value": 1,
+    "description": "Offers a whisper of protection.",
+    "stats": {
+      "max_hp": 5
+    }
+  },
+  {
+    "id": "travelers_cloak",
+    "name": "Traveler's Cloak",
+    "slot": "cloak",
+    "rarity": "common",
+    "value": 2,
+    "description": "A weathered cloak that keeps the cold from biting first.",
+    "stats": {
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "frayed_mantle",
+    "name": "Frayed Mantle",
+    "slot": "cloak",
+    "rarity": "common",
+    "value": 3,
+    "description": "Loose cloth and old stitching that still blocks a glancing cut.",
+    "stats": {
+      "defense": 1
+    }
+  },
+  {
+    "id": "ashgrey_cape",
+    "name": "Ashgrey Cape",
+    "slot": "cloak",
+    "rarity": "common",
+    "value": 4,
+    "description": "Ash-stained fabric that hides you in smoke and ruin.",
+    "stats": {
+      "max_hp": 3,
+      "defense": 1
+    }
+  },
+  {
+    "id": "nightwatch_cloak",
+    "name": "Nightwatch Cloak",
+    "slot": "cloak",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "Dark wool that makes you harder to read in torchlight.",
+    "stats": {
+      "defense": 1,
+      "max_hp": 6
+    }
+  },
+  {
+    "id": "mages_cloak",
+    "name": "Mage's Cloak",
+    "slot": "cloak",
+    "rarity": "uncommon",
+    "value": 14,
+    "description": "A lined cloak that holds warmth for spellwork.",
+    "stats": {
+      "skill_power": 0.12,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "thornhide_shawl",
+    "name": "Thornhide Shawl",
+    "slot": "cloak",
+    "rarity": "uncommon",
+    "value": 15,
+    "description": "Tough woven fibers that snag blades before they bite.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 3
+    }
+  },
+  {
+    "id": "shadow_cloak",
+    "name": "Shadow Cloak",
+    "slot": "cloak",
+    "rarity": "rare",
+    "value": 18,
+    "description": "Light armor that muffles movement and dulls incoming force.",
+    "stats": {
+      "max_hp": 12,
+      "defense": 2,
+      "skill_power": 0.12
+    }
+  },
+  {
+    "id": "duskweave_cloak",
+    "name": "Duskweave Cloak",
+    "slot": "cloak",
+    "rarity": "rare",
+    "value": 26,
+    "description": "Dusk-colored weave that drinks sound and sharpens focus.",
+    "stats": {
+      "skill_power": 0.2,
+      "defense": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "bloodstained_cape",
+    "name": "Bloodstained Cape",
+    "slot": "cloak",
+    "rarity": "rare",
+    "value": 28,
+    "description": "A cape that has learned to ignore gore and keep moving.",
+    "stats": {
+      "max_hp": 8,
+      "attack": 1
+    }
+  },
+  {
+    "id": "warded_cape",
+    "name": "Warded Cape",
+    "slot": "cloak",
+    "rarity": "rare",
+    "value": 30,
+    "description": "Stitched wards soften both steel and sorcery.",
+    "stats": {
+      "max_hp": 10,
+      "defense": 1,
+      "skill_power": 0.1
+    }
+  },
+  {
+    "id": "shadow_wrap",
+    "name": "Shadow Wrap",
+    "slot": "cloak",
+    "rarity": "epic",
+    "value": 58,
+    "description": "A living wrap of night that tightens when danger comes.",
+    "stats": {
+      "skill_power": 0.35,
+      "defense": 2,
+      "max_hp": 8
+    }
+  },
+  {
     "id": "iron_ring",
     "name": "Iron Ring",
-    "slot": "trinket",
+    "slot": "ring",
     "rarity": "common",
     "value": 1,
     "description": "Plain and sturdy. Sometimes that's enough.",
@@ -974,9 +1531,194 @@
     }
   },
   {
+    "id": "copper_ring",
+    "name": "Copper Ring",
+    "slot": "ring",
+    "rarity": "common",
+    "value": 2,
+    "description": "A dull ring that still carries a hint of bite.",
+    "stats": {
+      "attack": 1
+    }
+  },
+  {
+    "id": "worn_signet",
+    "name": "Worn Signet",
+    "slot": "ring",
+    "rarity": "common",
+    "value": 3,
+    "description": "A scratched seal ring that reminds you to stand firm.",
+    "stats": {
+      "defense": 1
+    }
+  },
+  {
+    "id": "simple_bone_band",
+    "name": "Simple Bone Band",
+    "slot": "ring",
+    "rarity": "common",
+    "value": 4,
+    "description": "A carved band that feels warmer than it should.",
+    "stats": {
+      "max_hp": 3
+    }
+  },
+  {
+    "id": "silver_ring",
+    "name": "Silver Ring",
+    "slot": "ring",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "Silver that catches the light—and a few lucky strikes.",
+    "stats": {
+      "attack": 1,
+      "defense": 1
+    }
+  },
+  {
+    "id": "ring_of_focus",
+    "name": "Ring of Focus",
+    "slot": "ring",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "The mind steadies when its cold edge touches skin.",
+    "stats": {
+      "skill_power": 0.15
+    }
+  },
+  {
+    "id": "scouts_band",
+    "name": "Scout's Band",
+    "slot": "ring",
+    "rarity": "uncommon",
+    "value": 13,
+    "description": "Lightweight metal that keeps your movements decisive.",
+    "stats": {
+      "speed": 1,
+      "attack": 1
+    }
+  },
+  {
+    "id": "ring_of_vigor",
+    "name": "Ring of Vigor",
+    "slot": "ring",
+    "rarity": "uncommon",
+    "value": 14,
+    "description": "A pulsing ring that coaxes one more breath.",
+    "stats": {
+      "max_hp": 8
+    }
+  },
+  {
+    "id": "stamina_band",
+    "name": "Stamina Band",
+    "slot": "ring",
+    "rarity": "uncommon",
+    "value": 0,
+    "description": "A leather band that keeps your muscles from tiring.",
+    "stats": {
+      "max_stamina": 8
+    }
+  },
+  {
+    "id": "veterans_band",
+    "name": "Veteran's Band",
+    "slot": "ring",
+    "rarity": "rare",
+    "value": 18,
+    "description": "Worn by survivors. It reminds you how to endure.",
+    "stats": {
+      "max_hp": 10,
+      "defense": 1
+    }
+  },
+  {
+    "id": "ring_of_the_fortress",
+    "name": "Ring of the Fortress",
+    "slot": "ring",
+    "rarity": "rare",
+    "value": 20,
+    "description": "A thick ring that makes you feel harder to break.",
+    "stats": {
+      "max_hp": 12,
+      "defense": 2
+    }
+  },
+  {
+    "id": "warriors_ring",
+    "name": "Warrior's Ring",
+    "slot": "ring",
+    "rarity": "rare",
+    "value": 24,
+    "description": "Worn by fighters who never wait for permission.",
+    "stats": {
+      "attack": 3
+    }
+  },
+  {
+    "id": "ring_of_stoneskin",
+    "name": "Ring of Stoneskin",
+    "slot": "ring",
+    "rarity": "rare",
+    "value": 28,
+    "description": "Your bruises feel shallower the moment you wear it.",
+    "stats": {
+      "defense": 3
+    }
+  },
+  {
+    "id": "ring_of_the_hunt",
+    "name": "Ring of the Hunt",
+    "slot": "ring",
+    "rarity": "rare",
+    "value": 30,
+    "description": "Your footing finds purchase, even in panic.",
+    "stats": {
+      "attack": 2,
+      "speed": 2
+    }
+  },
+  {
+    "id": "kings_signet",
+    "name": "King's Signet",
+    "slot": "ring",
+    "rarity": "epic",
+    "value": 55,
+    "description": "A heavy signet that demands endurance and obedience.",
+    "stats": {
+      "max_hp": 12,
+      "defense": 2,
+      "attack": 2
+    }
+  },
+  {
+    "id": "abyssal_ring",
+    "name": "Abyssal Ring",
+    "slot": "ring",
+    "rarity": "epic",
+    "value": 60,
+    "description": "A ring that whispers promises your better self rejects.",
+    "stats": {
+      "skill_power": 0.35,
+      "attack": 2
+    }
+  },
+  {
+    "id": "warriors_band",
+    "name": "Warrior's Band",
+    "slot": "ring",
+    "rarity": "epic",
+    "value": 0,
+    "description": "A heavy iron band worn by champions who never tire.",
+    "stats": {
+      "max_stamina": 20,
+      "attack": 1
+    }
+  },
+  {
     "id": "bone_amulet",
     "name": "Bone Amulet",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "common",
     "value": 2,
     "description": "A carved bone charm with faint protective meaning.",
@@ -988,7 +1730,7 @@
   {
     "id": "brass_charm",
     "name": "Brass Charm",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "common",
     "value": 2,
     "description": "Warm metal that feels reassuring in your palm.",
@@ -999,7 +1741,7 @@
   {
     "id": "lucky_coin",
     "name": "Lucky Coin",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "common",
     "value": 2,
     "description": "A scuffed coin that somehow ends up in your favor.",
@@ -1010,7 +1752,7 @@
   {
     "id": "minor_vigor_charm",
     "name": "Minor Vigor Charm",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "common",
     "value": 2,
     "description": "A simple charm that keeps your breath steady.",
@@ -1019,9 +1761,20 @@
     }
   },
   {
+    "id": "cracked_talisman",
+    "name": "Cracked Talisman",
+    "slot": "amulet",
+    "rarity": "common",
+    "value": 3,
+    "description": "A cracked charm that still refuses to fall apart.",
+    "stats": {
+      "max_hp": 4
+    }
+  },
+  {
     "id": "tiny_focus_talisman",
     "name": "Tiny Focus Talisman",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "common",
     "value": 3,
     "description": "A knotted cord that helps you concentrate in chaos.",
@@ -1030,9 +1783,32 @@
     }
   },
   {
+    "id": "prayer_beads",
+    "name": "Prayer Beads",
+    "slot": "amulet",
+    "rarity": "common",
+    "value": 4,
+    "description": "Beads worn smooth by old vows and trembling hands.",
+    "stats": {
+      "defense": 1,
+      "skill_power": 0.05
+    }
+  },
+  {
+    "id": "hunters_charm",
+    "name": "Hunter's Charm",
+    "slot": "amulet",
+    "rarity": "common",
+    "value": 5,
+    "description": "A tooth charm that urges you to strike before you hesitate.",
+    "stats": {
+      "attack": 1
+    }
+  },
+  {
     "id": "warding_bead",
     "name": "Warding Bead",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 8,
     "description": "A bead etched with ward marks. It doesn't like curses.",
@@ -1044,7 +1820,7 @@
   {
     "id": "amulet_of_breath",
     "name": "Amulet of Breath",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 9,
     "description": "Keeps panic out of your lungs when things get loud.",
@@ -1055,7 +1831,7 @@
   {
     "id": "hunters_token",
     "name": "Hunter's Token",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 9,
     "description": "A tooth charm that sharpens your instincts.",
@@ -1065,20 +1841,9 @@
     }
   },
   {
-    "id": "charm_of_precision",
-    "name": "Charm of Precision",
-    "slot": "trinket",
-    "rarity": "uncommon",
-    "value": 10,
-    "description": "Makes your strikes feel guided, not guessed.",
-    "stats": {
-      "attack": 2
-    }
-  },
-  {
     "id": "focus_charm",
     "name": "Charm of Focus",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 10,
     "description": "Sharpens your combat instincts.",
@@ -1087,20 +1852,20 @@
     }
   },
   {
-    "id": "sages_thread",
-    "name": "Sage's Thread",
-    "slot": "trinket",
+    "id": "charm_of_precision",
+    "name": "Charm of Precision",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 10,
-    "description": "A silver thread tied around the wrist to steady spellwork.",
+    "description": "Makes your strikes feel guided, not guessed.",
     "stats": {
-      "skill_power": 0.22
+      "attack": 2
     }
   },
   {
     "id": "vitality_charm",
     "name": "Charm of Vitality",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 10,
     "description": "A small charm that pulses with life.",
@@ -1109,9 +1874,20 @@
     }
   },
   {
+    "id": "sages_thread",
+    "name": "Sage's Thread",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 10,
+    "description": "A silver thread tied around the wrist to steady spellwork.",
+    "stats": {
+      "skill_power": 0.22
+    }
+  },
+  {
     "id": "charm_of_stoneskin",
     "name": "Charm of Stoneskin",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 11,
     "description": "Hardens your resolve—and your bruises.",
@@ -1122,7 +1898,7 @@
   {
     "id": "charm_of_sparks",
     "name": "Charm of Sparks",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 12,
     "description": "A tiny coil that crackles with bottled energy.",
@@ -1131,9 +1907,21 @@
     }
   },
   {
+    "id": "protection_amulet",
+    "name": "Protection Amulet",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 12,
+    "description": "A plain pendant that turns the worst edge aside.",
+    "stats": {
+      "defense": 2,
+      "max_hp": 4
+    }
+  },
+  {
     "id": "stoutheart_medallion",
     "name": "Stoutheart Medallion",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "uncommon",
     "value": 12,
     "description": "A heavy medallion that keeps you standing.",
@@ -1143,9 +1931,55 @@
     }
   },
   {
+    "id": "amulet_of_warding",
+    "name": "Amulet of Warding",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 15,
+    "description": "Ward marks dull curses before they can settle.",
+    "stats": {
+      "defense": 2,
+      "skill_power": 0.12
+    }
+  },
+  {
+    "id": "locket_of_resolve",
+    "name": "Locket of Resolve",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 16,
+    "description": "A locket that steadies your pulse when things get ugly.",
+    "stats": {
+      "max_hp": 10
+    }
+  },
+  {
+    "id": "totem_of_the_fang",
+    "name": "Totem of the Fang",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 18,
+    "description": "A carved fang that favors the first, sharpest blow.",
+    "stats": {
+      "attack": 2,
+      "max_hp": 4
+    }
+  },
+  {
+    "id": "mana_crystal",
+    "name": "Mana Crystal",
+    "slot": "amulet",
+    "rarity": "uncommon",
+    "value": 0,
+    "description": "A crystal that hums with stored magical energy.",
+    "stats": {
+      "max_mana": 12
+    }
+  },
+  {
     "id": "berserker_charm",
     "name": "Charm of the Berserker",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 14,
     "description": "Its bearer feels a constant urge to strike first and hard.",
@@ -1156,7 +1990,7 @@
   {
     "id": "guardian_charm",
     "name": "Charm of the Guardian",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 16,
     "description": "An engraved token said to ward off lethal blows.",
@@ -1168,7 +2002,7 @@
   {
     "id": "moonlit_locket",
     "name": "Moonlit Locket",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 17,
     "description": "A locket that calms the mind and steadies the body.",
@@ -1180,7 +2014,7 @@
   {
     "id": "charm_of_the_duelist",
     "name": "Charm of the Duelist",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 18,
     "description": "Rewards clean hits and punishes sloppy defenses.",
@@ -1190,21 +2024,9 @@
     }
   },
   {
-    "id": "veterans_band",
-    "name": "Veteran's Band",
-    "slot": "trinket",
-    "rarity": "rare",
-    "value": 18,
-    "description": "Worn by survivors. It reminds you how to endure.",
-    "stats": {
-      "max_hp": 10,
-      "defense": 1
-    }
-  },
-  {
     "id": "talisman_of_mending",
     "name": "Talisman of Mending",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 19,
     "description": "Warmth spreads from it when you take a hit.",
@@ -1213,21 +2035,9 @@
     }
   },
   {
-    "id": "ring_of_the_fortress",
-    "name": "Ring of the Fortress",
-    "slot": "trinket",
-    "rarity": "rare",
-    "value": 20,
-    "description": "A thick ring that makes you feel harder to break.",
-    "stats": {
-      "max_hp": 12,
-      "defense": 2
-    }
-  },
-  {
     "id": "wardstone",
     "name": "Wardstone",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 20,
     "description": "A pocket-sized stone that hums when danger nears.",
@@ -1238,7 +2048,7 @@
   {
     "id": "amulet_of_celerity",
     "name": "Amulet of Celerity",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 21,
     "description": "Your hands move faster than your thoughts can follow.",
@@ -1250,7 +2060,7 @@
   {
     "id": "assassins_mark",
     "name": "Assassin's Mark",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 21,
     "description": "A dark stamp that makes your openings feel wider.",
@@ -1261,7 +2071,7 @@
   {
     "id": "sigil_of_focus",
     "name": "Sigil of Focus",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 22,
     "description": "A crisp sigil that amplifies practiced techniques.",
@@ -1272,7 +2082,7 @@
   {
     "id": "ember_heart",
     "name": "Ember Heart",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "rare",
     "value": 23,
     "description": "A coal that never cools; it feeds aggressive magic.",
@@ -1282,20 +2092,67 @@
     }
   },
   {
-    "id": "adept_charm",
-    "name": "Charm of the Adept",
-    "slot": "trinket",
-    "rarity": "epic",
-    "value": 0,
-    "description": "The crystal at its center hums with contained power.",
+    "id": "talisman_of_clarity",
+    "name": "Talisman of Clarity",
+    "slot": "amulet",
+    "rarity": "rare",
+    "value": 28,
+    "description": "Cuts through noise and fear like a clean blade.",
     "stats": {
-      "skill_power": 0.45
+      "skill_power": 0.35
+    }
+  },
+  {
+    "id": "charm_of_siphoning",
+    "name": "Charm of Siphoning",
+    "slot": "amulet",
+    "rarity": "rare",
+    "value": 30,
+    "description": "A hungering charm that deepens your reserves.",
+    "stats": {
+      "max_mana": 10,
+      "skill_power": 0.18
+    }
+  },
+  {
+    "id": "wardstone_pendant",
+    "name": "Wardstone Pendant",
+    "slot": "amulet",
+    "rarity": "rare",
+    "value": 32,
+    "description": "A stone pendant that hums when danger commits.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 8
+    }
+  },
+  {
+    "id": "arcane_focus",
+    "name": "Arcane Focus",
+    "slot": "amulet",
+    "rarity": "rare",
+    "value": 0,
+    "description": "A polished orb that amplifies your magical reserves.",
+    "stats": {
+      "max_mana": 18,
+      "skill_power": 0.1
+    }
+  },
+  {
+    "id": "endurance_belt",
+    "name": "Endurance Belt",
+    "slot": "amulet",
+    "rarity": "rare",
+    "value": 0,
+    "description": "A wide belt that seems to store energy for when you need it most.",
+    "stats": {
+      "max_stamina": 12
     }
   },
   {
     "id": "heartstone",
     "name": "Heartstone",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 44,
     "description": "A living gem that beats in time with your pulse.",
@@ -1306,7 +2163,7 @@
   {
     "id": "aegis_totem",
     "name": "Aegis Totem",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 46,
     "description": "A carved totem that turns fear into protection.",
@@ -1318,7 +2175,7 @@
   {
     "id": "tyrants_seal",
     "name": "Tyrant's Seal",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 48,
     "description": "A heavy seal that radiates brutal authority.",
@@ -1330,7 +2187,7 @@
   {
     "id": "voidward_charm",
     "name": "Voidward Charm",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 49,
     "description": "A charm that dulls both blades and curses.",
@@ -1341,20 +2198,9 @@
     }
   },
   {
-    "id": "soul_prism",
-    "name": "Soul Prism",
-    "slot": "trinket",
-    "rarity": "epic",
-    "value": 0,
-    "description": "Light refracts inside it in impossible angles.",
-    "stats": {
-      "skill_power": 0.5
-    }
-  },
-  {
     "id": "sunspire_reliquary",
     "name": "Sunspire Reliquary",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 52,
     "description": "A reliquary that shines brighter in battle.",
@@ -1366,7 +2212,7 @@
   {
     "id": "battle_saints_icon",
     "name": "Battle-Saint's Icon",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 53,
     "description": "A tiny icon that fills you with stubborn courage.",
@@ -1377,9 +2223,58 @@
     }
   },
   {
+    "id": "reliquary_of_dawn",
+    "name": "Reliquary of Dawn",
+    "slot": "amulet",
+    "rarity": "epic",
+    "value": 58,
+    "description": "A sun-bright relic that punishes the bold and the dead alike.",
+    "stats": {
+      "attack": 2,
+      "skill_power": 0.4,
+      "max_hp": 10
+    }
+  },
+  {
+    "id": "icon_of_the_last_saint",
+    "name": "Icon of the Last Saint",
+    "slot": "amulet",
+    "rarity": "epic",
+    "value": 62,
+    "description": "A battered icon that refuses to let you fall quietly.",
+    "stats": {
+      "defense": 3,
+      "max_hp": 12,
+      "skill_power": 0.25
+    }
+  },
+  {
+    "id": "archmages_orb",
+    "name": "Archmage's Orb",
+    "slot": "amulet",
+    "rarity": "epic",
+    "value": 0,
+    "description": "A legendary orb that seems to contain infinite potential.",
+    "stats": {
+      "max_mana": 25,
+      "skill_power": 0.2
+    }
+  },
+  {
+    "id": "adept_charm",
+    "name": "Charm of the Adept",
+    "slot": "amulet",
+    "rarity": "epic",
+    "value": 0,
+    "description": "The crystal at its center hums with contained power.",
+    "stats": {
+      "skill_power": 0.45
+    }
+  },
+  {
     "id": "chronomancer_locket",
     "name": "Chronomancer Locket",
-    "slot": "trinket",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 0,
     "description": "Time feels slightly slower when you focus on it.",
@@ -1389,72 +2284,14 @@
     }
   },
   {
-    "id": "stamina_band",
-    "name": "Stamina Band",
-    "slot": "trinket",
-    "rarity": "uncommon",
-    "value": 0,
-    "description": "A leather band that keeps your muscles from tiring.",
-    "stats": {
-      "max_stamina": 8
-    }
-  },
-  {
-    "id": "endurance_belt",
-    "name": "Endurance Belt",
-    "slot": "trinket",
-    "rarity": "rare",
-    "value": 0,
-    "description": "A wide belt that seems to store energy for when you need it most.",
-    "stats": {
-      "max_stamina": 12
-    }
-  },
-  {
-    "id": "warriors_band",
-    "name": "Warrior's Band",
-    "slot": "trinket",
+    "id": "soul_prism",
+    "name": "Soul Prism",
+    "slot": "amulet",
     "rarity": "epic",
     "value": 0,
-    "description": "A heavy iron band worn by champions who never tire.",
+    "description": "Light refracts inside it in impossible angles.",
     "stats": {
-      "max_stamina": 20,
-      "attack": 1
-    }
-  },
-  {
-    "id": "mana_crystal",
-    "name": "Mana Crystal",
-    "slot": "trinket",
-    "rarity": "uncommon",
-    "value": 0,
-    "description": "A crystal that hums with stored magical energy.",
-    "stats": {
-      "max_mana": 12
-    }
-  },
-  {
-    "id": "arcane_focus",
-    "name": "Arcane Focus",
-    "slot": "trinket",
-    "rarity": "rare",
-    "value": 0,
-    "description": "A polished orb that amplifies your magical reserves.",
-    "stats": {
-      "max_mana": 18,
-      "skill_power": 0.1
-    }
-  },
-  {
-    "id": "archmages_orb",
-    "name": "Archmage's Orb",
-    "slot": "trinket",
-    "rarity": "epic",
-    "value": 0,
-    "description": "A legendary orb that seems to contain infinite potential.",
-    "stats": {
-      "max_mana": 25,
-      "skill_power": 0.2
+      "skill_power": 0.5
     }
   }
 ]

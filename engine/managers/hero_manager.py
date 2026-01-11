@@ -16,20 +16,22 @@ if TYPE_CHECKING:
     from ..core.game import Game
 
 
-def init_hero_for_class(game: "Game", hero_class_id: str) -> None:
+def init_hero_for_class(game: "Game", hero_class_id: str, hero_background_id: Optional[str] = None) -> None:
     """
-    Initialize hero for a given class.
+    Initialize hero for a given class and background.
     
     Creates HeroStats, Inventory, and Party for a fresh run.
+    
+    Args:
+        game: Game instance
+        hero_class_id: Class ID to initialize hero with
+        hero_background_id: Optional background ID to apply
     """
-    from systems.classes import all_classes  # local import to avoid cycles
+    from systems.classes import all_classes, get_class  # local import to avoid cycles
 
-    class_def = None
-    for cls in all_classes():
-        if cls.id == hero_class_id:
-            class_def = cls
-            break
-    if class_def is None:
+    try:
+        class_def = get_class(hero_class_id)
+    except KeyError:
         raise ValueError(f"Unknown hero class: {hero_class_id}")
 
     # Fresh hero stats
@@ -38,10 +40,24 @@ def init_hero_for_class(game: "Game", hero_class_id: str) -> None:
     # Remember which class this hero is using for restarts / UI
     game.hero_stats.hero_class_id = class_def.id
 
+    # Apply background if provided
+    if hero_background_id:
+        game.hero_stats.apply_background(hero_background_id)
+
     # Fresh inventory and starting items
     game.inventory = Inventory()
     for item_id in class_def.starting_items:
         game.inventory.add_item(item_id, randomized=False)
+    
+    # Add background starting items if background was applied
+    if hero_background_id:
+        from systems.character_creation import get_background
+        try:
+            background = get_background(hero_background_id)
+            for item_id in background.starting_items:
+                game.inventory.add_item(item_id, randomized=False)
+        except KeyError:
+            pass  # Background not found, skip items
 
     # Auto-equip one item per slot if available
     for slot in ("weapon", "armor", "trinket"):

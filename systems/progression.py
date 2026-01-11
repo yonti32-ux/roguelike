@@ -6,6 +6,7 @@ import copy
 
 from .stats import StatBlock
 from .classes import ClassDef
+from .character_creation import AppearanceConfig, StatDistribution
 
 
 @dataclass
@@ -52,6 +53,23 @@ class HeroStats:
     
     # Track skill ranks: skill_id -> current_rank (0 = unranked, max 5)
     skill_ranks: Dict[str, int] = field(default_factory=dict)
+
+    # ------------------------------------------------------------------
+    # Character Creation Enhancement Fields (Optional for backwards compatibility)
+    # ------------------------------------------------------------------
+    
+    # Background selection
+    background_id: Optional[str] = None
+    
+    # Trait system (point-buy)
+    traits: List[str] = field(default_factory=list)  # Trait IDs
+    trait_points_available: int = 5  # Starting trait points (5-7 recommended)
+    
+    # Stat distribution (3-5 points to allocate)
+    stat_distribution: Optional[StatDistribution] = None
+    
+    # Appearance customization
+    appearance: Optional[AppearanceConfig] = None
 
     # ------------------------------------------------------------------
     # XP / Level
@@ -194,6 +212,42 @@ class HeroStats:
         # as the first slotted offensive skill if available.
         self.skill_slots = [None, None, None, None]
         self.ensure_default_skill_slots(["power_strike"])
+
+    def apply_background(self, background_id: Optional[str]) -> None:
+        """
+        Apply a background's bonuses to this hero.
+        
+        - Applies percentage-based stat modifiers
+        - Adds starting perks, skills, items (handled elsewhere)
+        - Adds starting gold bonus
+        
+        Background should be compatible with the hero's class.
+        """
+        if background_id is None:
+            return
+        
+        from .character_creation import get_background, apply_percentage_stat_modifiers
+        
+        try:
+            background = get_background(background_id)
+        except KeyError:
+            # Background not found, skip
+            return
+        
+        # Apply stat modifiers (percentage-based)
+        apply_percentage_stat_modifiers(self.base, background.stat_modifiers)
+        
+        # Add starting perks (merge with class perks)
+        for perk_id in background.starting_perks:
+            if perk_id not in self.perks:
+                self.perks.append(perk_id)
+        
+        # Add starting gold bonus
+        self.gold += background.starting_gold_bonus
+        
+        # Starting skills and items are handled elsewhere (Game / inventory)
+        # Store background_id for reference
+        self.background_id = background_id
 
     # ------------------------------------------------------------------
     # Convenience properties (so older code still works)

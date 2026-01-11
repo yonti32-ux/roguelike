@@ -120,8 +120,14 @@ class Inventory:
     equipped: Dict[str, Optional[str]] = field(
         default_factory=lambda: {
             "weapon": None,
+            "helmet": None,
             "armor": None,
-            "trinket": None,
+            "gloves": None,
+            "boots": None,
+            "shield": None,
+            "cloak": None,
+            "ring": None,
+            "amulet": None,
         }
     )
 
@@ -209,6 +215,38 @@ class Inventory:
             return "You don't recognise how to use that."
 
         slot = item.slot
+        
+        # Backwards compatibility: map old "trinket" slot to "ring" or "amulet"
+        if slot == "trinket":
+            # Determine if it's a ring or amulet based on item name/ID
+            item_name_lower = item.name.lower()
+            item_id_lower = item_id.lower()
+            if "ring" in item_id_lower or "ring" in item_name_lower:
+                slot = "ring"
+            elif "amulet" in item_id_lower or "amulet" in item_name_lower or "locket" in item_id_lower or "locket" in item_name_lower:
+                slot = "amulet"
+            else:
+                # Default to ring for backwards compatibility
+                slot = "ring"
+        
+        # Map item slot types to equipment slots
+        slot_mapping = {
+            "weapon": "weapon",
+            "helmet": "helmet",
+            "armor": "armor",
+            "gloves": "gloves",
+            "boots": "boots",
+            "greaves": "boots",  # Greaves go in boots slot
+            "shield": "shield",
+            "cloak": "cloak",
+            "cape": "cloak",  # Capes go in cloak slot
+            "ring": "ring",
+            "amulet": "amulet",
+        }
+        
+        # Map the slot if needed
+        slot = slot_mapping.get(slot, slot)
+        
         if slot not in self.equipped:
             return f"You can't equip {item.name}."
 

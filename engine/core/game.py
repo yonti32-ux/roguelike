@@ -251,7 +251,7 @@ class Game:
         """Set inventory cursor position."""
         self.ui_screen_manager.inventory_cursor = value
 
-    def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior", overworld_config: Optional["OverworldConfig"] = None) -> None:
+    def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior", hero_background_id: Optional[str] = None, overworld_config: Optional["OverworldConfig"] = None) -> None:
         self.screen = screen
 
         # Logical input manager (actions -> keys/buttons).
@@ -393,7 +393,7 @@ class Game:
         self._quit_game: bool = False
 
         # Initialize hero stats, perks, items and gold for the chosen class
-        init_hero_for_class(self, hero_class_id)
+        init_hero_for_class(self, hero_class_id, hero_background_id=hero_background_id)
 
         # Give the hero a small starting stock of basic consumables so the
         # new system is visible from the first floor.

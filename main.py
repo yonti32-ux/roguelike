@@ -129,19 +129,7 @@ def main() -> None:
         telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
     
     if menu_choice == "new_game":
-        # --- Character creation: choose class + name ---
-        creation_scene = CharacterCreationScene(screen)
-        result = creation_scene.run()
-
-        if result is None:
-            telemetry.log("quit_during_character_creation")
-            pygame.quit()
-            sys.exit()
-
-        selected_class_id, hero_name = result
-        telemetry.log("character_created", hero_class_id=selected_class_id, hero_name=hero_name)
-
-        # --- Overworld Configuration: customize world settings ---
+        # --- Overworld Configuration: customize world settings (FIRST) ---
         from engine.scenes.overworld_config_scene import OverworldConfigScene
         config_scene = OverworldConfigScene(screen)
         overworld_config = config_scene.run()
@@ -157,9 +145,38 @@ def main() -> None:
                      poi_density=overworld_config.poi_density,
                      seed=overworld_config.seed)
 
-        # Start game with the chosen class and overworld config
-        game = Game(screen, hero_class_id=selected_class_id, overworld_config=overworld_config)
+        # --- Character creation: choose class + background + name (AFTER world config) ---
+        creation_scene = CharacterCreationScene(screen)
+        result = creation_scene.run()
 
+        if result is None:
+            telemetry.log("quit_during_character_creation")
+            pygame.quit()
+            sys.exit()
+
+        selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
+        telemetry.log("character_created", hero_class_id=selected_class_id, background_id=selected_background_id, hero_name=hero_name)
+
+        # Start game with the chosen class, background, and overworld config
+        game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id, overworld_config=overworld_config)
+
+        # Apply stat distribution
+        if stat_distribution:
+            game.hero_stats.stat_distribution = stat_distribution
+            stat_distribution.apply_to_stat_block(game.hero_stats.base)
+        
+        # Apply traits
+        if traits:
+            from systems.character_creation import get_trait, apply_percentage_stat_modifiers, trait_synergy_bonus
+            game.hero_stats.traits = traits
+            # Apply trait stat modifiers
+            for trait_id in traits:
+                trait = get_trait(trait_id)
+                apply_percentage_stat_modifiers(game.hero_stats.base, trait.stat_modifiers)
+            # Apply synergy bonuses
+            synergy_bonus = trait_synergy_bonus(traits)
+            apply_percentage_stat_modifiers(game.hero_stats.base, synergy_bonus)
+        
         # Store the chosen name on hero_stats
         game.hero_stats.hero_name = hero_name
 
@@ -243,8 +260,23 @@ def main() -> None:
                     if result is None:
                         running = False
                         continue
-                    selected_class_id, hero_name = result
-                    game = Game(screen, hero_class_id=selected_class_id)
+                    selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
+                    game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id)
+                    # Apply stat distribution
+                    if stat_distribution:
+                        game.hero_stats.stat_distribution = stat_distribution
+                        stat_distribution.apply_to_stat_block(game.hero_stats.base)
+                    # Apply traits
+                    if traits:
+                        from systems.character_creation import get_trait, apply_percentage_stat_modifiers, trait_synergy_bonus
+                        game.hero_stats.traits = traits
+                        # Apply trait stat modifiers
+                        for trait_id in traits:
+                            trait = get_trait(trait_id)
+                            apply_percentage_stat_modifiers(game.hero_stats.base, trait.stat_modifiers)
+                        # Apply synergy bonuses
+                        synergy_bonus = trait_synergy_bonus(traits)
+                        apply_percentage_stat_modifiers(game.hero_stats.base, synergy_bonus)
                     game.hero_stats.hero_name = hero_name
                     if game.player is not None:
                         game.apply_hero_stats_to_player(full_heal=True)
