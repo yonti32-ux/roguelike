@@ -22,10 +22,12 @@ class NamePools:
     # Prefixes
     dungeon_prefixes: List[str]
     town_prefixes: List[str]
+    village_prefixes: List[str]
     
     # Suffixes
     dungeon_suffixes: List[str]
     town_suffixes: List[str]
+    village_suffixes: List[str]
     
     # Descriptors/Adjectives
     brutal_descriptors: List[str]

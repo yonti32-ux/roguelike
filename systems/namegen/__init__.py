@@ -9,6 +9,7 @@ from .base import NameGenerator, NamePools
 from .generators.boss_generator import BossNameGenerator, generate_boss_name
 from .generators.dungeon_generator import DungeonNameGenerator, generate_dungeon_name
 from .generators.town_generator import TownNameGenerator, generate_town_name
+from .generators.village_generator import VillageNameGenerator, generate_village_name
 from .generators.world_generator import WorldNameGenerator, generate_world_name
 
 __all__ = [
@@ -24,6 +25,9 @@ __all__ = [
     # Town generator
     "TownNameGenerator",
     "generate_town_name",
+    # Village generator
+    "VillageNameGenerator",
+    "generate_village_name",
     # World generator
     "WorldNameGenerator",
     "generate_world_name",

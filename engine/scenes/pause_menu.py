@@ -202,33 +202,61 @@ class OptionsMenuScene:
         # Define all hotkeys organized by category
         self.hotkey_sections = [
             ("Movement & Interaction", [
-                ("WASD / Arrow Keys", "Move"),
-                ("E", "Interact"),
+                ("WASD / Arrow Keys", "Move (4-directional)"),
+                ("Q/E/Z/C", "Diagonal Movement (Overworld)"),
+                ("E", "Interact / Enter POI"),
+                ("Q (Exploration)", "Go Up Floor"),
             ]),
             ("UI Screens", [
                 ("I", "Inventory"),
                 ("C", "Character Sheet"),
-                ("T", "Skill Tree"),
+                ("J", "Quest Screen"),
+                ("T", "Skill Tree (Exploration)"),
                 ("K", "Exploration Log"),
                 ("L", "Battle Log"),
-                ("Tab", "Cycle Screens"),
+                ("Tab", "Cycle Screens (Shop)"),
                 ("Q/E", "Cycle Focus (Hero/Companions)"),
+            ]),
+            ("Battle Controls", [
+                ("WASD / Arrow Keys", "Move Unit"),
+                ("Mouse Click", "Move to Tile"),
+                ("Space", "Basic Attack"),
+                ("Q/E/F/R", "Skills 1-4"),
+                ("G", "Guard"),
+                ("Tab", "End Turn"),
             ]),
             ("Save & Load", [
                 ("F5", "Quick Save (Slot 1)"),
                 ("F6", "Save Menu"),
                 ("F7", "Load Menu"),
             ]),
-            ("Cheats (Requires F9)", [
+            ("Cheats - Universal (F9)", [
                 ("F9", "Toggle Cheat Mode"),
-                ("F1", "Toggle Map Reveal"),
-                ("F2", "Full Heal"),
+                ("F2", "Heal Player"),
                 ("F3", "+100 Gold"),
                 ("F4", "+25 XP"),
+            ]),
+            ("Cheats - Overworld", [
+                ("F1", "Reveal Map"),
+                ("F5", "Teleport to POI"),
+                ("F6", "Teleport to Center"),
+            ]),
+            ("Cheats - Exploration", [
+                ("F1", "Toggle Map Reveal"),
                 ("F8", "Skip Floor"),
             ]),
-            ("Other", [
+            ("Cheats - Battle", [
+                ("F1", "Kill All Enemies"),
+                ("F2", "Heal All Players"),
+                ("F5", "Heal All Units"),
+                ("F6", "Refill Resources"),
+                ("F7", "Skip Turn"),
+                ("F8", "Win Battle"),
+            ]),
+            ("Debug & System", [
+                ("F10", "Debug Sprites (No F9)"),
                 ("F11", "Toggle Fullscreen"),
+                ("F12 / ~", "Debug Console"),
                 ("Esc", "Pause Menu"),
             ]),
         ]

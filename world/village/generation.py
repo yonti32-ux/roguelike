@@ -152,6 +152,10 @@ def generate_village(
             if tiles[y][x] == WALL_TILE:
                 tiles[y][x] = VILLAGE_GRASS_TILE
     
+    # Place exit points on all edges of the map (bigger exit areas)
+    # Do this before decorative elements so trees don't block exits
+    exit_tiles = _place_village_exits(tiles, map_width, map_height, plaza_center_x, plaza_center_y)
+    
     # Add decorative elements: trees, rocks, etc.
     _place_decorative_elements(tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
     
@@ -169,6 +173,9 @@ def generate_village(
     
     # Store entrance position for player placement
     village_map.village_entrance = (entrance_x, entrance_y)
+    
+    # Store exit tiles (list of (x, y) tuples where player can exit)
+    village_map.village_exit_tiles = exit_tiles
     
     # Store buildings for building detection and room hints
     village_map.village_buildings = buildings
@@ -422,6 +429,74 @@ def _place_decorative_elements(
         # Place tree
         tiles[y][x] = TREE_TILE
         placed_trees += 1
+
+
+def _place_village_exits(
+    tiles: List[List],
+    map_width: int,
+    map_height: int,
+    plaza_center_x: int,
+    plaza_center_y: int,
+) -> List[Tuple[int, int]]:
+    """
+    Place exit points on all edges of the village map.
+    Each exit is a larger area (5 tiles wide) for easier access.
+    
+    Returns:
+        List of (x, y) tile coordinates that are exit points
+    """
+    exit_tiles: List[Tuple[int, int]] = []
+    exit_width = 5  # Make exits 5 tiles wide for easier access
+    
+    # Top edge exit (centered horizontally)
+    top_exit_start = max(1, map_width // 2 - exit_width // 2)
+    top_exit_end = min(map_width - 1, top_exit_start + exit_width)
+    top_exit_center_x = (top_exit_start + top_exit_end) // 2
+    for x in range(top_exit_start, top_exit_end):
+        if 0 <= x < map_width and 0 < map_height:
+            tiles[0][x] = VILLAGE_PATH_TILE
+            exit_tiles.append((x, 0))
+    # Create path from center of exit to plaza
+    if 0 <= top_exit_center_x < map_width:
+        _create_path(tiles, top_exit_center_x, 0, plaza_center_x, plaza_center_y)
+    
+    # Bottom edge exit (centered horizontally)
+    bottom_exit_start = max(1, map_width // 2 - exit_width // 2)
+    bottom_exit_end = min(map_width - 1, bottom_exit_start + exit_width)
+    bottom_exit_center_x = (bottom_exit_start + bottom_exit_end) // 2
+    for x in range(bottom_exit_start, bottom_exit_end):
+        if 0 <= x < map_width and map_height > 0:
+            tiles[map_height - 1][x] = VILLAGE_PATH_TILE
+            exit_tiles.append((x, map_height - 1))
+    # Create path from center of exit to plaza
+    if 0 <= bottom_exit_center_x < map_width:
+        _create_path(tiles, bottom_exit_center_x, map_height - 1, plaza_center_x, plaza_center_y)
+    
+    # Left edge exit (centered vertically)
+    left_exit_start = max(1, map_height // 2 - exit_width // 2)
+    left_exit_end = min(map_height - 1, left_exit_start + exit_width)
+    left_exit_center_y = (left_exit_start + left_exit_end) // 2
+    for y in range(left_exit_start, left_exit_end):
+        if 0 < map_width and 0 <= y < map_height:
+            tiles[y][0] = VILLAGE_PATH_TILE
+            exit_tiles.append((0, y))
+    # Create path from center of exit to plaza
+    if 0 <= left_exit_center_y < map_height:
+        _create_path(tiles, 0, left_exit_center_y, plaza_center_x, plaza_center_y)
+    
+    # Right edge exit (centered vertically)
+    right_exit_start = max(1, map_height // 2 - exit_width // 2)
+    right_exit_end = min(map_height - 1, right_exit_start + exit_width)
+    right_exit_center_y = (right_exit_start + right_exit_end) // 2
+    for y in range(right_exit_start, right_exit_end):
+        if map_width > 0 and 0 <= y < map_height:
+            tiles[y][map_width - 1] = VILLAGE_PATH_TILE
+            exit_tiles.append((map_width - 1, y))
+    # Create path from center of exit to plaza
+    if 0 <= right_exit_center_y < map_height:
+        _create_path(tiles, map_width - 1, right_exit_center_y, plaza_center_x, plaza_center_y)
+    
+    return exit_tiles
 
 
 def _add_wandering_villagers(

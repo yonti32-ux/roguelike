@@ -297,7 +297,16 @@ class GameMap:
         if tile_screen_size <= 0:
             return
 
-        for y, row in enumerate(self.tiles):
+        # Calculate which tile range is visible on screen (optimization: only iterate visible tiles)
+        # Add one extra tile on each side for safety (partial tiles at edges)
+        min_tile_x = max(0, int((camera_x - tile_screen_size) / TILE_SIZE))
+        max_tile_x = min(self.width, int((camera_x + screen_w + tile_screen_size) / TILE_SIZE) + 1)
+        min_tile_y = max(0, int((camera_y - tile_screen_size) / TILE_SIZE))
+        max_tile_y = min(self.height, int((camera_y + screen_h + tile_screen_size) / TILE_SIZE) + 1)
+
+        # Only iterate through tiles that are potentially visible on screen
+        for y in range(min_tile_y, max_tile_y):
+            row = self.tiles[y]
             world_y = y * TILE_SIZE
             sy = int((world_y - camera_y) * zoom)
 
@@ -305,7 +314,8 @@ class GameMap:
             if sy >= screen_h or sy + tile_screen_size <= 0:
                 continue
 
-            for x, tile in enumerate(row):
+            for x in range(min_tile_x, max_tile_x):
+                tile = row[x]
                 world_x = x * TILE_SIZE
                 sx = int((world_x - camera_x) * zoom)
 

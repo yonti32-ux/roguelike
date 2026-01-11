@@ -15,6 +15,7 @@ from ..overworld.terrain import TERRAIN_WATER, get_terrain
 from .base import PointOfInterest
 from .registry import get_registry
 from ..generation.config import load_generation_config
+from systems.namegen import generate_dungeon_name, generate_town_name, generate_village_name
 
 # Import types to ensure POI types are registered before use
 # This ensures auto-registration happens even if placement is imported directly
@@ -346,8 +347,11 @@ def _try_place_with_constraints(
         # Calculate POI level
         poi_level = _calculate_poi_level(poi_type, x, y, overworld, existing_pois)
         
-        # Create POI (pass gen_config for dungeon floor calculation)
-        poi = _create_poi(poi_type, poi_id, (x, y), level=poi_level, gen_config=gen_config)
+        # Get world seed from overworld map for deterministic name generation
+        world_seed = overworld.seed if hasattr(overworld, "seed") and overworld.seed is not None else None
+        
+        # Create POI (pass gen_config for dungeon floor calculation and world_seed for name generation)
+        poi = _create_poi(poi_type, poi_id, (x, y), level=poi_level, gen_config=gen_config, world_seed=world_seed)
         return poi
     
     # No valid candidates found
@@ -546,6 +550,7 @@ def _create_poi(
     position: tuple[int, int],
     level: int = 1,
     gen_config = None,
+    world_seed: int | None = None,
 ) -> PointOfInterest:
     """
     Create a POI instance of the given type using the registry.
@@ -556,6 +561,7 @@ def _create_poi(
         position: Overworld position
         level: Difficulty level of the POI
         gen_config: Optional generation config (for dungeon floor calculation)
+        world_seed: Optional world seed for deterministic name generation
         
     Returns:
         PointOfInterest instance
@@ -565,11 +571,46 @@ def _create_poi(
     """
     registry = get_registry()
     
+    # Generate name using name generation system with deterministic seed
+    # Use world_seed + poi_id + position to create a unique but deterministic seed
+    # Calculate a deterministic integer seed from the inputs
+    if world_seed is not None:
+        # Combine world seed, POI ID hash, and position into a single integer
+        poi_id_hash = abs(hash(poi_id)) % 10000  # Limit hash to reasonable range
+        name_seed = (world_seed * 100000 + poi_id_hash * 100 + position[0] * 10 + position[1]) % (2**31)
+    else:
+        # Fallback: use poi_id and position (less ideal but still deterministic)
+        poi_id_hash = abs(hash(poi_id)) % 10000
+        name_seed = (poi_id_hash * 1000 + position[0] * 100 + position[1]) % (2**31)
+    
+    # Save current random state
+    old_state = random.getstate()
+    try:
+        # Set seed for deterministic name generation
+        random.seed(name_seed)
+        
+        # Generate name based on POI type
+        if poi_type == "dungeon":
+            name = generate_dungeon_name(include_descriptor=True, pattern="auto")
+        elif poi_type == "village":
+            name = generate_village_name(pattern="auto")
+        elif poi_type == "town":
+            name = generate_town_name(pattern="auto")
+        elif poi_type == "camp":
+            # Camps use village names (simpler, more rustic)
+            name = generate_village_name(pattern="simple")
+        else:
+            # Fallback: use default naming
+            name = None
+    finally:
+        # Restore random state
+        random.setstate(old_state)
+    
     # Special handling for dungeon (needs floor_count)
     if poi_type == "dungeon":
         floor_count = _calculate_dungeon_floor_count(level, gen_config)
-        return registry.create(poi_type, poi_id, position, level=level, floor_count=floor_count)
+        return registry.create(poi_type, poi_id, position, level=level, name=name, floor_count=floor_count)
     else:
         # For other types, use standard creation
-        return registry.create(poi_type, poi_id, position, level=level)
+        return registry.create(poi_type, poi_id, position, level=level, name=name)
 

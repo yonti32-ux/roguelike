@@ -1168,7 +1168,21 @@ class ExplorationController:
                 self._disarm_trap(trap)
                 return
 
-        # 6) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
+        # 6) Check for village exit points (return to overworld)
+        if game.current_map is not None and game.player is not None:
+            # Check if we're in a village
+            from world.poi.types import VillagePOI
+            if game.current_poi is not None and isinstance(game.current_poi, VillagePOI):
+                px, py = game.player.rect.center
+                player_tx, player_ty = game.current_map.world_to_tile(px, py)
+                
+                # Check if standing on any village exit tile
+                exit_tiles = getattr(game.current_map, "village_exit_tiles", None)
+                if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
+                    game.exit_poi()
+                    return
+
+        # 7) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
         if game.current_map is not None and game.player is not None:
             px, py = game.player.rect.center
             player_tx, player_ty = game.current_map.world_to_tile(px, py)
@@ -1187,5 +1201,5 @@ class ExplorationController:
                         game.try_change_floor(-1)
                         return
 
-        # 7) Nothing
+        # 8) Nothing
         game.last_message = "There is nothing here to interact with."

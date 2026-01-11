@@ -14,3 +14,19 @@ telemetry/*.jsonl
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# Profiling
+*.prof
+profile_*.svg
+profile_*.html
+*.lprof
+*.mprof
+.profile

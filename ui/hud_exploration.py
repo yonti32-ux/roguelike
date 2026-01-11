@@ -172,6 +172,13 @@ def _gather_context_hints(game: "Game", game_map, player) -> List[str]:
     elif game_map.down_stairs is not None and (tx, ty) == game_map.down_stairs:
         hints.append("On stairs down – press '.' to descend.")
 
+    # Village exit points
+    from world.poi.types import VillagePOI
+    if game.current_poi is not None and isinstance(game.current_poi, VillagePOI):
+        exit_tiles = getattr(game_map, "village_exit_tiles", None)
+        if exit_tiles is not None and (tx, ty) in exit_tiles:
+            hints.append("Village exit – press E to return to overworld.")
+
     # Room tag
     room = game_map.get_room_at(tx, ty)
     if room is not None:

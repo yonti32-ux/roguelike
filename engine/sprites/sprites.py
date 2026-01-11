@@ -62,6 +62,10 @@ class SpriteManager:
         self._cache_metadata: Dict[str, bool] = {}  # Track if sprite is a fallback (True = is_fallback)
         self._missing_sprites: set = set()  # Track missing sprites to avoid repeated warnings
         
+        # File existence cache: (category, sprite_id, variant) -> Path or None
+        # Caches whether sprite files exist to avoid repeated file system I/O
+        self._file_existence_cache: Dict[Tuple[SpriteCategory, str, Optional[str]], Optional[Path]] = {}
+        
         # Sprite set manager (lazy-loaded)
         self._sprite_set_manager: Optional[object] = None
         
@@ -416,7 +420,14 @@ class SpriteManager:
         - sprites/entity/enemy_goblin.png
         - sprites/item/sword_iron.png
         - sprites/tile/floor.png
+        
+        Performance: Uses file existence cache to avoid repeated file system I/O.
         """
+        # Check cache first
+        cache_key = (category, sprite_id, variant)
+        if cache_key in self._file_existence_cache:
+            return self._file_existence_cache[cache_key]
+        
         category_dir = self.sprite_root / category.value
         
         # Build filename
@@ -429,14 +440,18 @@ class SpriteManager:
         
         # Check if file exists, otherwise return None
         if file_path.exists():
+            self._file_existence_cache[cache_key] = file_path
             return file_path
         
         # Try without variant if variant was provided
         if variant:
-            file_path = category_dir / f"{sprite_id}.png"
-            if file_path.exists():
-                return file_path
+            file_path_no_variant = category_dir / f"{sprite_id}.png"
+            if file_path_no_variant.exists():
+                self._file_existence_cache[cache_key] = file_path_no_variant
+                return file_path_no_variant
         
+        # Cache the None result so we don't check again
+        self._file_existence_cache[cache_key] = None
         return None
     
     def clear_cache(self) -> None:
@@ -445,6 +460,7 @@ class SpriteManager:
         self._cache_metadata.clear()
         self._raw_sprite_cache.clear()
         self._tile_chunk_cache.clear()
+        self._file_existence_cache.clear()
         self._missing_sprites.clear()
         
         # Also clear sprite set cache if available

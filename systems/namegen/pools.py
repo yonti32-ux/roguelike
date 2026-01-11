@@ -46,6 +46,13 @@ TOWN_PREFIXES = [
     "North", "South", "East", "West", "Fair", "White", "Black",
 ]
 
+VILLAGE_PREFIXES = [
+    "Little", "Small", "Quiet", "Green", "Oak", "Willow", "Birch", "Pine",
+    "Mill", "Creek", "Brook", "Spring", "Meadow", "Moss", "Fern", "Berry",
+    "Honey", "Apple", "Cherry", "Daisy", "Rose", "Thistle",
+    "Stone", "Clay", "Wood", "Hill", "Dale", "Glen", "Nook", "Corner",
+]
+
 # Suffix pools
 DUNGEON_SUFFIXES = [
     "Crypt", "Caverns", "Keep", "Temple", "Tomb", "Catacombs", "Vault",
@@ -57,6 +64,13 @@ TOWN_SUFFIXES = [
     "ville", "ton", "ham", "burgh", "ford", "port", "field", "vale",
     "dale", "bridge", "wood", "hill", "peak", "moor", "haven", "rest",
     "watch", "point", "shore", "grove",
+]
+
+VILLAGE_SUFFIXES = [
+    "ham", "thorpe", "wick", "cott", "stead", "mill", "ford", "brook",
+    "creek", "spring", "meadow", "glen", "nook", "corner", "cross",
+    "end", "green", "wood", "hill", "dale", "vale", "marsh", "fen",
+    "grove", "copse", "holt", "lea", "heath", "moor", "ridge",
 ]
 
 # Descriptor/Adjective pools (tiered)
@@ -125,8 +139,10 @@ def create_name_pools() -> NamePools:
         beast_syllables=BEAST_SYLLABLES,
         dungeon_prefixes=DUNGEON_PREFIXES,
         town_prefixes=TOWN_PREFIXES,
+        village_prefixes=VILLAGE_PREFIXES,
         dungeon_suffixes=DUNGEON_SUFFIXES,
         town_suffixes=TOWN_SUFFIXES,
+        village_suffixes=VILLAGE_SUFFIXES,
         brutal_descriptors=BRUTAL_DESCRIPTORS_T1 + BRUTAL_DESCRIPTORS_T2 + BRUTAL_DESCRIPTORS_T3,
         mystical_descriptors=MYSTICAL_DESCRIPTORS_T1 + MYSTICAL_DESCRIPTORS_T2 + MYSTICAL_DESCRIPTORS_T3,
         dungeon_descriptors=DUNGEON_DESCRIPTORS,

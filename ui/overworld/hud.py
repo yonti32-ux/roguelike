@@ -6,7 +6,7 @@ Renders the overworld map, POIs, player, and UI elements.
 
 import pygame
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple
 
 from settings import COLOR_BG, TILE_SIZE
 
@@ -68,54 +68,54 @@ def draw_overworld(game: "Game") -> None:
     start_y = max(0, player_y - viewport_tiles_y // 2)
     end_x = min(game.overworld_map.width, start_x + viewport_tiles_x)
     end_y = min(game.overworld_map.height, start_y + viewport_tiles_y)
-    
+
     # Draw terrain tiles
+    # Note: pygame.draw.rect is actually faster than blitting many small surfaces
+    # Surface caching increased calls from 21M to 43M and time from 8s to 16s
     for y in range(start_y, end_y):
         for x in range(start_x, end_x):
             # Calculate screen position (using zoomed tile size)
             screen_x = (x - start_x) * tile_size
             screen_y = (y - start_y) * tile_size
-            
-            # Draw tile
             rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
             
-            # Check if explored
+            # Calculate tile color
             if not game.overworld_map.is_explored(x, y):
                 # Unexplored tiles: very dark gray/black
-                pygame.draw.rect(screen, (20, 20, 20), rect)
-                continue
-            
-            tile = game.overworld_map.get_tile(x, y)
-            if tile is None:
-                pygame.draw.rect(screen, (40, 40, 40), rect)  # Dark gray for missing tiles
-                continue
-            
-            # Calculate distance from player for brightness
-            dx = abs(x - player_x)
-            dy = abs(y - player_y)
-            distance = max(dx, dy)  # Chebyshev distance
-            
-            # Dim explored but not currently visible tiles
-            if (x, y) == (player_x, player_y):
-                # Current tile: full brightness
-                color = tile.color
-            elif distance <= 3:
-                # Very close tiles: nearly full brightness
-                factor = 0.9
-                color = (
-                    int(tile.color[0] * factor),
-                    int(tile.color[1] * factor),
-                    int(tile.color[2] * factor),
-                )
+                color = (20, 20, 20)
             else:
-                # Explored tiles further away: dimmed
-                factor = 0.7
-                color = (
-                    int(tile.color[0] * factor),
-                    int(tile.color[1] * factor),
-                    int(tile.color[2] * factor),
-                )
+                tile = game.overworld_map.get_tile(x, y)
+                if tile is None:
+                    # Dark gray for missing tiles
+                    color = (40, 40, 40)
+                else:
+                    # Calculate distance from player for brightness
+                    dx = abs(x - player_x)
+                    dy = abs(y - player_y)
+                    distance = max(dx, dy)  # Chebyshev distance
+                    
+                    # Dim explored but not currently visible tiles
+                    if (x, y) == (player_x, player_y):
+                        # Current tile: full brightness
+                        color = tile.color
+                    elif distance <= 3:
+                        # Very close tiles: nearly full brightness
+                        factor = 0.9
+                        color = (
+                            int(tile.color[0] * factor),
+                            int(tile.color[1] * factor),
+                            int(tile.color[2] * factor),
+                        )
+                    else:
+                        # Explored tiles further away: dimmed
+                        factor = 0.7
+                        color = (
+                            int(tile.color[0] * factor),
+                            int(tile.color[1] * factor),
+                            int(tile.color[2] * factor),
+                        )
             
+            # Draw rectangle directly (faster than blitting many small surfaces)
             pygame.draw.rect(screen, color, rect)
     
     # Draw POI markers and detect hover
@@ -307,4 +307,3 @@ def _draw_message(game: "Game", screen: pygame.Surface) -> None:
     pygame.draw.rect(screen, (0, 0, 0, 180), bg_rect)
     
     screen.blit(text_surface, (x, y))
-

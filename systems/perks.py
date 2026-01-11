@@ -760,6 +760,8 @@ class _DummyBaseStats:
         self.max_stamina: int = 0
         self.stamina_regen_bonus: int = 0
         self.mana_regen_bonus: int = 0
+        self.initiative: int = 0
+        self.movement_points_bonus: float = 0.0
 
 
 class _DummyHeroLike:
@@ -803,4 +805,6 @@ def total_stat_modifiers_for_perks(perk_ids: Iterable[str]) -> Dict[str, float]:
         "max_stamina": int(getattr(base, "max_stamina", 0)),
         "stamina_regen_bonus": int(getattr(base, "stamina_regen_bonus", 0)),
         "mana_regen_bonus": int(getattr(base, "mana_regen_bonus", 0)),
+        "initiative": int(getattr(base, "initiative", 0)),
+        "movement_points_bonus": float(getattr(base, "movement_points_bonus", 0.0)),
     }

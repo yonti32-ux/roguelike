@@ -2,6 +2,7 @@ import pygame
 import traceback
 import sys
 import copy
+import random
 from typing import List, Optional
 
 from settings import COLOR_BG, FPS
@@ -30,6 +31,25 @@ def _get_backgrounds_for_class():
                 return []
             _backgrounds_for_class_fn = _fallback
     return _backgrounds_for_class_fn
+
+
+# Random name generator
+RANDOM_HERO_NAMES = [
+    "Aldric", "Bram", "Cora", "Darrow", "Elara", "Finn", "Gwen", "Hector",
+    "Iris", "Jax", "Kira", "Lucian", "Maya", "Nolan", "Orin", "Piper",
+    "Quinn", "Raven", "Sage", "Talon", "Vera", "Wren", "Xara", "Zane",
+    "Aric", "Brynn", "Cade", "Dara", "Evan", "Faye", "Grey", "Hope",
+    "Ivy", "Jace", "Kai", "Leah", "Max", "Nova", "Owen", "Pax",
+    "Rune", "Sky", "Tess", "Vex", "Yara", "Zoe",
+    "Arden", "Blake", "Case", "Dove", "Echo", "Fox", "Gale", "Haze",
+    "Iris", "Jade", "Kip", "Lake", "Mars", "Neo", "Onyx", "Poe",
+    "Reed", "Shade", "Thorn", "Vale", "Wren", "Zen"
+]
+
+
+def _generate_random_name() -> str:
+    """Generate a random hero name from the list."""
+    return random.choice(RANDOM_HERO_NAMES)
 
 
 class CharacterCreationScene:
@@ -452,6 +472,11 @@ class CharacterCreationScene:
             final_name = self.name_buffer.strip() or selected_class.name
             return (selected_class.id, selected_background.id, self.stat_distribution, self.selected_traits, final_name)
 
+        # Random name generator (R key)
+        if event.key == pygame.K_r:
+            self.name_buffer = _generate_random_name()
+            return False  # Continue loop
+
         # Delete last character
         if event.key == pygame.K_BACKSPACE:
             if self.name_buffer:
@@ -859,7 +884,7 @@ class CharacterCreationScene:
 
         # Hint text
         hint1 = self.font_small.render(
-            "Type to enter your name (A–Z, numbers, etc.) – Enter to confirm.",
+            "Type to enter your name (A–Z, numbers, etc.) – R: random name – Enter to confirm.",
             True,
             (190, 190, 190),
         )
