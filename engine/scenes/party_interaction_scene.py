@@ -174,9 +174,23 @@ class PartyInteractionScene:
         overlay.fill((0, 0, 0))
         screen.blit(overlay, (0, 0))
         
-        # Dialog box
-        box_width = 600
-        box_height = 400
+        # Calculate dialog box size dynamically based on content
+        # Base height for title, description, and info
+        base_height = 200
+        # Height per action (with spacing)
+        action_height = 35
+        actions_height = len(self.actions) * action_height + 40  # +40 for "Actions:" title and spacing
+        # Instructions height
+        instructions_height = 40
+        
+        # Calculate total height needed
+        box_width = 650  # Slightly wider for better readability
+        box_height = base_height + actions_height + instructions_height
+        
+        # Ensure minimum size and cap at screen size
+        box_height = max(400, min(box_height, screen_h - 40))
+        box_width = min(box_width, screen_w - 40)
+        
         box_x = (screen_w - box_width) // 2
         box_y = (screen_h - box_height) // 2
         
@@ -232,7 +246,16 @@ class PartyInteractionScene:
         screen.blit(actions_title, (box_x + 20, actions_start_y))
         
         action_y = actions_start_y + 35
+        action_height = 35
+        instructions_height = 40
+        
+        # Draw all actions (box is now dynamically sized to fit them)
         for i, (action_name, action_id, _) in enumerate(self.actions):
+            # Check if this action would go past the instructions area
+            if action_y + action_height > box_y + box_height - instructions_height - 10:
+                # This shouldn't happen with dynamic sizing, but just in case
+                break
+                
             # Highlight selected action
             if i == self.selected_action_index:
                 # Draw selection background
@@ -246,7 +269,7 @@ class PartyInteractionScene:
             action_text = f"> {action_name}" if i == self.selected_action_index else f"  {action_name}"
             action_surface = self.font_main.render(action_text, True, color)
             screen.blit(action_surface, (box_x + 30, action_y))
-            action_y += 35
+            action_y += action_height
         
         # Instructions
         instructions = "UP/DOWN: Navigate | ENTER: Select | ESC: Leave"
@@ -287,6 +310,13 @@ class PartyInteractionScene:
         """
         clock = pygame.time.Clock()
         
+        # Draw the game state once as background (cache it)
+        if hasattr(self.game, "draw"):
+            self.game.draw()
+            background = self.screen.copy()
+        else:
+            background = None
+        
         while not self.closed:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -295,11 +325,15 @@ class PartyInteractionScene:
                 self.handle_event(event)
             
             # Draw
-            # First draw the game state behind
-            if hasattr(self.game, "draw"):
-                self.game.draw()
+            # Restore the cached background instead of redrawing every frame
+            if background:
+                self.screen.blit(background, (0, 0))
+            else:
+                # Fallback: draw game state if no background cached
+                if hasattr(self.game, "draw"):
+                    self.game.draw()
             
-            # Then draw the interaction screen
+            # Then draw the interaction screen overlay
             self.draw()
             
             pygame.display.flip()

@@ -73,15 +73,21 @@ def filter_items(
             continue
         
         # Slot-based filtering
-        if filter_mode == FilterMode.WEAPON and item_def.slot == "weapon":
+        slot = item_def.slot or "misc"
+        
+        if filter_mode == FilterMode.WEAPON and slot == "weapon":
             filtered.append(item_id)
-        elif filter_mode == FilterMode.ARMOR and item_def.slot == "armor":
+        elif filter_mode == FilterMode.ARMOR:
+            # ARMOR filter includes all armor pieces
+            if slot in ["armor", "helmet", "gloves", "boots", "shield", "cloak", "greaves", "cape"]:
+                filtered.append(item_id)
+        elif filter_mode == FilterMode.TRINKET:
+            # TRINKET filter includes ring, amulet, and legacy trinket
+            if slot in ["trinket", "ring", "amulet"]:
+                filtered.append(item_id)
+        elif filter_mode == FilterMode.CONSUMABLE and slot == "consumable":
             filtered.append(item_id)
-        elif filter_mode == FilterMode.TRINKET and item_def.slot == "trinket":
-            filtered.append(item_id)
-        elif filter_mode == FilterMode.CONSUMABLE and item_def.slot == "consumable":
-            filtered.append(item_id)
-        elif filter_mode == FilterMode.MISC and (item_def.slot == "misc" or not item_def.slot):
+        elif filter_mode == FilterMode.MISC and (slot == "misc" or not item_def.slot):
             filtered.append(item_id)
         
         # Equipped status filtering
@@ -122,12 +128,12 @@ def sort_items(
             items_by_slot[slot].append(item_id)
         
         # Sort within each slot
-        slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
+        slot_order = ["weapon", "helmet", "armor", "gloves", "boots", "shield", "cloak", "ring", "amulet", "consumable", "misc"]
         result: List[str] = []
         for slot in slot_order:
             if slot in items_by_slot:
                 result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x)))
-        # Add any remaining slots
+        # Add any remaining slots (including legacy trinket, greaves, cape, etc.)
         for slot in sorted(items_by_slot.keys()):
             if slot not in slot_order:
                 result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x)))

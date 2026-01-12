@@ -22,6 +22,7 @@ from ui.hud_screens import (
     draw_skill_screen_fullscreen,
     draw_recruitment_fullscreen,
     draw_quest_fullscreen,
+    _process_inventory_items,
 )
 from systems.input import InputAction
 
@@ -116,56 +117,32 @@ class InventoryScreen:
                 game.cycle_inventory_focus(+1)
                 return
 
-        # Get inventory and group items by slot/category
+        # Get inventory and process items using the same logic as the draw function
         inventory = getattr(game, "inventory", None)
         if inventory is None:
             return
 
+        from ui.inventory_enhancements import FilterMode, SortMode
         from systems.inventory import get_item_def
         
-        # Group items by slot
-        items_by_slot: Dict[str, List[str]] = {}
-        for item_id in inventory.items:
-            item_def = get_item_def(item_id)
-            if item_def is None:
-                slot = "misc"
-            else:
-                slot = item_def.slot or "misc"
-            if slot not in items_by_slot:
-                items_by_slot[slot] = []
-            items_by_slot[slot].append(item_id)
+        # Use the same processing logic as the draw function to ensure alignment
+        filter_mode = getattr(game, "inventory_filter", FilterMode.ALL)
+        sort_mode = getattr(game, "inventory_sort", SortMode.DEFAULT)
+        search_query = getattr(game, "inventory_search", "") or ""
         
-        # Build flat list with category markers: (item_id or None for category header, slot_name)
-        flat_list: List[tuple[Optional[str], str]] = []
-        slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
-        for slot in slot_order:
-            if slot in items_by_slot and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
+        processed = _process_inventory_items(inventory, game, filter_mode, sort_mode, search_query)
+        flat_list = processed.flat_list
+        item_indices = processed.item_indices
         
-        # Add any remaining slots not in the preferred order
-        for slot in sorted(items_by_slot.keys()):
-            if slot not in slot_order and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
-        
-        total_items = len([x for x in flat_list if x[0] is not None])  # Count only actual items
         cursor = getattr(game, "inventory_cursor", 0)
         page_size = getattr(game, "inventory_page_size", 20)
         
-        # Find the actual item index (skip category headers)
-        item_indices = [i for i, (item_id, _) in enumerate(flat_list) if item_id is not None]
         if not item_indices:
             return
         
         # Clamp cursor to valid range
         cursor = max(0, min(cursor, len(item_indices) - 1))
         game.inventory_cursor = cursor
-        
-        # Get current item index in flat_list
-        current_flat_index = item_indices[cursor]
         
         # Cursor navigation (up / down)
         if input_manager is not None:
