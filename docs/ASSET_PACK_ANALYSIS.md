@@ -251,3 +251,4 @@ troll → Troll (from monsters.png)
 
 **Recommendation**: Start with 32rogues pack for core game assets, use Tiny RPG pack selectively (arrows, potential battle expansions).
 
+

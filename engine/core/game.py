@@ -470,6 +470,20 @@ class Game:
             for poi in nearby_pois:
                 poi.discover()
             
+            # Initialize roaming parties
+            if self.overworld_map.party_manager is not None:
+                player_level = getattr(self.hero_stats, "level", 1) if hasattr(self, "hero_stats") else 1
+                print(f"Initializing parties at player position ({start_x}, {start_y}), level {player_level}")
+                self.overworld_map.party_manager.initial_spawn(
+                    count=30,  # Increased initial party count
+                    player_level=player_level,
+                    player_position=(start_x, start_y),
+                )
+                all_parties = self.overworld_map.party_manager.get_all_parties()
+                print(f"Total parties after initialization: {len(all_parties)}")
+                if len(all_parties) == 0:
+                    print("WARNING: No parties spawned! Check spawn logic.")
+            
             print(f"Overworld initialized! Found {len(nearby_pois)} nearby POIs")
             
         except Exception as e:

@@ -80,13 +80,19 @@ class OverworldController:
             self.try_move(direction)
             return
         
-        # Interaction (enter POI)
+        # Interaction (enter POI or interact with party)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.INTERACT, event):
+                # Check for party interaction first
+                if self._try_party_interaction():
+                    return
                 self.try_enter_poi()
                 return
         else:
             if event.key == pygame.K_e:
+                # Check for party interaction first
+                if self._try_party_interaction():
+                    return
                 self.try_enter_poi()
                 return
         
@@ -197,6 +203,10 @@ class OverworldController:
         self._last_move_time += dt
         if self._zoom_cooldown > 0:
             self._zoom_cooldown = max(0.0, self._zoom_cooldown - dt)
+        
+        # Check for party interactions (combat, etc.)
+        # Note: Party movement is now handled in try_move() when player moves
+        self._check_party_interactions()
     
     def try_move(self, direction: tuple[int, int]) -> None:
         """
@@ -243,6 +253,14 @@ class OverworldController:
                 if tile:
                     cost = config.terrain_costs.get(tile.id, config.movement_cost_base)
                     game.time_system.add_time(cost * config.movement_cost_base)
+            
+            # Update roaming parties when player moves (turn-based movement)
+            if game.overworld_map.party_manager is not None:
+                player_level = getattr(game.hero_stats, "level", 1) if hasattr(game, "hero_stats") else 1
+                game.overworld_map.party_manager.update_on_player_move(
+                    player_level=player_level,
+                    player_position=(new_x, new_y),
+                )
             
             # Check for nearby POIs to discover (within sight radius)
             nearby_pois = game.overworld_map.get_pois_in_range(new_x, new_y, radius=sight_radius)
@@ -304,4 +322,62 @@ class OverworldController:
         
         # Enter the POI (message will be shown by POI.enter())
         game.enter_poi(poi)
+    
+    def _try_party_interaction(self) -> bool:
+        """
+        Try to interact with a party at player's position.
+        
+        Returns:
+            True if interaction was opened, False otherwise
+        """
+        game = self.game
+        
+        if game.overworld_map is None or game.overworld_map.party_manager is None:
+            return False
+        
+        player_x, player_y = game.overworld_map.get_player_position()
+        
+        # Check for parties at player position (same tile)
+        party_at_player = game.overworld_map.party_manager.get_party_at(player_x, player_y)
+        
+        if party_at_player:
+            self._open_party_interaction(party_at_player)
+            return True
+        
+        # Also check adjacent tiles
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+            check_x = player_x + dx
+            check_y = player_y + dy
+            nearby_party = game.overworld_map.party_manager.get_party_at(check_x, check_y)
+            if nearby_party:
+                self._open_party_interaction(nearby_party)
+                return True
+        
+        return False
+    
+    def _open_party_interaction(self, party) -> None:
+        """Open the party interaction screen."""
+        from world.overworld.party_types import get_party_type
+        from engine.scenes.party_interaction_scene import PartyInteractionScene
+        
+        party_type = get_party_type(party.party_type_id)
+        if party_type is None:
+            return
+        
+        # Create and run interaction scene
+        scene = PartyInteractionScene(self.game.screen, party, party_type, self.game)
+        action = scene.run()
+        
+        # Handle the selected action (some actions are handled in the scene)
+        if action == "attack":
+            # TODO: Trigger combat
+            pass
+        elif action == "trade":
+            # TODO: Open trade screen
+            pass
+    
+    def _check_party_interactions(self) -> None:
+        """Check for automatic party interactions (combat, etc.)."""
+        # This is now only for automatic interactions, not player-initiated
+        pass
 

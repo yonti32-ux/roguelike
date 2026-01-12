@@ -6,12 +6,13 @@ Renders the overworld map, POIs, player, and UI elements.
 
 import pygame
 import math
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Tuple, Optional
 
 from settings import COLOR_BG, TILE_SIZE
 
 if TYPE_CHECKING:
     from engine.core.game import Game
+    from world.overworld.roaming_party import RoamingParty
 
 
 # Base overworld tile size (before zoom)
@@ -47,9 +48,10 @@ def draw_overworld(game: "Game") -> None:
     # Get player position
     player_x, player_y = game.overworld_map.get_player_position()
     
-    # Get mouse position for POI hover detection
+    # Get mouse position for POI and party hover detection
     mouse_x, mouse_y = pygame.mouse.get_pos()
     hovered_poi = None
+    hovered_party = None
     
     # Get current zoom level
     zoom = 1.0
@@ -233,6 +235,13 @@ def draw_overworld(game: "Game") -> None:
         
         pygame.draw.polygon(screen, (0, 0, 0), rotated_points)
     
+    # Draw roaming parties and detect hover
+    if game.overworld_map.party_manager is not None:
+        hovered_party = _draw_roaming_parties(
+            game, screen, start_x, start_y, end_x, end_y, tile_size, zoom, 
+            player_x, player_y, mouse_x, mouse_y
+        )
+    
     # Draw UI overlay
     _draw_overworld_ui(game, screen)
     
@@ -240,9 +249,21 @@ def draw_overworld(game: "Game") -> None:
     if hasattr(game, "last_message") and game.last_message:
         _draw_message(game, screen)
     
-    # Draw POI tooltip if hovering
+    # Draw tooltips if hovering
     if hasattr(game, "tooltip") and game.tooltip:
-        if hovered_poi is not None and hovered_poi.discovered:
+        # Priority: party tooltip over POI tooltip
+        if hovered_party is not None:
+            from ui.overworld.party_tooltips import create_party_tooltip_data
+            from world.overworld.party_types import get_party_type
+            
+            party_type = get_party_type(hovered_party.party_type_id)
+            if party_type:
+                tooltip_data = create_party_tooltip_data(hovered_party, party_type, game)
+                game.tooltip.current_tooltip = tooltip_data
+                game.tooltip.mouse_pos = (mouse_x, mouse_y)
+                if hasattr(game, "ui_font"):
+                    game.tooltip.draw(screen, game.ui_font)
+        elif hovered_poi is not None and hovered_poi.discovered:
             from ui.overworld.poi_tooltips import create_poi_tooltip_data
             
             tooltip_data = create_poi_tooltip_data(hovered_poi, game)
@@ -253,8 +274,107 @@ def draw_overworld(game: "Game") -> None:
             if hasattr(game, "ui_font"):
                 game.tooltip.draw(screen, game.ui_font)
         else:
-            # Clear tooltip if not hovering over a POI
+            # Clear tooltip if not hovering over anything
             game.tooltip.current_tooltip = None
+
+
+def _draw_roaming_parties(
+    game: "Game",
+    screen: pygame.Surface,
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+    tile_size: int,
+    zoom: float,
+    player_x: int,
+    player_y: int,
+    mouse_x: int,
+    mouse_y: int,
+) -> Optional["RoamingParty"]:
+    """
+    Draw roaming parties on the overworld and detect hover.
+    
+    Returns:
+        The party being hovered over, or None
+    """
+    from world.overworld.party_types import get_party_type
+    from world.overworld.roaming_party import RoamingParty
+    
+    party_manager = game.overworld_map.party_manager
+    if party_manager is None:
+        return None
+    
+    all_parties = party_manager.get_all_parties()
+    hovered_party = None
+    
+    for party in all_parties:
+        px, py = party.get_position()
+        
+        # Only draw if in viewport
+        if not (start_x <= px < end_x and start_y <= py < end_y):
+            continue
+        
+        # Draw if explored OR within sight radius (parties are visible if nearby)
+        if not game.overworld_map.is_explored(px, py):
+            # Check if within sight radius
+            from world.overworld import OverworldConfig
+            config = OverworldConfig.load()
+            sight_radius = config.sight_radius
+            
+            dx = abs(px - player_x)
+            dy = abs(py - player_y)
+            distance = max(dx, dy)  # Chebyshev distance
+            if distance > sight_radius:
+                continue  # Too far away, don't show
+        
+        # Get party type for color/icon
+        party_type = get_party_type(party.party_type_id)
+        if party_type is None:
+            continue
+        
+        # Calculate screen position
+        screen_x = (px - start_x) * tile_size + tile_size // 2
+        screen_y = (py - start_y) * tile_size + tile_size // 2
+        
+        # Check if mouse is hovering over this party
+        hover_radius = max(8, int(8 * zoom))  # Scale hover detection with zoom
+        dx_mouse = abs(mouse_x - screen_x)
+        dy_mouse = abs(mouse_y - screen_y)
+        if dx_mouse <= hover_radius and dy_mouse <= hover_radius:
+            hovered_party = party
+        
+        # Draw party icon (colored circle with icon character)
+        base_radius = max(2, int(4 * zoom))
+        
+        # Use party type color
+        color = party_type.color
+        
+        # Highlight if hovering
+        if hovered_party == party:
+            # Draw larger, brighter circle when hovering
+            radius = max(3, int(base_radius * 1.5))
+            highlight_color = tuple(min(255, c + 30) for c in color)
+            pygame.draw.circle(screen, highlight_color, (screen_x, screen_y), radius)
+            # Draw border
+            border_width = max(1, int(2 * zoom))
+            pygame.draw.circle(screen, (255, 255, 255), (screen_x, screen_y), radius, border_width)
+        else:
+            # Normal size
+            pygame.draw.circle(screen, color, (screen_x, screen_y), base_radius)
+            # Draw border (darker for contrast)
+            border_color = tuple(max(0, c - 50) for c in color)
+            pygame.draw.circle(screen, border_color, (screen_x, screen_y), base_radius, max(1, int(1 * zoom)))
+        
+        # Draw icon character if zoom is high enough
+        if zoom >= 0.5:
+            font_size = max(8, int(10 * zoom))
+            font = pygame.font.Font(None, font_size)
+            icon_text = font.render(party_type.icon, True, (255, 255, 255))
+            text_rect = icon_text.get_rect(center=(screen_x, screen_y))
+            screen.blit(icon_text, text_rect)
+    
+    return hovered_party
 
 
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:

@@ -273,3 +273,4 @@ After basic integration works:
 
 See `docs/32ROGUES_INTEGRATION_PLAN.md` for complete integration guide with detailed mapping tables.
 
+

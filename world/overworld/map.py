@@ -9,6 +9,7 @@ from .terrain import TerrainType, TERRAIN_GRASS
 
 if TYPE_CHECKING:
     from ..poi.base import PointOfInterest
+    from .party_manager import PartyManager
 
 
 class OverworldMap:
@@ -52,6 +53,10 @@ class OverworldMap:
         
         # POIs stored by ID
         self.pois: Dict[str, "PointOfInterest"] = {}
+        
+        # Roaming parties
+        from .party_manager import PartyManager
+        self.party_manager: Optional["PartyManager"] = PartyManager(self)
         
         # Mark starting position as explored
         self.explore_tile(self.player_position[0], self.player_position[1])
