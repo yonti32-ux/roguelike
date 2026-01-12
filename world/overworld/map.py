@@ -58,6 +58,11 @@ class OverworldMap:
         from .party_manager import PartyManager
         self.party_manager: Optional["PartyManager"] = PartyManager(self)
         
+        # Faction manager (use world seed for deterministic generation)
+        # Note: Faction counts will be set when config is available
+        from ..factions import FactionManager
+        self.faction_manager: Optional["FactionManager"] = None
+        
         # Mark starting position as explored
         self.explore_tile(self.player_position[0], self.player_position[1])
     

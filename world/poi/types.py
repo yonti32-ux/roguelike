@@ -28,6 +28,7 @@ class DungeonPOI(PointOfInterest):
         level: int = 1,
         name: Optional[str] = None,
         floor_count: int = 5,
+        faction_id: Optional[str] = None,
     ) -> None:
         """
         Initialize a dungeon POI.
@@ -38,8 +39,9 @@ class DungeonPOI(PointOfInterest):
             level: Difficulty level
             name: Display name
             floor_count: Number of floors in this dungeon
+            faction_id: Optional faction that controls this POI
         """
-        super().__init__(poi_id, "dungeon", position, level, name)
+        super().__init__(poi_id, "dungeon", position, level, name, faction_id=faction_id)
         self.floor_count = floor_count
         self.cleared_floors: Set[int] = set()
         
@@ -187,8 +189,9 @@ class VillagePOI(PointOfInterest):
         position: tuple[int, int],
         level: int = 1,
         name: Optional[str] = None,
+        faction_id: Optional[str] = None,
     ) -> None:
-        super().__init__(poi_id, "village", position, level, name)
+        super().__init__(poi_id, "village", position, level, name, faction_id=faction_id)
         self.buildings: list[str] = ["shop", "inn"]
         self.merchants: list[str] = ["general_merchant"]
     
@@ -301,8 +304,9 @@ class TownPOI(PointOfInterest):
         position: tuple[int, int],
         level: int = 1,
         name: Optional[str] = None,
+        faction_id: Optional[str] = None,
     ) -> None:
-        super().__init__(poi_id, "town", position, level, name)
+        super().__init__(poi_id, "town", position, level, name, faction_id=faction_id)
         self.buildings: list[str] = ["shop", "inn", "blacksmith", "library"]
         self.merchants: list[str] = ["general_merchant", "weapon_merchant", "armor_merchant"]
     
@@ -349,8 +353,9 @@ class CampPOI(PointOfInterest):
         position: tuple[int, int],
         level: int = 1,
         name: Optional[str] = None,
+        faction_id: Optional[str] = None,
     ) -> None:
-        super().__init__(poi_id, "camp", position, level, name)
+        super().__init__(poi_id, "camp", position, level, name, faction_id=faction_id)
     
     def enter(self, game: "Game") -> None:
         """Enter the camp."""

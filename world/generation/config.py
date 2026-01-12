@@ -48,7 +48,7 @@ class TerrainConfig:
 @dataclass
 class POIConfig:
     """POI placement configuration."""
-    max_pois: int = 200
+    max_pois: int = 400  # Increased from 200 for more POIs
     max_placement_attempts: int = 200
     max_consecutive_failures: int = 50
     terrain_blacklist: List[str] = field(default_factory=lambda: ["water"])

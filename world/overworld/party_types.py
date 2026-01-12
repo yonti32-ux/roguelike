@@ -73,6 +73,11 @@ class PartyType:
     # POI preferences (for travel behavior)
     preferred_poi_types: List[str] = field(default_factory=list)  # e.g., ["town", "village"]
     avoids_poi_types: List[str] = field(default_factory=list)  # e.g., ["dungeon"]
+    
+    # Faction
+    faction_id: Optional[str] = None  # Which faction this party belongs to
+    can_join_battle: bool = False  # Can this party fight in battles?
+    battle_unit_template: Optional[str] = None  # Template for battle units (enemy archetype ID)
 
 
 # Registry of party types
@@ -119,6 +124,7 @@ MERCHANT_PARTY = register_party_type(
         spawn_weight=2.0,
         can_trade=True,
         preferred_poi_types=["town", "village"],
+        faction_id="free_cities",  # Merchants belong to free cities
     )
 )
 
@@ -138,6 +144,7 @@ VILLAGER_PARTY = register_party_type(
         icon="V",
         spawn_weight=3.0,
         preferred_poi_types=["village", "town"],
+        faction_id="kingdom_aetheria",  # Villagers belong to kingdom
     )
 )
 
@@ -158,6 +165,8 @@ GUARD_PATROL = register_party_type(
         icon="G",
         spawn_weight=1.5,
         preferred_poi_types=["town"],
+        faction_id="kingdom_aetheria",  # Guards belong to kingdom
+        can_join_battle=True,
     )
 )
 
@@ -179,6 +188,8 @@ BANDIT_PARTY = register_party_type(
         icon="B",
         spawn_weight=2.5,
         avoids_poi_types=["town"],  # Avoid towns with guards
+        faction_id="bandit_confederacy",  # Bandits belong to bandit confederacy
+        can_join_battle=True,
     )
 )
 
@@ -199,6 +210,7 @@ MONSTER_PACK = register_party_type(
         icon="M",
         spawn_weight=2.0,
         avoids_poi_types=["town", "village"],
+        can_join_battle=True,
     )
 )
 
@@ -262,6 +274,7 @@ NOBLE_ENTOURAGE = register_party_type(
         spawn_weight=0.8,
         can_trade=True,
         preferred_poi_types=["town"],
+        faction_id="kingdom_aetheria",  # Nobles belong to kingdom
     )
 )
 
@@ -282,6 +295,8 @@ RANGER_PATROL = register_party_type(
         icon="R",
         spawn_weight=1.2,
         preferred_poi_types=["village"],
+        faction_id="wild_tribes",  # Rangers belong to wild tribes
+        can_join_battle=True,
     )
 )
 
@@ -302,6 +317,8 @@ CULTIST_GATHERING = register_party_type(
         icon="C",
         spawn_weight=1.0,
         avoids_poi_types=["town", "village"],
+        faction_id="shadow_cult",  # Cultists belong to shadow cult
+        can_join_battle=True,
     )
 )
 
@@ -322,6 +339,8 @@ ORC_RAIDING_PARTY = register_party_type(
         icon="O",
         spawn_weight=1.5,
         avoids_poi_types=["town"],
+        faction_id="bandit_confederacy",  # Orcs belong to bandit confederacy
+        can_join_battle=True,
     )
 )
 
@@ -342,6 +361,7 @@ TRADER_CARAVAN = register_party_type(
         spawn_weight=1.8,
         can_trade=True,
         preferred_poi_types=["town", "village"],
+        faction_id="free_cities",  # Traders belong to free cities
     )
 )
 
@@ -360,6 +380,7 @@ SCOUT_PARTY = register_party_type(
         color=(144, 238, 144),  # Light green
         icon="S",
         spawn_weight=1.0,
+        faction_id="wild_tribes",  # Scouts belong to wild tribes
     )
 )
 
@@ -380,6 +401,8 @@ GOBLIN_WARBAND = register_party_type(
         icon="g",
         spawn_weight=2.0,
         avoids_poi_types=["town"],
+        faction_id="bandit_confederacy",  # Goblins belong to bandit confederacy
+        can_join_battle=True,
     )
 )
 
@@ -399,6 +422,7 @@ PILGRIM_GROUP = register_party_type(
         icon="P",
         spawn_weight=1.2,
         preferred_poi_types=["village", "town"],
+        faction_id="kingdom_aetheria",  # Pilgrims belong to kingdom
     )
 )
 

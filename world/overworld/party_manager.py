@@ -135,6 +135,15 @@ class PartyManager:
             y=spawn_y,
         )
         
+        # Assign faction if party type has one, or try to get from faction manager
+        if not party.faction_id and selected_type.faction_id:
+            party.faction_id = selected_type.faction_id
+        elif not party.faction_id and self.overworld_map.faction_manager:
+            # Try to get faction from faction manager based on party type
+            faction_id = self.overworld_map.faction_manager.get_faction_for_party_type(selected_type.id)
+            if faction_id:
+                party.faction_id = faction_id
+        
         # Initialize behavior-specific state
         if selected_type.behavior.value == "patrol":
             party.patrol_center_x = spawn_x

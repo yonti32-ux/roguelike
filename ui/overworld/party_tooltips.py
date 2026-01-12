@@ -52,6 +52,13 @@ def create_party_tooltip_data(
     alignment_label = alignment_labels.get(party_type.alignment.value, "Unknown")
     lines.append(f"Alignment: {alignment_label}")
     
+    # Faction (if applicable)
+    if party.faction_id:
+        from systems.factions import get_faction
+        faction = get_faction(party.faction_id)
+        if faction:
+            lines.append(f"Faction: {faction.name}")
+    
     # Behavior
     behavior_labels = {
         "patrol": "Patrolling",

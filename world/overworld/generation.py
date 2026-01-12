@@ -69,6 +69,31 @@ class WorldGenerator:
             tiles=tiles,
         )
         
+        # Initialize faction manager with config-based counts
+        try:
+            from ..factions import FactionManager
+            from systems.factions import FactionAlignment
+            
+            faction_counts = {
+                FactionAlignment.GOOD: self.config.faction_counts.get("good", 2),
+                FactionAlignment.NEUTRAL: self.config.faction_counts.get("neutral", 2),
+                FactionAlignment.EVIL: self.config.faction_counts.get("evil", 2),
+            }
+            
+            overworld.faction_manager = FactionManager(
+                world_seed=self.seed,
+                use_random_factions=True,
+                faction_counts=faction_counts,
+            )
+            all_factions = overworld.faction_manager.get_all_factions()
+            print(f"Faction manager initialized with {len(all_factions)} factions")
+        except Exception as e:
+            print(f"Warning: Failed to initialize faction manager: {e}")
+            import traceback
+            traceback.print_exc()
+            # Continue without faction manager - POIs will be created without factions
+            overworld.faction_manager = None
+        
         # Set starting location FIRST (needed for POI level calculation)
         start_x, start_y = self._set_starting_location(overworld)
         # Explore area around starting location with full sight radius

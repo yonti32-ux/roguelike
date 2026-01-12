@@ -487,13 +487,17 @@ class Game:
             print(f"Overworld initialized! Found {len(nearby_pois)} nearby POIs")
             
         except Exception as e:
-            print(f"ERROR initializing overworld: {e}")
+            print("=" * 80)
+            print(f"CRITICAL ERROR initializing overworld: {e}")
+            print("=" * 80)
             import traceback
             traceback.print_exc()
+            print("=" * 80)
             # Fallback: create a minimal overworld or handle error gracefully
             self.overworld_map = None
             self.time_system = None
             print("Overworld initialization failed - game may not work correctly")
+            print("Please check the error message above and report it if this persists.")
 
     # ------------------------------------------------------------------
     # Mode & overlay helpers

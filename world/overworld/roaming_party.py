@@ -5,7 +5,7 @@ Represents a party that moves around the overworld map with various behaviors.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Set, TYPE_CHECKING
+from typing import Optional, Dict, Tuple, List, Set, TYPE_CHECKING
 import random
 import math
 
@@ -54,6 +54,10 @@ class RoamingParty:
     # Special properties
     gold: int = 0  # Gold this party carries (for merchants, bandits, etc.)
     items: List[str] = field(default_factory=list)  # Items this party has
+    
+    # Faction
+    faction_id: Optional[str] = None  # Which faction this party belongs to
+    faction_relations: Dict[str, int] = field(default_factory=dict)  # Per-faction relations
     
     def __post_init__(self):
         """Initialize party after creation."""
@@ -146,6 +150,10 @@ def create_roaming_party(
     
     # Set move cooldown based on speed
     party.move_cooldown = 1.0 / max(0.1, party_type.speed)
+    
+    # Assign faction from party type
+    if party_type.faction_id:
+        party.faction_id = party_type.faction_id
     
     # Initialize gold for certain party types
     if party_type_id == "merchant":

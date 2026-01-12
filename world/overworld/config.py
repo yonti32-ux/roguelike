@@ -26,7 +26,7 @@ class OverworldConfig:
     world_name: Optional[str] = None
     
     # POI settings
-    poi_density: float = 0.15
+    poi_density: float = 0.25  # Increased from 0.15 for more POIs
     poi_min_distance: int = 8
     poi_distribution: Dict[str, float] = field(default_factory=lambda: {
         "dungeon": 0.4,
@@ -60,6 +60,13 @@ class OverworldConfig:
     
     # Zoom settings
     default_zoom_index: int = 1  # Index into zoom levels (1 = 75% default)
+    
+    # Faction settings (advanced)
+    faction_counts: Dict[str, int] = field(default_factory=lambda: {
+        "good": 2,
+        "neutral": 2,
+        "evil": 2,
+    })
     
     @classmethod
     def load(cls) -> "OverworldConfig":
@@ -118,6 +125,10 @@ class OverworldConfig:
             zoom_data = data.get("zoom", {})
             config.default_zoom_index = zoom_data.get("default_index", config.default_zoom_index)
             
+            # Faction settings (advanced)
+            faction_data = data.get("factions", {})
+            config.faction_counts = faction_data.get("counts", config.faction_counts)
+            
         except Exception as e:
             print(f"Error loading overworld config: {e}")
             print("Using default configuration.")
@@ -163,6 +174,9 @@ class OverworldConfig:
                 "zoom": {
                     "default_index": self.default_zoom_index,
                 },
+                "factions": {
+                    "counts": self.faction_counts,
+                },
             }
             
             with OVERWORLD_CONFIG_FILE.open("w", encoding="utf-8") as f:
@@ -195,5 +209,6 @@ class OverworldConfig:
             "starting_location_y": self.starting_location_y,
             "sight_radius": self.sight_radius,
             "default_zoom_index": self.default_zoom_index,
+            "faction_counts": self.faction_counts,
         }
 

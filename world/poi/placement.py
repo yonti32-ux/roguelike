@@ -16,6 +16,7 @@ from .base import PointOfInterest
 from .registry import get_registry
 from ..generation.config import load_generation_config
 from systems.namegen import generate_dungeon_name, generate_town_name, generate_village_name
+from .faction_placement import select_faction_for_poi
 
 # Import types to ensure POI types are registered before use
 # This ensures auto-registration happens even if placement is imported directly
@@ -350,8 +351,35 @@ def _try_place_with_constraints(
         # Get world seed from overworld map for deterministic name generation
         world_seed = overworld.seed if hasattr(overworld, "seed") and overworld.seed is not None else None
         
+        # Select faction using intelligent placement logic (spatial awareness)
+        # This happens AFTER position is determined, so we can consider nearby POIs
+        faction_id = None
+        try:
+            if overworld and hasattr(overworld, "faction_manager") and overworld.faction_manager:
+                faction_id = select_faction_for_poi(
+                    overworld=overworld,
+                    poi_type=poi_type,
+                    position=(x, y),
+                    existing_pois=existing_pois,
+                    clustering_distance=25.0,  # POIs within 25 tiles prefer same faction
+                    enemy_avoidance_distance=15.0,  # Avoid enemy factions within 15 tiles
+                    variation_chance=0.3,  # 30% chance to ignore clustering for variety
+                )
+                
+                # Fallback to default if no faction selected
+                if not faction_id:
+                    faction_id = overworld.faction_manager.get_faction_for_poi_type(poi_type)
+        except Exception as e:
+            # If faction selection fails, just continue without a faction
+            print(f"Warning: Faction selection failed for {poi_type} at ({x}, {y}): {e}")
+            faction_id = None
+        
         # Create POI (pass gen_config for dungeon floor calculation and world_seed for name generation)
-        poi = _create_poi(poi_type, poi_id, (x, y), level=poi_level, gen_config=gen_config, world_seed=world_seed)
+        poi = _create_poi(
+            poi_type, poi_id, (x, y), level=poi_level, 
+            gen_config=gen_config, world_seed=world_seed,
+            overworld=overworld, faction_id=faction_id
+        )
         return poi
     
     # No valid candidates found
@@ -551,6 +579,8 @@ def _create_poi(
     level: int = 1,
     gen_config = None,
     world_seed: int | None = None,
+    overworld = None,
+    faction_id: str | None = None,
 ) -> PointOfInterest:
     """
     Create a POI instance of the given type using the registry.
@@ -589,16 +619,21 @@ def _create_poi(
         # Set seed for deterministic name generation
         random.seed(name_seed)
         
-        # Generate name based on POI type
+        # Get faction info for name generation (faction_id already selected above)
+        faction = None
+        if overworld and hasattr(overworld, "faction_manager") and overworld.faction_manager and faction_id:
+            faction = overworld.faction_manager.get_faction(faction_id)
+        
+        # Generate name based on POI type (faction-aware)
         if poi_type == "dungeon":
             name = generate_dungeon_name(include_descriptor=True, pattern="auto")
         elif poi_type == "village":
-            name = generate_village_name(pattern="auto")
+            name = generate_village_name(pattern="auto", faction_id=faction_id, faction=faction)
         elif poi_type == "town":
-            name = generate_town_name(pattern="auto")
+            name = generate_town_name(pattern="auto", faction_id=faction_id, faction=faction)
         elif poi_type == "camp":
             # Camps use village names (simpler, more rustic)
-            name = generate_village_name(pattern="simple")
+            name = generate_village_name(pattern="simple", faction_id=faction_id, faction=faction)
         else:
             # Fallback: use default naming
             name = None
@@ -606,11 +641,15 @@ def _create_poi(
         # Restore random state
         random.setstate(old_state)
     
+    
     # Special handling for dungeon (needs floor_count)
     if poi_type == "dungeon":
         floor_count = _calculate_dungeon_floor_count(level, gen_config)
-        return registry.create(poi_type, poi_id, position, level=level, name=name, floor_count=floor_count)
+        return registry.create(
+            poi_type, poi_id, position, level=level, name=name, 
+            floor_count=floor_count, faction_id=faction_id
+        )
     else:
         # For other types, use standard creation
-        return registry.create(poi_type, poi_id, position, level=level, name=name)
+        return registry.create(poi_type, poi_id, position, level=level, name=name, faction_id=faction_id)
 

@@ -26,6 +26,7 @@ class PointOfInterest:
         position: Tuple[int, int],
         level: int = 1,
         name: Optional[str] = None,
+        faction_id: Optional[str] = None,
     ) -> None:
         """
         Initialize a POI.
@@ -36,12 +37,16 @@ class PointOfInterest:
             position: Overworld tile position (x, y)
             level: Difficulty/level rating
             name: Display name (if None, generates from type)
+            faction_id: Optional faction that controls this POI
         """
         self.poi_id = poi_id
         self.poi_type = poi_type
         self.position = position
         self.level = level
         self.name = name or f"{poi_type.title()} {poi_id.split('_')[-1]}"
+        
+        # Faction
+        self.faction_id: Optional[str] = faction_id
         
         # State
         self.discovered: bool = False
