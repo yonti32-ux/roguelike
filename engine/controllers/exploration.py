@@ -34,6 +34,20 @@ if TYPE_CHECKING:
     from ..core.game import Game
 
 
+def _rarity_priority(rarity: Optional[str]) -> int:
+    """Get priority value for rarity (higher = better)."""
+    if rarity is None:
+        return 0
+    rarity_map = {
+        "common": 1,
+        "uncommon": 2,
+        "rare": 3,
+        "epic": 4,
+        "legendary": 5,
+    }
+    return rarity_map.get(rarity.lower(), 0)
+
+
 class ExplorationController:
     """
     Owns the exploration phase rules:
@@ -537,48 +551,92 @@ class ExplorationController:
         # Mark as opened regardless of loot outcome
         chest.opened = True
 
-        # Roll item loot first
-        item_id = roll_chest_loot(game.floor)
+        try:
+            # Determine chest type (could be enhanced later with chest entity attributes)
+            chest_type = getattr(chest, "chest_type", "normal")
+            
+            # Roll loot (now returns a list that can include both equipment and consumables)
+            loot_items = roll_chest_loot(game.floor, chest_type=chest_type)
 
-        # Roll some gold for the chest as well
-        # Floors deeper → more gold
-        min_gold = 5 + game.floor
-        max_gold = 10 + game.floor * 2
-        gold_amount = random.randint(min_gold, max_gold)
-        gained_gold = 0
-        if hasattr(game.hero_stats, "add_gold"):
-            gained_gold = game.hero_stats.add_gold(gold_amount)
+            # Roll some gold for the chest as well
+            # Floors deeper → more gold
+            min_gold = 5 + game.floor
+            max_gold = 10 + game.floor * 2
+            gold_amount = random.randint(min_gold, max_gold)
+            gained_gold = 0
+            if hasattr(game.hero_stats, "add_gold"):
+                gained_gold = game.hero_stats.add_gold(gold_amount)
 
-        # Build message based on what we actually got
-        if item_id is None:
-            if gained_gold > 0:
-                game.last_message = f"You open the chest and find {gained_gold} gold."
+            # Build message based on what we actually got
+            if not loot_items:
+                if gained_gold > 0:
+                    game.last_message = f"You open the chest and find {gained_gold} gold."
+                else:
+                    game.last_message = "The chest is empty."
+                return
+
+            # Add all loot items to inventory
+            item_names = []
+            item_rarities = []
+            for item_id in loot_items:
+                try:
+                    item_def = get_item_def(item_id)
+                    if item_def is None:
+                        continue  # Skip invalid items
+                    
+                    # Determine if it's a consumable or equipment
+                    is_consumable = item_def.slot == "consumable"
+                    game.inventory.add_item(item_id, randomized=not is_consumable)
+                    
+                    # Store floor index for randomization context
+                    if not hasattr(game.inventory, "_current_floor"):
+                        game.inventory._current_floor = game.floor
+                    else:
+                        game.inventory._current_floor = game.floor
+                    
+                    item_names.append(item_def.name)
+                    item_rarities.append(getattr(item_def, "rarity", None))
+                except Exception:
+                    # Skip items that fail to add
+                    continue
+
+            if not item_names:
+                # All items failed to add
+                if gained_gold > 0:
+                    game.last_message = f"You open the chest and find {gained_gold} gold."
+                else:
+                    game.last_message = "The chest is empty."
+                return
+
+            # Build message with all items
+            if len(item_names) == 1:
+                items_str = item_names[0]
+            elif len(item_names) == 2:
+                items_str = f"{item_names[0]} and {item_names[1]}"
             else:
-                game.last_message = "The chest is empty."
-            return
+                # Multiple items: list all but last, then "and X"
+                items_str = ", ".join(item_names[:-1]) + f", and {item_names[-1]}"
+            
+            # Use highest rarity for color (if any)
+            highest_rarity = None
+            for rarity in item_rarities:
+                if rarity and (highest_rarity is None or _rarity_priority(rarity) > _rarity_priority(highest_rarity)):
+                    highest_rarity = rarity
+            
+            if gained_gold > 0:
+                msg = f"You open the chest and find: {items_str} and {gained_gold} gold."
+            else:
+                msg = f"You open the chest and find: {items_str}."
 
-        # Add item to inventory (with randomization enabled)
-        game.inventory.add_item(item_id, randomized=True)
-        # Store floor index for randomization context
-        if not hasattr(game.inventory, "_current_floor"):
-            game.inventory._current_floor = game.floor
-        else:
-            game.inventory._current_floor = game.floor
-
-        item_def = get_item_def(item_id)
-        item_name = item_def.name if item_def is not None else item_id
-        rarity = getattr(item_def, "rarity", None) if item_def is not None else None
-        color = get_rarity_color(rarity) if rarity else None
-
-        if gained_gold > 0:
-            msg = f"You open the chest and find: {item_name} and {gained_gold} gold."
-        else:
-            msg = f"You open the chest and find: {item_name}."
-
-        if color is not None and hasattr(game, "add_message_colored"):
-            game.add_message_colored(msg, color)
-        else:
-            game.last_message = msg
+            color = get_rarity_color(highest_rarity) if highest_rarity else None
+            if color is not None and hasattr(game, "add_message_colored"):
+                game.add_message_colored(msg, color)
+            else:
+                game.last_message = msg
+        
+        except Exception:
+            # Error handling: at least give a message
+            game.last_message = "You open the chest, but something seems wrong..."
 
         # Re-sync stats in case gear bonuses matter later (no full heal)
         if game.player is not None:
@@ -759,6 +817,27 @@ class ExplorationController:
                 game.add_message(dialogue[0])
             else:
                 game.add_message(f"{getattr(npc, 'name', 'Villager')} greets you warmly.")
+        elif npc_type == "camp_merchant":
+            # Camp merchant - open camp shop
+            from systems.camp.services import open_camp_merchant
+            camp_level = 1
+            if game.current_poi is not None:
+                camp_level = getattr(game.current_poi, "level", 1)
+            open_camp_merchant(game, camp_level=camp_level)
+        elif npc_type == "camp_guard":
+            # Camp guard - just dialogue for now
+            dialogue = getattr(npc, "dialogue", [])
+            if dialogue:
+                game.add_message(dialogue[0])
+            else:
+                game.add_message(f"{getattr(npc, 'name', 'Guard')} nods at you. 'The camp is safe here.'")
+        elif npc_type == "camp_traveler":
+            # Camp traveler - dialogue and potential rumors
+            dialogue = getattr(npc, "dialogue", [])
+            if dialogue:
+                game.add_message(dialogue[0])
+            else:
+                game.add_message(f"{getattr(npc, 'name', 'Traveler')} shares stories of the road.")
         else:
             game.add_message(f"You talk to {getattr(npc, 'name', 'the NPC')}.")
 
@@ -789,6 +868,9 @@ class ExplorationController:
 
         # Attach (or reattach) shop state to the Game object.
         game.shop_stock = stock
+        # Clear sorted list so it gets regenerated with new stock
+        if hasattr(game, "shop_stock_sorted"):
+            delattr(game, "shop_stock_sorted")
         game.shop_cursor = 0
         game.shop_mode = "buy"
         game.show_shop = True
@@ -808,6 +890,7 @@ class ExplorationController:
     def _attempt_shop_purchase(self, index: int) -> None:
         """
         Try to buy the item at ``index`` in the current shop stock.
+        Uses sorted list if available (for categorized display), otherwise uses original stock.
         """
         game = self.game
 
@@ -815,7 +898,13 @@ class ExplorationController:
             game.last_message = "You have no way to carry more items."
             return
 
-        stock: list[str] = list(getattr(game, "shop_stock", []))
+        # Use sorted list if available (for categorized shop display), otherwise use original
+        sorted_stock = getattr(game, "shop_stock_sorted", None)
+        if sorted_stock is not None:
+            stock = sorted_stock
+        else:
+            stock = list(getattr(game, "shop_stock", []))
+        
         if index < 0 or index >= len(stock):
             return
 
@@ -842,9 +931,15 @@ class ExplorationController:
         item_name = getattr(item_def, "name", item_id)
         game.last_message = f"You buy {item_name} for {price} gold."
 
-        # Remove the item from the merchant's stock so it's not infinite
+        # Remove the item from both sorted and original stock
         stock.pop(index)
-        game.shop_stock = stock
+        game.shop_stock_sorted = stock  # Update sorted list
+        
+        # Also remove from original stock by finding the item_id
+        original_stock = list(getattr(game, "shop_stock", []))
+        if item_id in original_stock:
+            original_stock.remove(item_id)
+        game.shop_stock = original_stock
 
         if stock:
             game.shop_cursor = max(0, min(index, len(stock) - 1))
@@ -1168,7 +1263,31 @@ class ExplorationController:
                 self._disarm_trap(trap)
                 return
 
-        # 6) Check for village exit points (return to overworld)
+        # 6) Check for campfire interaction (camp rest)
+        if game.current_map is not None and game.player is not None:
+            from world.poi.types import CampPOI
+            if game.current_poi is not None and isinstance(game.current_poi, CampPOI):
+                px, py = game.player.rect.center
+                player_tx, player_ty = game.current_map.world_to_tile(px, py)
+                
+                # Check if standing on or adjacent to campfire
+                camp_fire_pos = getattr(game.current_map, "camp_fire_pos", None)
+                if camp_fire_pos is not None:
+                    fire_tx, fire_ty = camp_fire_pos
+                    # Check if player is on fire tile or adjacent (within 1 tile)
+                    distance = max(abs(player_tx - fire_tx), abs(player_ty - fire_ty))
+                    if distance <= 1:
+                        # Can rest at campfire (if not hostile)
+                        if not game.current_poi.is_hostile:
+                            from systems.camp.services import rest_at_camp
+                            # Calculate cost based on faction relations (free for friendly)
+                            cost = 0  # Free for now, can be adjusted based on faction
+                            rest_at_camp(game, cost=cost)
+                        else:
+                            game.last_message = "You cannot rest at a hostile camp!"
+                        return
+        
+        # 7) Check for village/camp exit points (return to overworld)
         if game.current_map is not None and game.player is not None:
             # Check if we're in a village
             from world.poi.types import VillagePOI
@@ -1182,7 +1301,7 @@ class ExplorationController:
                     game.exit_poi()
                     return
 
-        # 7) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
+        # 8) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
         if game.current_map is not None and game.player is not None:
             px, py = game.player.rect.center
             player_tx, player_ty = game.current_map.world_to_tile(px, py)
@@ -1201,5 +1320,5 @@ class ExplorationController:
                         game.try_change_floor(-1)
                         return
 
-        # 8) Nothing
+        # 9) Nothing
         game.last_message = "There is nothing here to interact with."

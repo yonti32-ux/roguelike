@@ -37,6 +37,7 @@ class RoamingParty:
     behavior_state: str = "idle"  # Current behavior state
     last_move_time: float = 0.0  # Time since last movement
     move_cooldown: float = 1.0  # Seconds between moves
+    failed_move_count: int = 0  # Count consecutive failed moves (for stuck detection)
     
     # Patrol/Wander state
     patrol_center_x: Optional[int] = None
@@ -75,6 +76,7 @@ class RoamingParty:
         """Set position."""
         self.x = x
         self.y = y
+        self.failed_move_count = 0  # Reset failed move count on successful move
     
     def distance_to(self, other_x: int, other_y: int) -> float:
         """Calculate distance to another position."""

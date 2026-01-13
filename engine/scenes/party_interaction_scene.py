@@ -124,10 +124,42 @@ class PartyInteractionScene:
         self.closed = True
     
     def _action_attack(self) -> None:
-        """Attack the party."""
-        # TODO: Trigger combat
-        self.game.add_message(f"You attack {self.party_type.name}!")
-        self.closed = True
+        """Attack the party and trigger combat."""
+        try:
+            from world.overworld.battle_conversion import party_to_battle_enemies
+            
+            # Convert party to enemies
+            player_level = 1
+            if self.game.player:
+                if hasattr(self.game.player, 'level'):
+                    player_level = self.game.player.level
+                elif hasattr(self.game, 'hero_stats') and self.game.hero_stats:
+                    player_level = getattr(self.game.hero_stats, 'level', 1)
+            
+            enemies = party_to_battle_enemies(
+                party=self.party,
+                party_type=self.party_type,
+                game=self.game,
+                player_level=player_level
+            )
+            
+            if not enemies:
+                self.game.add_message("Unable to engage in combat.")
+                self.closed = True
+                return
+            
+            # Close interaction screen
+            self.closed = True
+            
+            # Trigger battle
+            self.game.start_battle_from_overworld(enemies, context_party=self.party)
+        except Exception as e:
+            # Log error and show message to player
+            import traceback
+            print(f"Error starting battle: {e}")
+            traceback.print_exc()
+            self.game.add_message(f"Error: Unable to start combat. {str(e)}")
+            self.closed = True
     
     def _action_leave(self) -> None:
         """Leave the interaction."""

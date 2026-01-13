@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from world.overworld.config import OverworldConfig
     from world.poi.base import PointOfInterest
     from world.time.time_system import TimeSystem
+    from world.overworld.roaming_party import RoamingParty
 
 from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
@@ -1007,6 +1008,75 @@ class Game:
             game=self,  # Pass game reference for inventory access
         )
         self.enter_battle_mode()
+    
+    def start_battle_from_overworld(
+        self,
+        enemies: List[Enemy],
+        context_party: Optional["RoamingParty"] = None
+    ) -> None:
+        """
+        Start a battle from the overworld with a list of enemies.
+        
+        This is used when engaging with roaming parties on the overworld.
+        
+        Args:
+            enemies: List of Enemy entities to fight
+            context_party: Optional party that triggered this battle (for post-combat updates)
+        """
+        # Ensure player exists - create one if needed (overworld might not have player entity)
+        if self.player is None:
+            # Create a minimal player entity for battle
+            # Stats will be synced from hero_stats
+            self.player = Player(
+                x=0.0,
+                y=0.0,
+                width=24,
+                height=24,
+            )
+            # Sync stats from hero_stats if available
+            if hasattr(self, 'hero_stats') and self.hero_stats:
+                apply_hero_stats_to_player(self, full_heal=True)
+        
+        if not enemies:
+            print("Warning: No enemies provided to start_battle_from_overworld")
+            return
+        
+        # As soon as we start a new battle, hide any previous overlays
+        self.show_battle_log = False
+        self.show_character_sheet = False
+        
+        # Calculate XP for this encounter
+        # Sum up XP from all enemies
+        total_xp = sum(getattr(e, "xp_reward", 0) for e in enemies)
+        self.pending_battle_xp = total_xp
+        
+        if telemetry is not None:
+            telemetry.log(
+                "battle_start",
+                floor=None,  # Overworld battles don't have floors
+                enemy_count=len(enemies),
+                xp_total=int(self.pending_battle_xp),
+            )
+        
+        # Get player companions
+        party_list = getattr(self, "party", None) or []
+        companions_for_battle = list(party_list) if party_list else None
+        
+        # Create battle scene
+        self.battle_scene = BattleScene(
+            self.player,
+            enemies,
+            self.ui_font,
+            companions=companions_for_battle,
+            game=self,  # Pass game reference for inventory access
+        )
+        
+        # Store context for post-combat updates
+        if context_party is not None:
+            self.battle_scene.context_party = context_party
+        
+        # Enter battle mode
+        self.enter_battle_mode()
 
     def restart_run(self) -> None:
         """
@@ -1049,11 +1119,86 @@ class Game:
         Roll gold and items after a battle.
         Returns a list of message strings describing rewards.
         """
+        # Get encounter enemies from battle scene if available
+        encounter_enemies = None
+        if self.battle_scene is not None:
+            # Try to get original enemies from enemy_units
+            if hasattr(self.battle_scene, 'enemy_units'):
+                try:
+                    from world.entities import Enemy
+                    encounter_enemies = [
+                        unit.entity for unit in self.battle_scene.enemy_units
+                        if isinstance(unit.entity, Enemy)
+                    ]
+                except Exception:
+                    # Fallback: can't extract enemies, will use defaults
+                    encounter_enemies = None
+        
         return BattleOrchestrator.calculate_battle_rewards(
             floor=self.floor,
             hero_stats=self.hero_stats,
             inventory=self.inventory,
+            encounter_enemies=encounter_enemies,
         )
+    
+    def _handle_overworld_battle_victory(self, party: "RoamingParty") -> None:
+        """
+        Handle post-combat updates for overworld battles.
+        
+        - Remove party from map
+        - Distribute loot (gold, items)
+        - Update faction relations (if applicable)
+        """
+        from world.overworld.party_types import get_party_type
+        
+        party_type = get_party_type(party.party_type_id)
+        if not party_type:
+            return
+        
+        messages: list[str] = []
+        
+        # Remove party from overworld map
+        if self.overworld_map and self.overworld_map.party_manager:
+            self.overworld_map.party_manager.remove_party(party.party_id)
+            messages.append(f"Defeated {party_type.name}!")
+        
+        # Distribute loot (gold)
+        # Gold is stored in hero_stats, not inventory
+        if party.gold > 0:
+            if hasattr(self, 'hero_stats') and self.hero_stats:
+                self.hero_stats.gold += party.gold
+                messages.append(f"Gained {party.gold} gold!")
+        
+        # Distribute items (if any)
+        if party.items:
+            for item_id in party.items:
+                if hasattr(self, 'inventory') and self.inventory:
+                    self.inventory.add_item(item_id)
+                    from systems.inventory import get_item_def
+                    item_def = get_item_def(item_id)
+                    if item_def:
+                        messages.append(f"Gained {item_def.name}!")
+        
+        # Update faction relations (if applicable)
+        if party.faction_id and self.overworld_map and self.overworld_map.faction_manager:
+            # Get player faction (if any)
+            player_faction = getattr(self, 'player_faction', None)
+            if player_faction:
+                # Decrease relation with defeated party's faction
+                current_relation = self.overworld_map.faction_manager.get_relation(
+                    player_faction, party.faction_id
+                )
+                # Decrease by 5-15 points depending on party type
+                decrease = 5 + (party_type.combat_strength * 2)
+                new_relation = max(-100, current_relation - decrease)
+                
+                self.overworld_map.faction_manager.set_relation(
+                    player_faction, party.faction_id, new_relation
+                )
+        
+        # Add messages to game log
+        for msg in messages:
+            self.add_message(msg)
 
     def _check_battle_finished(self) -> None:
         """
@@ -1132,15 +1277,26 @@ class Game:
                 reward_msgs = self.roll_battle_reward()
                 messages.extend(reward_msgs)
 
-            # 4) Go back to exploration
-            self.enter_exploration_mode()
+            # 4) Handle overworld battle post-combat updates
+            context_party = None
+            if hasattr(self.battle_scene, 'context_party') and self.battle_scene.context_party:
+                context_party = self.battle_scene.context_party
+            
+            # 5) Go back to overworld (if we came from overworld)
+            if context_party:
+                # This was an overworld battle - handle post-combat updates
+                self._handle_overworld_battle_victory(context_party)
+                self.enter_overworld_mode()
+            else:
+                # This was a dungeon battle - return to exploration
+                self.enter_exploration_mode()
             self.battle_scene = None
 
-            # 5) Log messages into exploration log
+            # 6) Log messages into exploration log
             for msg in messages:
                 self.add_message(msg)
 
-            # 6) Run perk selection scene if anyone leveled up
+            # 7) Run perk selection scene if anyone leveled up
             if perk_entries:
                 self.run_perk_selection(perk_entries)
 

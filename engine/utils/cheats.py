@@ -142,7 +142,16 @@ def _handle_overworld_cheat(game: "Game", key: int) -> bool:
             for y in range(game.overworld_map.height):
                 for x in range(game.overworld_map.width):
                     game.overworld_map.explore_tile(x, y)
-            game.last_message = "[CHEAT] Overworld map fully revealed."
+            # Discover all POIs
+            pois_discovered = 0
+            for poi in game.overworld_map.get_all_pois():
+                if not poi.discovered:
+                    poi.discover()
+                    pois_discovered += 1
+            if pois_discovered > 0:
+                game.last_message = f"[CHEAT] Overworld map fully revealed. Discovered {pois_discovered} POI(s)."
+            else:
+                game.last_message = "[CHEAT] Overworld map fully revealed."
         return True
     
     # ------------------------------------------------------------------

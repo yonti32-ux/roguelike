@@ -341,30 +341,112 @@ class WorldGenerator:
     
     def _calculate_poi_levels(self, overworld: OverworldMap) -> None:
         """
-        Calculate difficulty levels for all POIs based on distance from start.
+        Calculate difficulty levels for all POIs using diverse random distribution.
+        
+        Uses weighted random distribution to create a good mix of levels:
+        - More low-level POIs (levels 1-10)
+        - Some mid-level POIs (levels 11-25)
+        - Fewer high-level POIs (levels 26-50)
+        
+        POIs near the starting location have a slight level reduction to provide
+        a gentler starting experience, while maintaining diversity overall.
+        
+        Different POI types can have slight level preferences but overall variation is high.
         
         Args:
             overworld: The overworld map
         """
         start_x, start_y = overworld.get_player_position()
         
+        # Find max distance for distance normalization
+        max_distance = 0.0
         for poi in overworld.get_all_pois():
             px, py = poi.position
-            
+            dx = px - start_x
+            dy = py - start_y
+            distance = math.sqrt(dx * dx + dy * dy)
+            max_distance = max(max_distance, distance)
+        
+        # Define level ranges with weights for diverse distribution
+        # This creates a natural distribution with more low-level content
+        level_weights = []
+        for level in range(self.config.base_level, self.config.max_level + 1):
+            # Weight decreases as level increases (exponential decay)
+            # This gives us more low-level POIs but still good high-level variety
+            weight = math.exp(-level / 15.0)  # Adjust divisor to control distribution curve
+            level_weights.append((level, weight))
+        
+        # POI type level preferences (slight bias, but still diverse)
+        poi_type_bias = {
+            "camp": -3,      # Camps tend to be lower level (bias towards lower levels)
+            "village": -1,   # Villages slightly lower
+            "town": 0,       # Towns neutral (full range)
+            "dungeon": +3,   # Dungeons tend to be higher level (bias towards higher levels)
+        }
+        
+        for poi in overworld.get_all_pois():
             # Calculate distance from starting location
+            px, py = poi.position
             dx = px - start_x
             dy = py - start_y
             distance = math.sqrt(dx * dx + dy * dy)
             
-            # Calculate level based on distance
-            if self.config.difficulty_scaling == "distance":
-                level = int(self.config.base_level + (distance * self.config.level_per_distance))
-            else:
-                # Default to base level
-                level = self.config.base_level
+            # Normalize distance (0 = at start, 1 = max distance)
+            normalized_distance = distance / max_distance if max_distance > 0 else 0.0
             
-            # Clamp to valid range
-            level = max(1, min(level, self.config.max_level))
+            # Start with base weights
+            weights = [wgt for _, wgt in level_weights]
+            levels = [lvl for lvl, _ in level_weights]
+            
+            # Apply POI type bias (shift weights towards higher/lower levels)
+            poi_bias = poi_type_bias.get(poi.poi_type, 0)
+            if poi_bias != 0:
+                adjusted_weights = []
+                mid_level = (self.config.base_level + self.config.max_level) / 2.0
+                for level, weight in level_weights:
+                    # Calculate distance from mid-level
+                    level_diff = (level - mid_level) / (self.config.max_level - self.config.base_level) if (self.config.max_level - self.config.base_level) > 0 else 0
+                    # Positive bias increases weight for higher levels, negative for lower
+                    bias_factor = 1.0 + (poi_bias * 0.15 * level_diff)
+                    adjusted_weights.append(weight * max(0.1, bias_factor))
+                weights = adjusted_weights
+            
+            # Apply distance-based modifier: reduce levels near starting location
+            # Near start (normalized_distance < 0.3): reduce levels by up to 40%
+            # Far from start (normalized_distance > 0.7): no reduction
+            # Uses smooth curve for gradual transition
+            if normalized_distance < 0.3:
+                # Strong reduction near start
+                distance_modifier = 0.6 + (normalized_distance / 0.3) * 0.4  # 0.6 to 1.0
+            elif normalized_distance < 0.7:
+                # Gradual transition
+                distance_modifier = 1.0 - ((0.7 - normalized_distance) / 0.4) * 0.2  # 0.8 to 1.0
+            else:
+                # No reduction far from start
+                distance_modifier = 1.0
+            
+            # Apply distance modifier to weights (reduce probability of higher levels near start)
+            if distance_modifier < 1.0:
+                adjusted_weights = []
+                mid_level = (self.config.base_level + self.config.max_level) / 2.0
+                for level, weight in level_weights:
+                    # Reduce weight more for higher levels when near start
+                    level_normalized = (level - self.config.base_level) / (self.config.max_level - self.config.base_level) if (self.config.max_level - self.config.base_level) > 0 else 0
+                    # Higher levels get more reduction
+                    reduction = 1.0 - ((1.0 - distance_modifier) * level_normalized)
+                    adjusted_weights.append(weight * max(0.1, reduction))
+                weights = adjusted_weights
+            
+            # Normalize weights
+            total_weight = sum(weights)
+            if total_weight > 0:
+                weights = [w / total_weight for w in weights]
+            
+            # Select level using weighted random
+            level = random.choices(levels, weights=weights, k=1)[0]
+            
+            # Ensure level is in valid range
+            level = max(self.config.base_level, min(level, self.config.max_level))
             
             poi.level = level
     

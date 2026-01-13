@@ -434,7 +434,11 @@ class ShopScreen(BaseScreen):
         inv = getattr(game, "inventory", None)
 
         if mode == "buy":
-            active_list = stock_buy
+            # Sort items by type for better organization
+            from ui.hud_screens import _sort_items_by_type
+            active_list = _sort_items_by_type(stock_buy)
+            # Store sorted list so purchase function can use it
+            game.shop_stock_sorted = active_list
         else:
             if inv is None:
                 active_list = []

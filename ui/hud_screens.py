@@ -1423,6 +1423,55 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
     _draw_screen_footer(screen, ui_font, hints, w, h)
 
 
+def _sort_items_by_type(item_ids: List[str]) -> List[str]:
+    """
+    Sort items by type: consumables first, then weapons, armor pieces, and accessories.
+    Within each category, maintain original order.
+    """
+    # Define category order (lower number = appears first)
+    # Grouping: consumables, weapons, armor pieces (helmet/armor/gloves/boots), 
+    # shields, accessories (cloak/ring/amulet), then others
+    category_order = {
+        "consumable": 0,
+        "weapon": 1,
+        "helmet": 2,
+        "armor": 3,
+        "gloves": 4,
+        "boots": 5,
+        "shield": 6,
+        "cloak": 7,
+        "ring": 8,
+        "amulet": 9,
+    }
+    
+    def get_sort_key(item_id: str) -> Tuple[int, str]:
+        item_def = get_item_def(item_id)
+        if item_def is None:
+            return (999, item_id)  # Unknown items go last
+        slot = item_def.slot.lower()
+        category = category_order.get(slot, 999)
+        return (category, item_id)
+    
+    return sorted(item_ids, key=get_sort_key)
+
+
+def _get_category_name(slot: str) -> str:
+    """Get display name for item category."""
+    category_names = {
+        "consumable": "Consumables",
+        "weapon": "Weapons",
+        "helmet": "Helmets",
+        "armor": "Armor",
+        "gloves": "Gloves",
+        "boots": "Boots",
+        "shield": "Shields",
+        "cloak": "Cloaks",
+        "ring": "Rings",
+        "amulet": "Amulets",
+    }
+    return category_names.get(slot.lower(), "Other")
+
+
 def draw_shop_fullscreen(game: "Game") -> None:
     """Full-screen shop view."""
     screen = game.screen
@@ -1450,12 +1499,24 @@ def draw_shop_fullscreen(game: "Game") -> None:
     cursor = int(getattr(game, "shop_cursor", 0))
     
     if mode == "buy":
-        active_list = stock_buy
+        # Use sorted list if available, otherwise create and store it
+        sorted_stock = getattr(game, "shop_stock_sorted", None)
+        if sorted_stock is None:
+            sorted_stock = _sort_items_by_type(stock_buy)
+            game.shop_stock_sorted = sorted_stock
+        active_list = sorted_stock
     else:
         if inv is None:
             active_list = []
         else:
             active_list = inv.get_sellable_item_ids()
+    
+    # Sort items by type (consumables first, then weapons, armor, trinkets)
+    # For sell mode, also sort for consistency
+    if mode == "sell":
+        sorted_list = _sort_items_by_type(active_list)
+    else:
+        sorted_list = active_list
     
     # Left column: Buy list
     left_x = 40
@@ -1465,7 +1526,7 @@ def draw_shop_fullscreen(game: "Game") -> None:
     screen.blit(buy_title, (left_x, y))
     y += 28
     
-    if not active_list:
+    if not sorted_list:
         msg_text = (
             "The merchant has nothing left to sell."
             if mode == "buy"
@@ -1474,7 +1535,7 @@ def draw_shop_fullscreen(game: "Game") -> None:
         msg = ui_font.render(msg_text, True, (190, 190, 190))
         screen.blit(msg, (left_x, y))
     else:
-        max_items = len(active_list)
+        max_items = len(sorted_list)
         line_height = 26
         if max_items > 0:
             cursor = max(0, min(cursor, max_items - 1))
@@ -1482,10 +1543,13 @@ def draw_shop_fullscreen(game: "Game") -> None:
         # Show more items in fullscreen
         visible_start = max(0, cursor - 10)
         visible_end = min(max_items, cursor + 15)
-        visible_items = active_list[visible_start:visible_end]
+        visible_items = sorted_list[visible_start:visible_end]
         
         # Get floor index for economy calculations
         floor_index = getattr(game, "floor", 1)
+        
+        # Track current category to show headers
+        last_category = None
         
         for i, item_id in enumerate(visible_items):
             actual_index = visible_start + i
@@ -1494,14 +1558,27 @@ def draw_shop_fullscreen(game: "Game") -> None:
                 name = item_id
                 price = 0
                 rarity = ""
+                current_category = "Other"
             else:
                 name = item_def.name
                 rarity = getattr(item_def, "rarity", "")
+                current_category = item_def.slot
                 # Use economy system for dynamic pricing
                 if mode == "buy":
                     price = calculate_shop_buy_price(item_def, floor_index)
                 else:
                     price = calculate_shop_sell_price(item_def, floor_index)
+            
+            # Show category header when category changes
+            if current_category != last_category and current_category:
+                category_name = _get_category_name(current_category)
+                # Add some spacing before category header
+                if last_category is not None:
+                    y += 4
+                category_surf = ui_font.render(f"--- {category_name} ---", True, COLOR_CATEGORY)
+                screen.blit(category_surf, (left_x, y))
+                y += line_height
+                last_category = current_category
             
             label = f"{actual_index + 1}) {name}"
             if rarity:

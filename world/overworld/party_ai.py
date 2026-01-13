@@ -501,4 +501,12 @@ def update_party_ai(
             # If reached target, clear it
             if party.is_at_target():
                 party.clear_target()
+        else:
+            # Move blocked - increment failed move count
+            party.failed_move_count = getattr(party, 'failed_move_count', 0) + 1
+            
+            # If stuck for too many moves (e.g., 5), clear target to pick a new one
+            if party.failed_move_count >= 5:
+                party.clear_target()
+                party.failed_move_count = 0
 

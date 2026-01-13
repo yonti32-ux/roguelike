@@ -152,6 +152,7 @@ def generate_merchant_stock(
     - Floor depth (deeper floors get better items)
     - Stock size scaling
     - Optional rarity preference
+    - Consumables are included and given higher frequency
     
     Args:
         floor_index: Current floor
@@ -162,6 +163,7 @@ def generate_merchant_stock(
         List of item IDs the merchant has in stock
     """
     from .loot import _candidate_items, _rarity_weight, _weighted_choice
+    from .inventory import all_items
     
     # Calculate stock size
     if max_items is None:
@@ -170,18 +172,32 @@ def generate_merchant_stock(
         max_items = base_size + floor_bonus
         max_items = max(3, min(max_items, 12))  # Clamp between 3 and 12
     
-    # Get candidate items
-    candidates = _candidate_items()
-    if not candidates or max_items <= 0:
+    # Get candidate items (weapons, armor, trinkets)
+    equipment_candidates = _candidate_items()
+    
+    # Also include consumables - they should appear more frequently in shops
+    consumable_candidates = [item for item in all_items() if item.slot == "consumable"]
+    
+    # Combine all candidates
+    all_candidates = list(equipment_candidates) + list(consumable_candidates)
+    
+    if not all_candidates or max_items <= 0:
         return []
     
     # Build weighted pool
-    weighted_pool = list(candidates)
+    weighted_pool = list(all_candidates)
     weights = []
+    
+    # Consumable boost multiplier - makes consumables appear more frequently
+    CONSUMABLE_BOOST = 2.5  # Consumables are 2.5x more likely to appear
     
     for item in weighted_pool:
         # Base weight from rarity and floor
         base_weight = _rarity_weight(item.rarity, floor_index, source="shop")
+        
+        # Boost consumables significantly
+        if item.slot == "consumable":
+            base_weight *= CONSUMABLE_BOOST
         
         # Boost if it matches preferred rarity
         if prefer_rarity and item.rarity.lower() == prefer_rarity.lower():

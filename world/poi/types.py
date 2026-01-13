@@ -356,13 +356,94 @@ class CampPOI(PointOfInterest):
         faction_id: Optional[str] = None,
     ) -> None:
         super().__init__(poi_id, "camp", position, level, name, faction_id=faction_id)
+        # Future: mark hostile / destroyed in serialized state
+        self.is_hostile: bool = False
+        self.is_destroyed: bool = False
     
     def enter(self, game: "Game") -> None:
-        """Enter the camp."""
+        """Enter the camp and load a simple camp map."""
         game.current_poi = self
+
+        # If the camp has been destroyed/cleared, just show a simple message for now
+        if getattr(self, "is_destroyed", False):
+            game.add_message(f"You arrive at the ruins of {self.name}. The camp has been abandoned.")
+            return
+
+        # Generate camp map if not already generated
+        if "camp_map" not in self.state:
+            from world.camp import generate_camp
+            import random
+
+            seed = hash((self.poi_id, self.position[0], self.position[1]))
+            
+            # Determine if camp has merchant (friendly camps usually do)
+            has_merchant = not self.is_hostile and (self.faction_id is None or random.random() < 0.7)
+            
+            camp_map = generate_camp(
+                self.level,
+                self.name or "Camp",
+                seed=seed,
+                is_hostile=self.is_hostile,
+                has_merchant=has_merchant,
+            )
+            self.state["camp_map"] = camp_map
+            self.state["has_merchant"] = has_merchant
+        else:
+            camp_map = self.state["camp_map"]
+            has_merchant = self.state.get("has_merchant", False)
+
+        # Load the camp map
+        game.current_map = camp_map
+
+        # Ensure player exists (create if needed, similar to VillagePOI)
+        if game.player is None:
+            from world.entities import Player
+
+            game.player = Player(
+                x=0.0,
+                y=0.0,
+                width=24,
+                height=24,
+            )
+            from engine.managers.hero_manager import apply_hero_stats_to_player
+
+            apply_hero_stats_to_player(game, full_heal=True)
+
+        # Place player near the camp center
+        center = getattr(camp_map, "camp_center", None)
+        if center is not None:
+            center_x, center_y = center
+            player_width = game.player.width
+            player_height = game.player.height
+            world_x, world_y = camp_map.center_entity_on_tile(
+                center_x,
+                center_y,
+                player_width,
+                player_height,
+            )
+            game.player.move_to(world_x, world_y)
+
+        # Update camera to follow player
+        game.camera_x = game.player.x
+        game.camera_y = game.player.y
+
+        # Initialize FOV for the camp
+        if hasattr(game, "update_fov"):
+            game.update_fov()
+
+        # Switch to exploration mode
         game.enter_exploration_mode()
-        # TODO: Load camp map/interior
-        game.add_message(f"You enter {self.name} (Level {self.level}). A small, temporary camp.")
+
+        # Entry message based on camp type
+        if self.is_hostile:
+            game.add_message(f"You enter {self.name} (Level {self.level}). This camp appears hostile - enemies are present!")
+        else:
+            services = []
+            if has_merchant:
+                services.append("a merchant")
+            services.append("rest")
+            services_str = " and ".join(services)
+            game.add_message(f"You enter {self.name} (Level {self.level}). A small camp with {services_str} available.")
     
     def exit(self, game: "Game") -> None:
         """Exit the camp."""

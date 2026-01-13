@@ -81,6 +81,9 @@ def open_shop(game: "Game", merchant_id: Optional[str] = None, village_level: in
     
     # Set shop stock
     game.shop_stock = stock
+    # Clear sorted list so it gets regenerated with new stock
+    if hasattr(game, "shop_stock_sorted"):
+        delattr(game, "shop_stock_sorted")
     game.shop_mode = "buy"  # Start in buy mode
     game.shop_cursor = 0
     

@@ -16,9 +16,9 @@
     }
   },
   "difficulty": {
-    "scaling_type": "distance",
+    "scaling_type": "random",
     "base_level": 1,
-    "max_level": 20,
+    "max_level": 50,
     "level_per_distance": 0.5
   },
   "time": {
