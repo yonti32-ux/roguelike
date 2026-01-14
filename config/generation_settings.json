@@ -24,6 +24,124 @@
       "mountain_water_threshold": 3,
       "mountain_conversion_chance": 0.2,
       "variation_chance": 0.02
+    },
+    "chunk_based": {
+      "enabled": true,
+      "use_heightmap": true,
+      "heightmap_scale": 0.04,
+      "heightmap_octaves": 5,
+      "heightmap_persistence": 0.5,
+      "heightmap_lacunarity": 2.0,
+      "moisture_scale": 0.06,
+      "moisture_octaves": 3,
+      "moisture_persistence": 0.6,
+      "moisture_lacunarity": 2.0,
+      "water_level": -0.25,
+      "lowland_threshold": 0.0,
+      "highland_threshold": 0.2,
+      "mountain_threshold": 0.45,
+      "south_zone": 0.3,
+      "north_zone": 0.3,
+      "latitude_transition": 0.2,
+      "base_region_size": 16,
+      "region_size_variance": 0.4,
+      "noise_scales": [
+        0.03,
+        0.08,
+        0.2
+      ],
+      "noise_weights": [
+        0.4,
+        0.35,
+        0.25
+      ],
+      "coherence_radius": 2,
+      "coherence_strength": 0.15,
+      "smoothing_iterations": 3,
+      "diversity_patch_chance": 0.05,
+      "water_noise_scale": 0.02,
+      "water_threshold": -0.3,
+      "water_body_count": 4,
+      "min_water_body_size": 20,
+      "max_water_body_size": 100,
+      "biome_distribution": {
+        "grass": 0.22,
+        "plains": 0.18,
+        "forest": 0.2,
+        "mountain": 0.15,
+        "desert": 0.15,
+        "water": 0.1
+      },
+      "biome_rules": {
+        "grass": {
+          "variation": 0.15,
+          "allowed_terrain": [
+            "grass",
+            "plains"
+          ],
+          "terrain_weights": {
+            "grass": 0.7,
+            "plains": 0.3
+          }
+        },
+        "plains": {
+          "variation": 0.15,
+          "allowed_terrain": [
+            "plains",
+            "grass"
+          ],
+          "terrain_weights": {
+            "plains": 0.7,
+            "grass": 0.3
+          }
+        },
+        "forest": {
+          "variation": 0.2,
+          "allowed_terrain": [
+            "forest",
+            "grass"
+          ],
+          "terrain_weights": {
+            "forest": 0.8,
+            "grass": 0.2
+          }
+        },
+        "mountain": {
+          "variation": 0.25,
+          "allowed_terrain": [
+            "mountain",
+            "forest",
+            "grass"
+          ],
+          "terrain_weights": {
+            "mountain": 0.6,
+            "forest": 0.25,
+            "grass": 0.15
+          }
+        },
+        "desert": {
+          "variation": 0.15,
+          "allowed_terrain": [
+            "desert",
+            "plains"
+          ],
+          "terrain_weights": {
+            "desert": 0.8,
+            "plains": 0.2
+          }
+        },
+        "water": {
+          "variation": 0.1,
+          "allowed_terrain": [
+            "water",
+            "grass"
+          ],
+          "terrain_weights": {
+            "water": 0.9,
+            "grass": 0.1
+          }
+        }
+      }
     }
   },
   "poi": {

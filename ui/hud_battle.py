@@ -133,13 +133,18 @@ def _draw_battle_skill_hotbar(
 ) -> None:
     """
     Draw a visible skill hotbar showing skill slots with key bindings,
-    cooldowns, and resource costs.
+    cooldowns, and resource costs. Also draws Guard button if available.
     """
     # Increased size for better visibility
     slot_width = 140
     slot_height = 85
     slot_spacing = 12
-    hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
+    
+    # Check if guard skill exists
+    guard_skill = skills.get("guard") if skills else None
+    guard_width = (slot_width + slot_spacing) if guard_skill else 0
+    
+    hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing + guard_width
     
     # Larger, more prominent background panel with border
     panel_h = slot_height + 30
@@ -267,6 +272,50 @@ def _draw_battle_skill_hotbar(
             surface.blit(empty_surf, (slot_x + 6, y + 30))
         
         slot_x += slot_width + slot_spacing
+    
+    # Draw Guard button after skill slots (if unit has guard skill)
+    guard_skill = skills.get("guard") if skills else None
+    if guard_skill:
+        # Get guard key binding
+        guard_key_label = ""
+        if input_manager is not None:
+            try:
+                from systems.input import InputAction
+                guard_keys = input_manager.get_bindings(InputAction.GUARD)
+                if guard_keys:
+                    guard_key_label = pygame.key.name(list(guard_keys)[0]).upper()
+            except (AttributeError, KeyError, TypeError):
+                pass
+        
+        # Draw guard slot (similar style but with distinct color to show it's a turn-ender)
+        guard_rect = pygame.Rect(slot_x, y, slot_width, slot_height)
+        # Distinct color scheme for guard (blue-ish, defensive)
+        guard_bg_color = (50, 60, 80)
+        guard_border_color = (120, 160, 220)
+        pygame.draw.rect(surface, guard_bg_color, guard_rect)
+        pygame.draw.rect(surface, guard_border_color, guard_rect, 3)
+        
+        # Guard name
+        name_font = pygame.font.Font(None, int(font.get_height() * 1.1))
+        guard_name = getattr(guard_skill, "name", "Guard")
+        if len(guard_name) > 12:
+            guard_name = guard_name[:10] + ".."
+        name_surf = name_font.render(guard_name, True, (240, 240, 240))
+        surface.blit(name_surf, (slot_x + 6, y + 6))
+        
+        # Guard key binding
+        if guard_key_label:
+            key_font = pygame.font.Font(None, int(font.get_height() * 1.2))
+            key_surf = key_font.render(guard_key_label, True, (150, 200, 255))
+            key_bg = pygame.Rect(slot_x + slot_width - key_surf.get_width() - 10, y + 6, key_surf.get_width() + 8, key_surf.get_height() + 4)
+            pygame.draw.rect(surface, (30, 50, 80), key_bg)
+            pygame.draw.rect(surface, (100, 150, 200), key_bg, 2)
+            surface.blit(key_surf, (slot_x + slot_width - key_surf.get_width() - 6, y + 8))
+        
+        # Guard description hint (small text at bottom)
+        hint_font = pygame.font.Font(None, int(font.get_height() * 0.9))
+        hint_surf = hint_font.render("End Turn", True, (180, 200, 255))
+        surface.blit(hint_surf, (slot_x + 6, y + 50))
 
 
 def _draw_battle_log_line(

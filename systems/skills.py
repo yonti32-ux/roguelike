@@ -8,7 +8,7 @@ import pygame
 from .statuses import StatusEffect
 
 
-TargetMode = Literal["self", "adjacent_enemy"]
+TargetMode = Literal["self", "adjacent_enemy", "any_enemy"]
 RangeMetric = Literal["manhattan", "chebyshev"]
 
 
@@ -21,7 +21,7 @@ class Skill:
     - name:        display name
     - description: UI / tooltip text
     - key:         pygame key constant to trigger it (None = AI only)
-    - target_mode: "self" or "adjacent_enemy" for now
+    - target_mode: "self", "adjacent_enemy", or "any_enemy" (ranged targeting)
     - base_power:  multiplier on the user's attack stat
     - uses_skill_power: if True, multiplies damage by entity.skill_power
     - cooldown:    number of that unit's turns before reuse
@@ -66,6 +66,9 @@ class Skill:
     # Targeting range fields
     range_tiles: int = 1
     range_metric: RangeMetric = "chebyshev"
+    
+    # Weapon requirement fields
+    requires_ranged_weapon: bool = False  # If True, unit must have a ranged weapon equipped
 
 
 SKILLS: Dict[str, Skill] = {}
@@ -345,7 +348,7 @@ def _build_core_skills() -> None:
         Skill(
             id="guard",
             name="Guard",
-            description="Brace to halve incoming damage until your next turn.",
+            description="Brace yourself, reducing incoming damage by 50% until your next turn. Higher ranks increase duration and damage reduction.",
             key=pygame.K_g,
             target_mode="self",
             base_power=0.0,
@@ -363,7 +366,7 @@ def _build_core_skills() -> None:
         Skill(
             id="power_strike",
             name="Power Strike",
-            description="Heavy blow that weakens the target for 2 turns.",
+            description="A devastating blow dealing 1.6x damage and weakening the target, reducing their damage by 30% for 2 turns. Higher ranks increase damage, weaken duration, and reduce cooldown.",
             key=pygame.K_q,
             target_mode="adjacent_enemy",
             base_power=1.6,
@@ -492,7 +495,7 @@ def _build_core_skills() -> None:
         Skill(
             id="lunge",
             name="Lunge",
-            description="Driving strike (1.25x damage).",
+            description="A quick forward strike dealing 1.25x damage. Higher ranks increase damage and reduce both cooldown and stamina cost, making it more spammable.",
             key=pygame.K_r,
             target_mode="adjacent_enemy",
             base_power=1.25,
@@ -510,7 +513,7 @@ def _build_core_skills() -> None:
         Skill(
             id="shield_bash",
             name="Shield Bash",
-            description="Smash the target, dealing 1.1x damage and stunning for 1 turn.",
+            description="Smash your shield into the target, dealing 1.1x damage and stunning them for 1 turn. Higher ranks increase damage and stun duration, making it a powerful control tool.",
             key=pygame.K_e,
             target_mode="adjacent_enemy",
             base_power=1.1,
@@ -531,7 +534,7 @@ def _build_core_skills() -> None:
         Skill(
             id="focus_blast",
             name="Focus Blast",
-            description="Focused blow that scales heavily with skill power (1.4x).",
+            description="Channel your inner power into a focused strike dealing 1.4x damage, scaling with your skill power. Higher ranks dramatically increase damage output, perfect for skill-power builds.",
             key=pygame.K_f,
             target_mode="adjacent_enemy",
             base_power=1.4,
@@ -546,7 +549,7 @@ def _build_core_skills() -> None:
         Skill(
             id="nimble_step",
             name="Nimble Step",
-            description="Evasive footwork: halve damage taken until your next turn.",
+            description="Use evasive footwork to reduce incoming damage by 50% until your next turn. Higher ranks increase duration and damage reduction, making you harder to hit.",
             key=pygame.K_t,
             target_mode="self",
             base_power=0.0,
@@ -570,7 +573,7 @@ def _build_core_skills() -> None:
         Skill(
             id="cleave",
             name="Cleave",
-            description="Sweeping strike hitting all adjacent enemies (1.2x damage each).",
+            description="A sweeping strike that hits all adjacent enemies for 1.2x damage each. Higher ranks increase damage and expand the area of effect, devastating groups of enemies.",
             key=None,  # Will be assigned via perk or starting skill
             target_mode="adjacent_enemy",
             base_power=1.2,
@@ -650,7 +653,7 @@ def _build_core_skills() -> None:
         Skill(
             id="backstab",
             name="Backstab",
-            description="Precise strike from an advantageous position (2.0x damage).",
+            description="A devastating precision strike dealing 2.0x damage when attacking from an advantageous position. Higher ranks dramatically increase damage, making it one of the most powerful single-target attacks.",
             key=None,
             target_mode="adjacent_enemy",
             base_power=2.0,
@@ -721,19 +724,21 @@ def _build_core_skills() -> None:
 
     # --- Mage-specific skills ------------------------------------------------
 
-    # Fireball: AoE damage with burn
+    # Fireball: AoE damage with burn (ranged)
     fireball = register(
         Skill(
             id="fireball",
             name="Fireball",
-            description="Hurl a ball of fire that explodes, dealing 1.5x damage and burning all enemies in the area.",
+            description="Hurl a ball of fire that explodes on impact, dealing 1.5x damage to all enemies in a large area and setting them ablaze for 2 turns. Higher ranks increase damage, burn duration, burn damage, and expand the explosion radius.",
             key=None,
-            target_mode="adjacent_enemy",
+            target_mode="any_enemy",
             base_power=1.5,  # Reduced slightly since it's AoE
             uses_skill_power=True,
             cooldown=4,
             mana_cost=7,  # Increased: AoE + DoT is powerful
             class_restrictions=["mage"],
+            range_tiles=5,
+            range_metric="manhattan",
             aoe_radius=2,
             aoe_shape="circle",
             aoe_affects_enemies=True,
@@ -746,19 +751,21 @@ def _build_core_skills() -> None:
         )
     )
 
-    # Lightning Bolt: Chain damage (AoE)
+    # Lightning Bolt: Chain damage (AoE, ranged)
     lightning_bolt = register(
         Skill(
             id="lightning_bolt",
             name="Lightning Bolt",
             description="Strike with lightning that arcs to nearby enemies (1.4x damage each).",
             key=None,
-            target_mode="adjacent_enemy",
+            target_mode="any_enemy",
             base_power=1.4,  # Reduced slightly since it's AoE
             uses_skill_power=True,
             cooldown=4,
             mana_cost=7,  # Increased: AoE damage is powerful
             class_restrictions=["mage"],
+            range_tiles=5,
+            range_metric="manhattan",
             aoe_radius=1,
             aoe_shape="circle",
             aoe_affects_enemies=True,
@@ -766,14 +773,14 @@ def _build_core_skills() -> None:
         )
     )
 
-    # Slow: Reduce enemy speed
+    # Slow: Reduce enemy speed (melee-only touch spell)
     slow = register(
         Skill(
             id="slow",
             name="Slow",
             description="Encase the target in temporal magic, slowing them for 3 turns.",
             key=None,
-            target_mode="adjacent_enemy",
+            target_mode="adjacent_enemy",  # Melee-only touch spell
             base_power=0.0,
             uses_skill_power=True,
             cooldown=3,
@@ -787,14 +794,14 @@ def _build_core_skills() -> None:
         )
     )
 
-    # Magic Shield: Absorb damage
+    # Magic Shield: Absorb damage (self-target, no weapon requirement)
     magic_shield = register(
         Skill(
             id="magic_shield",
             name="Magic Shield",
             description="Create a barrier that absorbs the next 20 damage.",
             key=None,
-            target_mode="self",
+            target_mode="self",  # Self-target, no weapon requirement
             base_power=0.0,
             uses_skill_power=True,
             cooldown=4,
@@ -808,19 +815,174 @@ def _build_core_skills() -> None:
         )
     )
 
-    # Arcane Missile: Quick magic attack
+    # Arcane Missile: Quick magic attack (ranged)
     arcane_missile = register(
         Skill(
             id="arcane_missile",
             name="Arcane Missile",
             description="Quick magical projectile (1.3x damage, low cooldown).",
             key=None,
-            target_mode="adjacent_enemy",
+            target_mode="any_enemy",
             base_power=1.3,
             uses_skill_power=True,
             cooldown=2,
             mana_cost=4,  # Increased: still cheap but balanced
             class_restrictions=["mage"],
+            range_tiles=4,
+            range_metric="manhattan",
+        )
+    )
+
+    # --- Ranged Weapon Skills (for archers/ranged characters) --------------------
+
+    # Quick Shot: Fast ranged attack
+    quick_shot = register(
+        Skill(
+            id="quick_shot",
+            name="Quick Shot",
+            description="Rapid arrow shot (1.1x damage, no cooldown).",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.1,
+            uses_skill_power=False,
+            cooldown=0,
+            stamina_cost=2,  # Low cost for basic ranged attack
+            range_tiles=4,
+            range_metric="manhattan",
+            requires_ranged_weapon=True,
+        )
+    )
+
+    # Precise Shot: High damage ranged attack
+    precise_shot = register(
+        Skill(
+            id="precise_shot",
+            name="Precise Shot",
+            description="Aimed shot dealing 1.5x damage with increased crit chance.",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.5,
+            uses_skill_power=False,
+            cooldown=3,
+            stamina_cost=4,  # Higher cost for better damage
+            range_tiles=5,
+            range_metric="manhattan",
+            requires_ranged_weapon=True,
+        )
+    )
+
+    # Multi-shot: Hit multiple enemies
+    multi_shot = register(
+        Skill(
+            id="multi_shot",
+            name="Multi-shot",
+            description="Fire arrows at multiple enemies (1.0x damage each).",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.0,
+            uses_skill_power=False,
+            cooldown=4,
+            stamina_cost=5,
+            range_tiles=4,
+            range_metric="manhattan",
+            requires_ranged_weapon=True,
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    # Piercing Shot: Line attack through enemies
+    piercing_shot = register(
+        Skill(
+            id="piercing_shot",
+            name="Piercing Shot",
+            description="Arrow that pierces through enemies in a line (1.2x damage each).",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.2,
+            uses_skill_power=False,
+            cooldown=4,
+            stamina_cost=5,
+            range_tiles=5,
+            range_metric="manhattan",
+            requires_ranged_weapon=True,
+            # Note: Line AoE would need special handling, using circle for now
+            aoe_radius=0,  # Single target for now, can be enhanced later
+        )
+    )
+
+    # --- Ranged Magic Skills (for mages) -----------------------------------------
+
+    # Magic Missile: Basic ranged magic attack (already exists, updating range)
+    # Note: arcane_missile already updated above
+
+    # Ice Bolt: Ranged ice attack with slow
+    ice_bolt = register(
+        Skill(
+            id="ice_bolt",
+            name="Ice Bolt",
+            description="Hurl a bolt of ice dealing 1.4x damage and slowing the target.",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.4,
+            uses_skill_power=True,
+            cooldown=3,
+            mana_cost=5,
+            class_restrictions=["mage"],
+            range_tiles=5,
+            range_metric="manhattan",
+            make_target_status=lambda: StatusEffect(
+                name="slowed",
+                duration=2,
+                # Speed reduction would need special handling
+            ),
+        )
+    )
+
+    # Chain Lightning: Ranged chain attack
+    chain_lightning = register(
+        Skill(
+            id="chain_lightning",
+            name="Chain Lightning",
+            description="Lightning that chains between nearby enemies (1.3x damage each).",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.3,
+            uses_skill_power=True,
+            cooldown=4,
+            mana_cost=7,
+            class_restrictions=["mage"],
+            range_tiles=5,
+            range_metric="manhattan",
+            aoe_radius=1,
+            aoe_shape="circle",
+            aoe_affects_enemies=True,
+            aoe_affects_allies=False,
+        )
+    )
+
+    # Shadow Bolt: Ranged dark magic
+    shadow_bolt = register(
+        Skill(
+            id="shadow_bolt",
+            name="Shadow Bolt",
+            description="Dark magic projectile dealing 1.5x damage and weakening the target.",
+            key=None,
+            target_mode="any_enemy",
+            base_power=1.5,
+            uses_skill_power=True,
+            cooldown=3,
+            mana_cost=6,
+            class_restrictions=["mage"],
+            range_tiles=5,
+            range_metric="manhattan",
+            make_target_status=lambda: StatusEffect(
+                name="weakened",
+                duration=2,
+                outgoing_mult=0.8,
+            ),
         )
     )
 
@@ -1223,14 +1385,16 @@ def _register_skill_rank_effects() -> None:
     register_rank_effects("guard", SkillRankEffects(
         status_duration_bonus=1,  # +1 turn per rank (starts at 1, becomes 2-6)
         status_strength_bonus=-0.05,  # Better reduction: 0.5 -> 0.45 -> 0.4 -> 0.35 -> 0.3 -> 0.25
-        cost_reduction_per_rank=0.5,  # Reduce stamina cost (if it had one)
+        # No cost reduction since guard has no cost
     ))
     
     # Power Strike: Damage + weaken - more damage, longer weaken duration
     register_rank_effects("power_strike", SkillRankEffects(
-        power_per_rank=0.12,  # +12% per rank (better than default 10%)
+        power_per_rank=0.15,  # +15% per rank (better scaling)
         status_duration_bonus=1,  # Weaken lasts longer: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+        status_strength_bonus=-0.02,  # Weaken gets stronger: 0.7 -> 0.68 -> 0.66 -> etc.
         cooldown_reduction_per_rank=0.5,  # -0.5 turns per rank (faster cooldown)
+        cost_reduction_per_rank=0.3,  # Slight stamina cost reduction
     ))
     
     # Lunge: Quick strike - faster cooldown, more damage
@@ -1242,15 +1406,17 @@ def _register_skill_rank_effects() -> None:
     
     # Shield Bash: Control skill - longer stun, more damage
     register_rank_effects("shield_bash", SkillRankEffects(
-        power_per_rank=0.10,
+        power_per_rank=0.12,  # Better damage scaling
         status_duration_bonus=1,  # Stun lasts longer: 1 -> 2 -> 3 -> 4 -> 5 -> 6
-        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+        cooldown_reduction_per_rank=0.4,  # Better cooldown reduction
+        cost_reduction_per_rank=0.3,  # Reduce stamina cost
     ))
     
     # Focus Blast: Skill-power scaling - much more damage
     register_rank_effects("focus_blast", SkillRankEffects(
-        power_per_rank=0.15,  # +15% per rank (stronger scaling)
-        cooldown_reduction_per_rank=0.4,  # Slight cooldown reduction
+        power_per_rank=0.18,  # +18% per rank (stronger scaling for skill-power builds)
+        cooldown_reduction_per_rank=0.5,  # Better cooldown reduction
+        cost_reduction_per_rank=0.4,  # Reduce stamina/mana cost
     ))
     
     # Nimble Step: Defensive - longer duration, better reduction
@@ -1262,10 +1428,11 @@ def _register_skill_rank_effects() -> None:
     
     # Cleave: AoE - more damage, larger radius at higher ranks
     register_rank_effects("cleave", SkillRankEffects(
-        power_per_rank=0.12,  # +12% per rank
+        power_per_rank=0.14,  # +14% per rank (better scaling)
         aoe_radius_bonus=1,  # +1 radius
-        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
-        cooldown_reduction_per_rank=0.4,
+        aoe_radius_ranks=[2, 4],  # +1 at rank 2, +1 more at rank 4 (earlier radius increase)
+        cooldown_reduction_per_rank=0.5,  # Better cooldown reduction
+        cost_reduction_per_rank=0.4,  # Reduce stamina cost
     ))
     
     # Taunt: Control - longer duration
@@ -1289,8 +1456,9 @@ def _register_skill_rank_effects() -> None:
     
     # Backstab: High damage - massive damage scaling
     register_rank_effects("backstab", SkillRankEffects(
-        power_per_rank=0.20,  # +20% per rank (very high damage)
-        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+        power_per_rank=0.25,  # +25% per rank (very high damage scaling)
+        cooldown_reduction_per_rank=0.4,  # -0.4 turns per rank (faster cooldown)
+        cost_reduction_per_rank=0.5,  # Reduce stamina cost
     ))
     
     # Shadow Strike: Mobility + damage - more damage
@@ -1301,9 +1469,11 @@ def _register_skill_rank_effects() -> None:
     
     # Poison Blade: DoT - longer duration, more DoT damage
     register_rank_effects("poison_blade", SkillRankEffects(
-        power_per_rank=0.08,  # Slight damage increase
+        power_per_rank=0.10,  # Better damage increase
         status_duration_bonus=1,  # +1 turn per rank: 3 -> 4 -> 5 -> 6 -> 7 -> 8
         dot_damage_bonus=1,  # +1 damage per turn per rank: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+        cooldown_reduction_per_rank=0.4,  # Slight cooldown reduction
+        cost_reduction_per_rank=0.3,  # Reduce stamina cost
     ))
     
     # Evade: Defensive - longer duration
@@ -1314,11 +1484,12 @@ def _register_skill_rank_effects() -> None:
     
     # Fireball: AoE + DoT - more damage, larger radius, more burn damage
     register_rank_effects("fireball", SkillRankEffects(
-        power_per_rank=0.12,  # +12% per rank
+        power_per_rank=0.15,  # +15% per rank (better scaling)
         aoe_radius_bonus=1,  # +1 radius
-        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
-        status_duration_bonus=1,  # Burn lasts longer
-        dot_damage_bonus=1,  # +1 burn damage per turn per rank
+        aoe_radius_ranks=[2, 4],  # +1 at rank 2, +1 more at rank 4 (earlier radius increase)
+        status_duration_bonus=1,  # Burn lasts longer: 2 -> 3 -> 4 -> 5 -> 6 -> 7
+        dot_damage_bonus=1,  # +1 burn damage per turn per rank: 3 -> 4 -> 5 -> 6 -> 7 -> 8
+        cooldown_reduction_per_rank=0.4,  # Slight cooldown reduction
     ))
     
     # Lightning Bolt: AoE - more damage, larger radius
@@ -1389,10 +1560,11 @@ def _register_skill_rank_effects() -> None:
     
     # Meteor Strike: Massive AoE - more damage, larger radius
     register_rank_effects("meteor_strike", SkillRankEffects(
-        power_per_rank=0.15,  # +15% per rank (very high damage)
+        power_per_rank=0.18,  # +18% per rank (very high damage scaling)
         aoe_radius_bonus=1,
         aoe_radius_ranks=[2, 4],  # +1 at rank 2, +1 more at rank 4
-        cooldown_reduction_per_rank=0.33,  # -1 turn every 3 ranks
+        cooldown_reduction_per_rank=0.4,  # Better cooldown reduction
+        cost_reduction_per_rank=0.5,  # Reduce mana cost (expensive skill)
     ))
     
     # Frost Nova: AoE + stun - more damage, longer stun, larger radius
@@ -1411,6 +1583,65 @@ def _register_skill_rank_effects() -> None:
         dot_damage_bonus=1,  # +1 damage per turn per rank
         aoe_radius_bonus=1,
         aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # --- Ranged Weapon Skills Rank Effects ---
+    
+    # Quick Shot: Fast ranged - more damage, cost reduction
+    register_rank_effects("quick_shot", SkillRankEffects(
+        power_per_rank=0.10,
+        cost_reduction_per_rank=0.3,  # Reduce stamina cost
+    ))
+    
+    # Precise Shot: High damage ranged - more damage, range increase
+    register_rank_effects("precise_shot", SkillRankEffects(
+        power_per_rank=0.15,  # +15% per rank (high damage scaling)
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Multi-shot: AoE ranged - more damage, larger radius
+    register_rank_effects("multi_shot", SkillRankEffects(
+        power_per_rank=0.12,
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Piercing Shot: Line attack - more damage
+    register_rank_effects("piercing_shot", SkillRankEffects(
+        power_per_rank=0.12,
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # --- Ranged Magic Skills Rank Effects ---
+    
+    # Arcane Missile: Quick magic - more damage, faster cooldown
+    register_rank_effects("arcane_missile", SkillRankEffects(
+        power_per_rank=0.10,
+        cooldown_reduction_per_rank=0.5,  # Can become 0 cooldown at rank 2
+        cost_reduction_per_rank=0.5,  # Reduce mana cost
+    ))
+    
+    # Ice Bolt: Ranged ice - more damage, longer slow
+    register_rank_effects("ice_bolt", SkillRankEffects(
+        power_per_rank=0.12,
+        status_duration_bonus=1,  # Slow lasts longer
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Chain Lightning: Ranged chain - more damage, larger radius
+    register_rank_effects("chain_lightning", SkillRankEffects(
+        power_per_rank=0.12,
+        aoe_radius_bonus=1,
+        aoe_radius_ranks=[3, 5],  # +1 at rank 3, +1 more at rank 5
+        cooldown_reduction_per_rank=0.4,
+    ))
+    
+    # Shadow Bolt: Ranged dark magic - more damage, longer weaken
+    register_rank_effects("shadow_bolt", SkillRankEffects(
+        power_per_rank=0.12,
+        status_duration_bonus=1,  # Weaken lasts longer
         cooldown_reduction_per_rank=0.4,
     ))
 

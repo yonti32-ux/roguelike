@@ -190,6 +190,100 @@ def _apply_endurance_training(hero_stats: object) -> None:
     hero_stats.base.stamina_regen_bonus += 1
 
 
+def _apply_battle_rage(hero_stats: object) -> None:
+    # Damage boost when below 50% HP - handled in combat calculations
+    pass  # This would need special handling in combat
+
+
+def _apply_weapon_mastery_4(hero_stats: object) -> None:
+    hero_stats.base.attack += 3
+    hero_stats.base.crit_chance += 0.05
+
+
+def _apply_shield_expert(hero_stats: object) -> None:
+    hero_stats.base.defense += 2
+    # Shield bash stun duration handled in skill rank effects
+
+
+def _apply_assassin_training(hero_stats: object) -> None:
+    hero_stats.base.crit_chance += 0.15
+    hero_stats.base.dodge_chance += 0.05
+
+
+def _apply_poison_mastery(hero_stats: object) -> None:
+    # Poison damage bonus handled in combat
+    hero_stats.base.skill_power += 0.10
+
+
+def _apply_shadow_adept(hero_stats: object) -> None:
+    hero_stats.base.dodge_chance += 0.10
+    hero_stats.base.initiative += 2
+
+
+def _apply_nimble_mind(hero_stats: object) -> None:
+    hero_stats.base.dodge_chance += 0.10
+    hero_stats.base.status_resist += 0.05
+
+
+def _apply_arcane_power(hero_stats: object) -> None:
+    hero_stats.base.skill_power += 0.25
+    hero_stats.base.max_mana += 5
+
+
+def _apply_mana_efficiency(hero_stats: object) -> None:
+    hero_stats.base.mana_regen_bonus += 2
+    # Skill cost reduction handled in combat
+
+
+def _apply_spell_focus(hero_stats: object) -> None:
+    hero_stats.base.skill_power += 0.15
+    hero_stats.base.max_mana += 3
+
+
+def _apply_elemental_mastery(hero_stats: object) -> None:
+    hero_stats.base.skill_power += 0.20
+    # Elemental damage bonus handled in combat
+
+
+def _apply_iron_will_2(hero_stats: object) -> None:
+    hero_stats.base.status_resist += 0.15
+    hero_stats.base.max_hp += 10
+
+
+def _apply_vitality_boost(hero_stats: object) -> None:
+    hero_stats.base.max_hp += 15
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+def _apply_combat_reflexes(hero_stats: object) -> None:
+    hero_stats.base.initiative += 4
+    hero_stats.base.crit_chance += 0.05
+
+
+def _apply_duelist(hero_stats: object) -> None:
+    hero_stats.base.attack += 2
+    hero_stats.base.crit_chance += 0.10
+    hero_stats.base.dodge_chance += 0.05
+
+
+def _apply_berserker(hero_stats: object) -> None:
+    hero_stats.base.attack += 3
+    hero_stats.base.max_hp += 10
+    # Low HP damage boost handled in combat
+
+
+def _apply_warden(hero_stats: object) -> None:
+    hero_stats.base.defense += 3
+    hero_stats.base.max_hp += 15
+    hero_stats.base.status_resist += 0.10
+
+
+def _apply_spellweaver(hero_stats: object) -> None:
+    hero_stats.base.skill_power += 0.20
+    hero_stats.base.max_mana += 8
+    hero_stats.base.mana_regen_bonus += 2
+
+
 # --- Perk trees -------------------------------------------------------------
 
 # ----------------- Vitality tree -----------------
@@ -197,7 +291,7 @@ def _apply_endurance_training(hero_stats: object) -> None:
 register(Perk(
     id="toughness_1",
     name="Toughness I",
-    description="+10 Max HP.",
+    description="+10 Max HP. Increases your maximum health, allowing you to survive longer in battle.",
     unlock_level=2,
     branch="vitality",
     requires=[],
@@ -232,7 +326,7 @@ register(Perk(
 register(Perk(
     id="weapon_training_1",
     name="Weapon Training I",
-    description="+2 Attack.",
+    description="+2 Attack. Improves your proficiency with weapons, increasing damage dealt.",
     unlock_level=2,
     branch="blade",
     requires=[],
@@ -266,7 +360,7 @@ register(Perk(
 register(Perk(
     id="blade_technique_1",
     name="Blade Technique I",
-    description="Unlocks the Lunge (R) battle skill.",
+    description="Unlocks the Lunge (R) battle skill - a quick forward strike dealing 1.25x damage. Perfect for closing distance and dealing consistent damage.",
     unlock_level=3,
     branch="blade",
     requires=["weapon_training_1"],
@@ -279,7 +373,7 @@ register(Perk(
 register(Perk(
     id="iron_guard_1",
     name="Iron Guard I",
-    description="+1 Defense.",
+    description="+1 Defense. Hardens your defenses, reducing incoming physical damage.",
     unlock_level=2,
     branch="ward",
     requires=[],
@@ -302,7 +396,7 @@ register(Perk(
 register(Perk(
     id="ward_technique_1",
     name="Ward Technique I",
-    description="Unlocks the Shield Bash (E) battle skill.",
+    description="Unlocks the Shield Bash (E) battle skill - smash your shield into enemies, dealing damage and stunning them for 1 turn. Excellent for controlling the battlefield.",
     unlock_level=3,
     branch="ward",
     requires=["iron_guard_1"],
@@ -326,7 +420,7 @@ register(Perk(
 register(Perk(
     id="battle_focus_1",
     name="Battle Focus I",
-    description="+15% Skill Power.",
+    description="+15% Skill Power. Enhances your ability to channel power into skills and spells.",
     unlock_level=3,
     branch="focus",
     requires=[],
@@ -362,7 +456,7 @@ register(Perk(
 register(Perk(
     id="fleet_footwork_1",
     name="Fleet Footwork I",
-    description="Unlocks Nimble Step (T), +1 Defense, and +2 Initiative.",
+    description="Unlocks Nimble Step (T), +1 Defense, and +2 Initiative. Improves your evasive capabilities and reaction speed.",
     unlock_level=3,
     branch="mobility",
     requires=[],
@@ -588,6 +682,203 @@ register(Perk(
     requires=["battle_focus_1"],
     grant_skills=["arcane_missile"],
     tags=["offense", "skills", "mage"],
+))
+
+# ----------------- Enhanced Perks with Better Effects -----------------
+
+# Vitality tree enhancements
+register(Perk(
+    id="vitality_boost",
+    name="Vitality Boost",
+    description="+15 Max HP and +1 Stamina Regen. Strengthens your body for extended battles.",
+    unlock_level=5,
+    branch="vitality",
+    requires=["toughness_2"],
+    tags=["defense", "survivability"],
+    apply_fn=_apply_vitality_boost,
+))
+
+register(Perk(
+    id="iron_will_2",
+    name="Iron Will II",
+    description="+15% Status Resistance and +10 Max HP. Your mind and body resist debilitating effects.",
+    unlock_level=7,
+    branch="vitality",
+    requires=["iron_will"],
+    tags=["defense", "survivability"],
+    apply_fn=_apply_iron_will_2,
+))
+
+# Blade tree enhancements
+register(Perk(
+    id="weapon_mastery_4",
+    name="Weapon Mastery IV",
+    description="+3 Attack and +5% Crit Chance. Unlocks the Cleave skill - strike multiple enemies at once.",
+    unlock_level=8,
+    branch="blade",
+    requires=["weapon_training_3"],
+    grant_skills=["cleave"],
+    tags=["offense", "skills"],
+    apply_fn=_apply_weapon_mastery_4,
+))
+
+register(Perk(
+    id="duelist",
+    name="Duelist",
+    description="+2 Attack, +10% Crit Chance, and +5% Dodge Chance. Master of single combat.",
+    unlock_level=6,
+    branch="blade",
+    requires=["weapon_training_2"],
+    tags=["offense", "defense"],
+    apply_fn=_apply_duelist,
+))
+
+register(Perk(
+    id="combat_reflexes",
+    name="Combat Reflexes",
+    description="+4 Initiative and +5% Crit Chance. React faster in battle.",
+    unlock_level=5,
+    branch="blade",
+    requires=["weapon_training_1"],
+    tags=["offense", "initiative"],
+    apply_fn=_apply_combat_reflexes,
+))
+
+register(Perk(
+    id="berserker",
+    name="Berserker",
+    description="+3 Attack and +10 Max HP. Deal 20% more damage when below 50% HP.",
+    unlock_level=7,
+    branch="blade",
+    requires=["weapon_training_3"],
+    tags=["offense", "survivability"],
+    apply_fn=_apply_berserker,
+))
+
+# Ward tree enhancements
+register(Perk(
+    id="shield_expert",
+    name="Shield Expert",
+    description="+2 Defense. Shield Bash stuns for 2 turns instead of 1.",
+    unlock_level=6,
+    branch="ward",
+    requires=["iron_guard_2"],
+    tags=["defense", "control"],
+    apply_fn=_apply_shield_expert,
+))
+
+register(Perk(
+    id="warden",
+    name="Warden",
+    description="+3 Defense, +15 Max HP, and +10% Status Resistance. Ultimate defensive specialist.",
+    unlock_level=8,
+    branch="ward",
+    requires=["iron_guard_2", "toughness_3"],
+    tags=["defense", "survivability"],
+    apply_fn=_apply_warden,
+))
+
+# Focus tree enhancements
+register(Perk(
+    id="arcane_power",
+    name="Arcane Power",
+    description="+25% Skill Power and +5 Max Mana. Unlocks the Fireball skill - explosive fire magic.",
+    unlock_level=5,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["fireball"],
+    tags=["offense", "skills", "mage"],
+    apply_fn=_apply_arcane_power,
+))
+
+register(Perk(
+    id="mana_efficiency",
+    name="Mana Efficiency",
+    description="+2 Mana Regen. All skills cost 2 less mana (minimum 0).",
+    unlock_level=6,
+    branch="focus",
+    requires=["battle_focus_2"],
+    tags=["offense", "resources"],
+    apply_fn=_apply_mana_efficiency,
+))
+
+register(Perk(
+    id="spell_focus",
+    name="Spell Focus",
+    description="+15% Skill Power and +3 Max Mana. All skills have 1 less cooldown (minimum 0).",
+    unlock_level=7,
+    branch="focus",
+    requires=["battle_focus_2"],
+    tags=["offense", "skills"],
+    apply_fn=_apply_spell_focus,
+))
+
+register(Perk(
+    id="elemental_mastery",
+    name="Elemental Mastery",
+    description="+20% Skill Power. Fire, ice, and lightning skills deal 20% more damage.",
+    unlock_level=8,
+    branch="focus",
+    requires=["battle_focus_2"],
+    tags=["offense", "skills", "mage"],
+    apply_fn=_apply_elemental_mastery,
+))
+
+register(Perk(
+    id="spellweaver",
+    name="Spellweaver",
+    description="+20% Skill Power, +8 Max Mana, and +2 Mana Regen. Master of arcane arts.",
+    unlock_level=9,
+    branch="focus",
+    requires=["battle_focus_2", "arcane_power"],
+    tags=["offense", "resources", "mage"],
+    apply_fn=_apply_spellweaver,
+))
+
+# Mobility tree enhancements
+register(Perk(
+    id="assassin_training",
+    name="Assassin Training",
+    description="+15% Crit Chance and +5% Dodge Chance. Unlocks the Backstab skill - devastating precision strike.",
+    unlock_level=5,
+    branch="mobility",
+    requires=["fleet_footwork_2"],
+    grant_skills=["backstab"],
+    tags=["offense", "defense", "skills", "rogue"],
+    apply_fn=_apply_assassin_training,
+))
+
+register(Perk(
+    id="poison_mastery",
+    name="Poison Mastery",
+    description="+10% Skill Power. Poison effects deal 50% more damage over time.",
+    unlock_level=6,
+    branch="mobility",
+    requires=["fleet_footwork_2"],
+    tags=["offense", "skills", "rogue"],
+    apply_fn=_apply_poison_mastery,
+))
+
+register(Perk(
+    id="shadow_adept",
+    name="Shadow Adept",
+    description="+10% Dodge Chance and +2 Initiative. Stealth skills last 1 turn longer.",
+    unlock_level=7,
+    branch="mobility",
+    requires=["fleet_footwork_2"],
+    tags=["defense", "mobility", "rogue"],
+    apply_fn=_apply_shadow_adept,
+))
+
+register(Perk(
+    id="nimble_mind",
+    name="Nimble Mind",
+    description="+10% Dodge Chance and +5% Status Resistance. Quick thinking keeps you safe.",
+    unlock_level=6,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    tags=["defense", "rogue"],
+    apply_fn=_apply_nimble_mind,
 ))
 
 

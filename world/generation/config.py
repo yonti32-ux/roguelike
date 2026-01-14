@@ -43,6 +43,7 @@ class TerrainConfig:
         "mountain_conversion_chance": 0.2,
         "variation_chance": 0.02,
     })
+    chunk_based: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -193,6 +194,7 @@ class GenerationConfig:
                     smoothing=terrain_data.get("smoothing", config.terrain.smoothing),
                     water_clustering=terrain_data.get("water_clustering", config.terrain.water_clustering),
                     refinement=terrain_data.get("refinement", config.terrain.refinement),
+                    chunk_based=terrain_data.get("chunk_based", config.terrain.chunk_based),
                 )
             
             # Load POI config
@@ -266,6 +268,7 @@ class GenerationConfig:
                     "smoothing": self.terrain.smoothing,
                     "water_clustering": self.terrain.water_clustering,
                     "refinement": self.terrain.refinement,
+                    "chunk_based": self.terrain.chunk_based,
                 },
                 "poi": {
                     "max_pois": self.poi.max_pois,

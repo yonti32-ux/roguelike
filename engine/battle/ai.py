@@ -34,7 +34,8 @@ class BattleAI:
         self.scene = scene
     
     def get_ai_profile(self, unit: BattleUnit) -> str:
-        """Get the AI profile for an enemy unit."""
+        """Get the AI profile for an enemy unit or AI-controlled ally."""
+        # Check if it's an enemy with an archetype
         if isinstance(unit.entity, Enemy):
             arch_id = getattr(unit.entity, "archetype_id", None)
             if arch_id:
@@ -43,6 +44,12 @@ class BattleAI:
                     return arch.ai_profile
                 except KeyError:
                     pass
+        
+        # Check if it's an AI-controlled ally
+        if getattr(unit, "is_ai_controlled", False):
+            # Allies use a balanced AI profile (aggressive but not suicidal)
+            return "brute"  # Default for allies
+        
         return "brute"  # Default
     
     def choose_target_by_priority(self, unit: BattleUnit, targets: List[BattleUnit]) -> Optional[BattleUnit]:
@@ -411,7 +418,7 @@ class BattleAI:
                 rage_skill = unit.skills.get("berserker_rage")
                 if rage_skill:
                     cd = unit.cooldowns.get(rage_skill.id, 0)
-                    can_use, _ = unit.has_resources_for_skill(rage_skill)
+                    can_use, _ = unit.has_resources_for_skill(rage_skill, self.scene.combat)
                     if cd == 0 and can_use and random.random() < 0.8:
                         if self.scene._use_skill(unit, rage_skill, for_ai=True):
                             return
@@ -424,7 +431,7 @@ class BattleAI:
             ]
             for skill in defensive_skills:
                 cd = unit.cooldowns.get(skill.id, 0)
-                can_use, _ = unit.has_resources_for_skill(skill)
+                can_use, _ = unit.has_resources_for_skill(skill, self.scene.combat)
                 if cd == 0 and can_use and random.random() < 0.7:
                     if self.scene._use_skill(unit, skill, for_ai=True):
                         return
@@ -434,7 +441,7 @@ class BattleAI:
                 guard_skill = unit.skills.get("guard")
                 if guard_skill:
                     cd = unit.cooldowns.get(guard_skill.id, 0)
-                    can_use, _ = unit.has_resources_for_skill(guard_skill)
+                    can_use, _ = unit.has_resources_for_skill(guard_skill, self.scene.combat)
                     if cd == 0 and can_use and random.random() < 0.5:
                         if self.scene._use_skill(unit, guard_skill, for_ai=True):
                             return
@@ -470,7 +477,7 @@ class BattleAI:
         # --- Offensive Skills (with tactical targeting) ---
         offensive_skills = [
             s for s in unit.skills.values()
-            if s.target_mode == "adjacent_enemy" and s.base_power > 0.0
+            if s.target_mode in ("adjacent_enemy", "any_enemy") and s.base_power > 0.0
         ]
         # Prioritize mark_target and debuff skills
         priority_skills = [s for s in offensive_skills if s.id in ("mark_target", "dark_hex", "crippling_blow")]
@@ -485,7 +492,7 @@ class BattleAI:
                 continue
             
             cd = unit.cooldowns.get(skill.id, 0)
-            can_use, _ = unit.has_resources_for_skill(skill)
+            can_use, _ = unit.has_resources_for_skill(skill, self.scene.combat)
             if cd == 0 and can_use:
                 # Higher chance to use debuff/mark skills (70% for mark, 60% for debuffs)
                 chance = 0.7 if skill.id == "mark_target" else 0.6
@@ -505,7 +512,7 @@ class BattleAI:
                 continue
 
             cd = unit.cooldowns.get(skill.id, 0)
-            can_use, _ = unit.has_resources_for_skill(skill)
+            can_use, _ = unit.has_resources_for_skill(skill, self.scene.combat)
             if cd == 0 and can_use:
                 # Special handling for life_drain (higher priority when low HP)
                 if skill.id == "life_drain":

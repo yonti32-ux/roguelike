@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 import pygame
 
-from ui.hud_screens import draw_quest_fullscreen
+from ui.fullscreen_screens.quest_screen import draw_quest_fullscreen
 from systems.input import InputAction
 from systems.quests import QuestStatus
 

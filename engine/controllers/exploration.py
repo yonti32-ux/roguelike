@@ -1289,17 +1289,24 @@ class ExplorationController:
         
         # 7) Check for village/camp exit points (return to overworld)
         if game.current_map is not None and game.player is not None:
+            px, py = game.player.rect.center
+            player_tx, player_ty = game.current_map.world_to_tile(px, py)
+            
             # Check if we're in a village
-            from world.poi.types import VillagePOI
-            if game.current_poi is not None and isinstance(game.current_poi, VillagePOI):
-                px, py = game.player.rect.center
-                player_tx, player_ty = game.current_map.world_to_tile(px, py)
-                
-                # Check if standing on any village exit tile
-                exit_tiles = getattr(game.current_map, "village_exit_tiles", None)
-                if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
-                    game.exit_poi()
-                    return
+            from world.poi.types import VillagePOI, CampPOI
+            if game.current_poi is not None:
+                if isinstance(game.current_poi, VillagePOI):
+                    # Check if standing on any village exit tile
+                    exit_tiles = getattr(game.current_map, "village_exit_tiles", None)
+                    if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
+                        game.exit_poi()
+                        return
+                elif isinstance(game.current_poi, CampPOI):
+                    # Check if standing on any camp exit tile
+                    exit_tiles = getattr(game.current_map, "camp_exit_tiles", None)
+                    if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
+                        game.exit_poi()
+                        return
 
         # 8) Check for stairs (after other interactions, so they don't block chests/merchants on stairs)
         if game.current_map is not None and game.player is not None:

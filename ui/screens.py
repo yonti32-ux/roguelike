@@ -15,15 +15,13 @@ from typing import Optional, Protocol, TYPE_CHECKING, Dict, List, Tuple
 
 import pygame
 
-from ui.hud_screens import (
-    draw_inventory_fullscreen,
-    draw_character_sheet_fullscreen,
-    draw_shop_fullscreen,
-    draw_skill_screen_fullscreen,
-    draw_recruitment_fullscreen,
-    draw_quest_fullscreen,
-    _process_inventory_items,
-)
+from ui.fullscreen_screens.inventory_screen import draw_inventory_fullscreen
+from ui.fullscreen_screens.character_screen import draw_character_sheet_fullscreen
+from ui.fullscreen_screens.shop_screen import draw_shop_fullscreen
+from ui.fullscreen_screens.skill_screen import draw_skill_screen_fullscreen
+from ui.fullscreen_screens.recruitment_screen import draw_recruitment_fullscreen
+from ui.fullscreen_screens.quest_screen import draw_quest_fullscreen
+from ui.hud_screens import _process_inventory_items
 from systems.input import InputAction
 
 if TYPE_CHECKING:

@@ -181,14 +181,29 @@ class BattleUnit:
                 amount = self.calculate_regen_amount(base_regen=1, regen_bonus=regen_bonus)
             self.current_mana = min(max_mana, self.current_mana + amount)
 
-    def has_resources_for_skill(self, skill: Skill) -> tuple[bool, Optional[str]]:
+    def has_ranged_weapon(self) -> bool:
+        """
+        Check if this unit has a ranged weapon equipped.
+        Returns True if weapon range > 1, False otherwise.
+        """
+        # We need access to the combat system to check weapon range
+        # This will be called from battle scene which has access to combat
+        # For now, return False - will be checked externally
+        return False
+    
+    def has_resources_for_skill(self, skill: Skill, combat_system=None) -> tuple[bool, Optional[str]]:
         """
         Check if unit has enough resources to use a skill.
+        
+        Args:
+            skill: The skill to check
+            combat_system: Optional BattleCombat instance to check weapon requirements
         
         Returns:
             Tuple of (can_use, error_message)
             - (True, None) if resources are sufficient
             - (False, "Not enough mana!") or (False, "Not enough stamina!") if insufficient
+            - (False, "Requires ranged weapon!") if skill requires ranged weapon but unit doesn't have one
         """
         mana_cost = getattr(skill, "mana_cost", 0)
         stamina_cost = getattr(skill, "stamina_cost", 0)
@@ -198,6 +213,15 @@ class BattleUnit:
         
         if stamina_cost > 0 and self.current_stamina < stamina_cost:
             return False, "Not enough stamina!"
+        
+        # Check weapon requirement
+        if getattr(skill, "requires_ranged_weapon", False):
+            if combat_system is None:
+                # Can't check without combat system, assume invalid
+                return False, "Requires ranged weapon!"
+            weapon_range = combat_system._get_weapon_range(self)
+            if weapon_range <= 1:
+                return False, "Requires ranged weapon!"
         
         return True, None
 

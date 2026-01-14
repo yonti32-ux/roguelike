@@ -1062,6 +1062,24 @@ class Game:
         party_list = getattr(self, "party", None) or []
         companions_for_battle = list(party_list) if party_list else None
         
+        # Check for allied parties that should join the battle
+        allied_parties = []
+        if context_party is not None:
+            from world.overworld.faction_combat import get_allied_parties_for_battle
+            from world.overworld.party_types import get_party_type
+            
+            player_faction = getattr(self, 'player_faction', None)
+            enemy_party_type = get_party_type(context_party.party_type_id)
+            
+            if enemy_party_type:
+                allied_parties = get_allied_parties_for_battle(
+                    party=context_party,
+                    party_type=enemy_party_type,
+                    game=self,
+                    player_faction=player_faction,
+                    radius=2  # 2 tile radius for allies to join
+                )
+        
         # Create battle scene
         self.battle_scene = BattleScene(
             self.player,
@@ -1075,8 +1093,119 @@ class Game:
         if context_party is not None:
             self.battle_scene.context_party = context_party
         
+        # Add allied parties to battle (as AI-controlled player-side units)
+        if allied_parties:
+            self._add_allied_parties_to_battle(allied_parties, context_party)
+        
         # Enter battle mode
         self.enter_battle_mode()
+    
+    def _add_allied_parties_to_battle(
+        self,
+        allied_parties: List["RoamingParty"],
+        enemy_party: Optional["RoamingParty"] = None
+    ) -> None:
+        """
+        Add allied parties to the current battle as AI-controlled player-side units.
+        
+        Args:
+            allied_parties: List of allied parties to add
+            enemy_party: The enemy party being fought (for context)
+        """
+        if not self.battle_scene:
+            return
+        
+        from world.overworld.battle_conversion import allied_party_to_battle_units
+        from world.overworld.party_types import get_party_type
+        from engine.battle.types import BattleUnit
+        
+        player_level = 1
+        if self.player:
+            if hasattr(self.player, 'level'):
+                player_level = self.player.level
+            elif hasattr(self, 'hero_stats') and self.hero_stats:
+                player_level = getattr(self.hero_stats, 'level', 1)
+        
+        # Get current player units to find positioning
+        player_units = getattr(self.battle_scene, 'player_units', [])
+        grid_height = getattr(self.battle_scene, 'grid_height', 5)
+        
+        # Position allies on the left side, below existing player units
+        start_row = len(player_units) + 1
+        ally_index = 0
+        
+        for party in allied_parties:
+            party_type = get_party_type(party.party_type_id)
+            if not party_type:
+                continue
+            
+            # Convert party to ally entities
+            ally_entities = allied_party_to_battle_units(
+                party=party,
+                party_type=party_type,
+                game=self,
+                player_level=player_level
+            )
+            
+            # Create battle units for each ally
+            for ally_entity in ally_entities:
+                # Position on left side, below existing units
+                gx = 2  # Same column as player/companions
+                gy = min(start_row + ally_index, grid_height - 1)
+                
+                ally_unit = BattleUnit(
+                    entity=ally_entity,
+                    side="player",  # On player's side
+                    gx=gx,
+                    gy=gy,
+                    name=getattr(ally_entity, 'name', f"{party_type.name} Ally"),
+                )
+                
+                # Initialize resources
+                ally_unit.init_resources_from_entity()
+                
+                # Initialize movement points
+                from settings import BASE_MOVEMENT_POINTS, MAX_SPEED_MULTIPLIER
+                ally_speed = float(getattr(ally_entity, "speed", 1.0) or 1.0)
+                ally_speed = min(ally_speed, MAX_SPEED_MULTIPLIER)
+                ally_unit.max_movement_points = max(1, int(BASE_MOVEMENT_POINTS * ally_speed))
+                ally_unit.current_movement_points = ally_unit.max_movement_points
+                
+                # Give basic skills (guard at minimum)
+                from systems.skills import get as get_skill
+                try:
+                    guard_skill = get_skill("guard")
+                    if guard_skill:
+                        ally_unit.skills["guard"] = guard_skill
+                except (KeyError, AttributeError):
+                    pass
+                
+                # Auto-assign skill slots
+                self.battle_scene._auto_assign_skill_slots(ally_unit)
+                
+                # Mark as AI-controlled ally (not player-controlled)
+                ally_unit.is_ally = True
+                ally_unit.is_ai_controlled = True
+                
+                # Add to player units (they fight on player's side)
+                self.battle_scene.player_units.append(ally_unit)
+                
+                # Mark party as in combat
+                party.in_combat = True
+                
+                ally_index += 1
+        
+        # Re-initialize turn order to include allies
+        if ally_index > 0:
+            self.battle_scene._init_turn_order()
+            
+            # Show message about allies joining
+            if len(allied_parties) == 1:
+                party_type = get_party_type(allied_parties[0].party_type_id)
+                if party_type:
+                    self.add_message(f"{party_type.name} joins the battle!")
+            else:
+                self.add_message(f"{len(allied_parties)} allied parties join the battle!")
 
     def restart_run(self) -> None:
         """
@@ -1281,6 +1410,33 @@ class Game:
             context_party = None
             if hasattr(self.battle_scene, 'context_party') and self.battle_scene.context_party:
                 context_party = self.battle_scene.context_party
+            
+            # Handle allied parties cleanup (only remove if all their units died)
+            if hasattr(self.battle_scene, 'allied_parties') and self.battle_scene.allied_parties:
+                for ally_party in self.battle_scene.allied_parties:
+                    # Check if any units from this party survived
+                    party_survived = False
+                    if hasattr(self.battle_scene, 'player_units'):
+                        for unit in self.battle_scene.player_units:
+                            # Check if this unit belongs to this allied party
+                            if (getattr(unit, 'is_ally', False) and 
+                                hasattr(unit.entity, 'party_id') and 
+                                unit.entity.party_id == ally_party.party_id and
+                                unit.is_alive):
+                                party_survived = True
+                                break
+                    
+                    # Only remove if all units from this party died
+                    if not party_survived:
+                        if self.overworld_map and self.overworld_map.party_manager:
+                            self.overworld_map.party_manager.remove_party(ally_party.party_id)
+                            from world.overworld.party_types import get_party_type
+                            party_type = get_party_type(ally_party.party_type_id)
+                            if party_type:
+                                self.add_message(f"{party_type.name} party was lost in battle.")
+                    else:
+                        # Party survived - mark as no longer in combat
+                        ally_party.in_combat = False
             
             # 5) Go back to overworld (if we came from overworld)
             if context_party:

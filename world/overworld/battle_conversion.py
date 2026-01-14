@@ -2,13 +2,14 @@
 Convert roaming parties into battle units.
 
 This module handles the conversion of overworld parties into enemies
-that can fight in the battle system.
+that can fight in the battle system, and also converts allied parties
+into player-side units.
 """
 
 from typing import List, Optional, TYPE_CHECKING
 import random
 
-from world.entities import Enemy
+from world.entities import Enemy, Player
 from systems.enemies import get_archetype, EnemyArchetype, compute_scaled_stats
 
 if TYPE_CHECKING:
@@ -351,4 +352,83 @@ def _get_default_archetype_for_strength(strength: int) -> EnemyArchetype:
                 )
     
     return archetype
+
+
+def allied_party_to_battle_units(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    game: "Game",
+    player_level: int = 1
+) -> List[Player]:
+    """
+    Convert an allied roaming party into Player entities for battle.
+    
+    Allied parties fight on the player's side but are AI-controlled.
+    They are similar to companions but are temporary (only for this battle).
+    
+    Args:
+        party: The allied roaming party
+        party_type: The party's type definition
+        game: Game instance
+        player_level: Current player level (for scaling)
+    
+    Returns:
+        List of Player entities ready for battle (on player's side)
+    """
+    from systems.party import CompanionDef, create_companion_entity
+    
+    # Calculate how many allies join (similar to enemy scaling, but fewer)
+    # Allied parties typically send 1-2 members to help
+    num_allies = min(2, max(1, party_type.combat_strength))
+    
+    allies: List[Player] = []
+    
+    # Get reference player stats for scaling
+    reference_player = game.player if game.player else None
+    if not reference_player:
+        return allies
+    
+    base_hp = getattr(reference_player, "max_hp", 30)
+    base_attack = getattr(reference_player, "attack_power", 5)
+    base_defense = int(getattr(reference_player, "defense", 0))
+    base_skill_power = float(getattr(reference_player, "skill_power", 1.0))
+    
+    # Create a companion-like template for the ally
+    # Use party type name and combat strength to determine stats
+    for i in range(num_allies):
+        # Create a simple companion template based on party type
+        ally_template = CompanionDef(
+            id=f"{party_type.id}_ally",
+            name=party_type.name,
+            role="Ally",
+            class_id=None,  # No class for temporary allies
+            hp_factor=0.7 + (party_type.combat_strength * 0.1),  # 0.7-1.2
+            attack_factor=0.6 + (party_type.combat_strength * 0.1),  # 0.6-1.1
+            defense_factor=0.8 + (party_type.combat_strength * 0.1),  # 0.8-1.3
+            skill_power_factor=1.0,
+            skill_ids=[]  # Allies get basic skills
+        )
+        
+        # Create ally entity (similar to companion)
+        ally_entity = create_companion_entity(
+            template=ally_template,
+            state=None,  # No state for temporary allies
+            reference_player=reference_player,
+            hero_base_hp=base_hp,
+            hero_base_attack=base_attack,
+            hero_base_defense=base_defense,
+            hero_base_skill_power=base_skill_power,
+        )
+        
+        # Set ally name
+        ally_name = f"{party_type.name} Ally {i + 1}"
+        ally_entity.name = ally_name
+        
+        # Store party reference for post-combat
+        ally_entity.party_id = party.party_id
+        ally_entity.is_ally = True  # Mark as temporary ally
+        
+        allies.append(ally_entity)
+    
+    return allies
 

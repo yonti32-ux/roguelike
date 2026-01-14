@@ -1,0 +1,48 @@
+"""
+UI constants for fullscreen screens.
+
+This module contains all color, spacing, layout, and display constants
+used by the fullscreen UI screens (inventory, character sheet, shop, etc.).
+"""
+
+# Colors
+COLOR_TITLE = (240, 240, 200)
+COLOR_SUBTITLE = (220, 220, 180)
+COLOR_TEXT = (220, 220, 220)
+COLOR_TEXT_DIM = (200, 200, 200)
+COLOR_TEXT_DIMMER = (180, 180, 180)
+COLOR_TEXT_DIMMEST = (170, 170, 170)
+COLOR_GOLD = (230, 210, 120)
+COLOR_CATEGORY = (200, 200, 150)
+COLOR_STATUS = (180, 200, 220)
+COLOR_SELECTED_BG = (60, 60, 90, 210)
+COLOR_SELECTED_TEXT = (255, 255, 200)
+COLOR_TAB_ACTIVE = (255, 255, 200)
+COLOR_TAB_INACTIVE = (150, 150, 150)
+COLOR_FOOTER = (160, 160, 160)
+
+# Spacing
+MARGIN_X = 40
+MARGIN_Y_TOP = 30
+MARGIN_Y_START = 90
+MARGIN_Y_FOOTER = 50
+LINE_HEIGHT_SMALL = 22
+LINE_HEIGHT_MEDIUM = 24
+LINE_HEIGHT_LARGE = 26
+LINE_HEIGHT_TITLE = 28
+LINE_HEIGHT_ITEM = 38
+SPACING_SECTION = 30
+
+# Layout
+# Tab spacing and starting X for the header tabs.
+TAB_SPACING = 130
+TAB_X_OFFSET = 520
+INDENT_DEFAULT = 20
+INDENT_INFO = 24
+
+# Item display
+MAX_DESC_LENGTH = 80
+ITEM_NAME_HEIGHT = 20
+ITEM_INFO_HEIGHT = 18
+ITEM_MIN_SPACING = 4
+

@@ -127,6 +127,22 @@ class PartyInteractionScene:
         """Attack the party and trigger combat."""
         try:
             from world.overworld.battle_conversion import party_to_battle_enemies
+            from world.overworld.faction_combat import should_initiate_combat
+            
+            # Check faction relations before combat
+            player_faction = getattr(self.game, 'player_faction', None)
+            should_fight, reason = should_initiate_combat(
+                party=self.party,
+                party_type=self.party_type,
+                game=self.game,
+                player_faction=player_faction
+            )
+            
+            # Allow combat even if faction check says no (player initiated)
+            # But show a warning if relations are good
+            if not should_fight and reason.startswith("Faction relations are friendly"):
+                # Player is attacking a friendly faction - warn them
+                self.game.add_message(f"Warning: {reason}. Attacking anyway...")
             
             # Convert party to enemies
             player_level = 1

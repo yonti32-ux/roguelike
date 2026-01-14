@@ -19,8 +19,8 @@ class OverworldConfig:
     """Overworld configuration loaded from file."""
     
     # World settings
-    world_width: int = 512
-    world_height: int = 512
+    world_width: int = 128
+    world_height: int = 128
     region_size: int = 64
     seed: Optional[int] = None
     world_name: Optional[str] = None

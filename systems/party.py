@@ -112,14 +112,24 @@ class CompanionState:
     def xp_to_next(self) -> int:
         """
         XP needed for this companion's next level.
-
-        Matches the hero's curve for now:
-            level 1 -> 2: 10 XP
-            level 2 -> 3: 15 XP
-            level 3 -> 4: 20 XP
-        etc.
+        
+        Matches the hero's polynomial curve for consistency:
+        - Level 1->2: 10 XP
+        - Level 5->6: 45 XP
+        - Level 10->11: 100 XP
+        - Level 15->16: 175 XP
+        - Level 20->21: 280 XP
         """
-        return 10 + (self.level - 1) * 5
+        if self.level <= 1:
+            return 10  # First level up is always 10 XP
+        
+        # Same polynomial curve as hero: 10 + 5*(level-1) + 0.5*(level-1)^2
+        level_offset = self.level - 1
+        base = 10
+        linear_term = 5 * level_offset
+        quadratic_term = int(0.5 * level_offset * level_offset)
+        
+        return base + linear_term + quadratic_term
 
     def grant_xp(self, amount: int) -> int:
         """
@@ -293,9 +303,10 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
             # Initiative growth per level (same as hero: +1 every 2 levels)
             initiative = base_stats.initiative + (level - 1) // 2
             
-            # Resource pools from class (scaled appropriately)
-            stamina = base_stats.max_stamina + (level - 1) * 3  # Reduced growth: 3 per level
-            mana = base_stats.max_mana + (level - 1) * 2  # Reduced growth: 2 per level
+            # Resource pools from class (grow per level)
+            # Lower starting values from class base_stats, but grow meaningfully
+            stamina = base_stats.max_stamina + (level - 1) * 3  # +3 per level
+            mana = base_stats.max_mana + (level - 1) * 2  # +2 per level
             
             # Apply template factors as multipliers (for companion balance)
             hp = int(hp * float(template.hp_factor))
@@ -333,12 +344,13 @@ def recalc_companion_stats_for_level(state: CompanionState, template: CompanionD
         defense = def_linear * float(template.defense_factor)
         skill_power = sp_linear * float(template.skill_power_factor)
 
-        # Baseline resource pools (reduced for balance)
-        BASE_STAMINA = 24  # Reduced from 36
-        BASE_MANA = 8  # Reduced from 12
+        # Baseline resource pools (matched to hero starting values)
+        # Lower starting values encourage resource management early on
+        BASE_STAMINA = 12  # Matches average of hero classes (15/12/8)
+        BASE_MANA = 4  # Matches average of hero classes (3/4/18, but this is for non-mages)
 
-        stamina_linear = BASE_STAMINA + (level - 1) * 3  # Reduced growth
-        mana_linear = BASE_MANA + (level - 1) * 2  # Reduced growth
+        stamina_linear = BASE_STAMINA + (level - 1) * 3  # +3 per level (same as heroes)
+        mana_linear = BASE_MANA + (level - 1) * 2  # +2 per level (same as heroes)
 
         # Scale with template specialisation
         stamina = stamina_linear * float(template.hp_factor) * 0.9  # Slight reduction

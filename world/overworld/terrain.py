@@ -40,9 +40,9 @@ TERRAIN_FOREST = TerrainType(
 TERRAIN_MOUNTAIN = TerrainType(
     id="mountain",
     name="Mountain",
-    color=(139, 137, 137),  # Gray
-    walkable=True,
-    movement_cost=2.0,
+    color=(100, 100, 100),  # Darker gray for better visibility
+    walkable=False,  # Mountains block movement
+    movement_cost=999.0,
 )
 
 TERRAIN_WATER = TerrainType(
@@ -69,6 +69,22 @@ TERRAIN_PLAINS = TerrainType(
     movement_cost=0.9,
 )
 
+TERRAIN_BEACH = TerrainType(
+    id="beach",
+    name="Beach",
+    color=(255, 228, 196),  # Sandy beige
+    walkable=True,
+    movement_cost=1.1,
+)
+
+TERRAIN_SNOW = TerrainType(
+    id="snow",
+    name="Snow",
+    color=(255, 255, 255),  # Pure white
+    walkable=True,
+    movement_cost=1.3,
+)
+
 
 # Registry of all terrain types
 TERRAIN_REGISTRY: dict[str, TerrainType] = {
@@ -78,6 +94,8 @@ TERRAIN_REGISTRY: dict[str, TerrainType] = {
     "water": TERRAIN_WATER,
     "desert": TERRAIN_DESERT,
     "plains": TERRAIN_PLAINS,
+    "beach": TERRAIN_BEACH,
+    "snow": TERRAIN_SNOW,
 }
 
 

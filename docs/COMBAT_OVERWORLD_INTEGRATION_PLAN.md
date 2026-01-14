@@ -944,47 +944,56 @@ def _trigger_combat_with_party(
 
 ## Implementation Checklist
 
-### Phase 1: Core Conversion System
-- [ ] Create `world/overworld/battle_conversion.py`
-- [ ] Implement `party_to_battle_enemies()`
-- [ ] Implement `_create_enemy_from_archetype()`
-- [ ] Implement `_get_default_archetype_for_strength()`
-- [ ] Test conversion with different party types
+### Phase 1: Core Conversion System ✅ COMPLETED
+- [x] Create `world/overworld/battle_conversion.py`
+- [x] Implement `party_to_battle_enemies()` with dynamic scaling
+- [x] Implement `_create_enemy_from_archetype()`
+- [x] Implement `_get_default_archetype_for_strength()`
+- [x] Test conversion with different party types
+- [x] Implement dynamic enemy scaling based on player party size (1-3 base, scales up)
 
-### Phase 2: Combat Triggers
-- [ ] Modify `party_interaction_scene.py` `_action_attack()`
-- [ ] Add `start_battle()` method to `Game` class
-- [ ] Test manual combat triggers
+### Phase 2: Combat Triggers ✅ COMPLETED
+- [x] Modify `party_interaction_scene.py` `_action_attack()`
+- [x] Add `start_battle_from_overworld()` method to `Game` class
+- [x] Test manual combat triggers
 - [ ] Add automatic combat triggers in overworld controller
 - [ ] Test automatic combat
 
-### Phase 3: Faction Integration
-- [ ] Create `world/overworld/faction_combat.py`
-- [ ] Implement `should_initiate_combat()`
-- [ ] Implement `get_allied_parties_for_battle()`
-- [ ] Integrate faction checks into combat triggers
-- [ ] Test faction-based combat behavior
+### Phase 3: Faction Integration ✅ COMPLETED
+- [x] Create `world/overworld/faction_combat.py`
+- [x] Implement `should_initiate_combat()` with faction relation checks
+- [x] Implement `get_allied_parties_for_battle()` to find nearby allies
+- [x] Integrate faction checks into combat triggers
+- [x] Test faction-based combat behavior
 
-### Phase 4: Post-Combat Updates
-- [ ] Create `world/overworld/post_combat.py`
-- [ ] Implement `handle_party_defeat()`
-- [ ] Implement faction relation updates
-- [ ] Implement loot distribution
-- [ ] Add battle end callback to `BattleScene`
-- [ ] Test post-combat updates
+### Phase 4: Post-Combat Updates ✅ COMPLETED
+- [x] Create `_handle_overworld_battle_victory()` method in `Game` class
+- [x] Implement party removal after defeat
+- [x] Implement loot distribution (gold, items)
+- [x] Implement faction relation updates
+- [x] Test post-combat updates
 
-### Phase 5: Allied Party Support (Future)
-- [ ] Extend battle scene to support allied units
-- [ ] Implement allied party joining logic
-- [ ] Add allied unit AI
-- [ ] Test multi-party battles
+### Phase 5: Allied Party Support ✅ COMPLETED
+- [x] Create `allied_party_to_battle_units()` in `battle_conversion.py`
+- [x] Extend battle scene to support AI-controlled allied units
+- [x] Implement `_add_allied_parties_to_battle()` in `Game` class
+- [x] Add allied unit AI (they target enemies correctly)
+- [x] Implement conditional party removal (only if all units die)
+- [x] Test multi-party battles with allies
 
-### Phase 6: Polish & Balance
-- [ ] Balance enemy scaling from parties
-- [ ] Tune faction relation changes
+### Phase 6: Automatic Combat Triggers ⏳ NEXT
+- [ ] Modify overworld controller to detect hostile party proximity
+- [ ] Implement automatic combat initiation for hostile parties
+- [ ] Test automatic combat triggers
+- [ ] Add cooldown/timer to prevent spam
+
+### Phase 7: Polish & Balance ⏳ PENDING
+- [ ] Balance enemy scaling from parties (fine-tune based on playtesting)
+- [ ] Tune faction relation changes (ensure they feel meaningful)
 - [ ] Add visual feedback for combat triggers
-- [ ] Add sound effects
-- [ ] Test edge cases
+- [ ] Add sound effects for combat initiation
+- [ ] Test edge cases (multiple allies, partial survival, etc.)
+- [ ] Add UI indicators for faction relations
 
 ---
 

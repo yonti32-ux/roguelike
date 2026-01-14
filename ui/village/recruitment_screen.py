@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 import pygame
 
-from ui.hud_screens import draw_recruitment_fullscreen
+from ui.fullscreen_screens.recruitment_screen import draw_recruitment_fullscreen
 from systems.input import InputAction
 
 if TYPE_CHECKING:

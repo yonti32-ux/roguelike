@@ -217,11 +217,71 @@ def generate_camp(
     # Add entities to map
     game_map.entities = entities
 
+    # Place exit tiles on edges (simpler than villages - just mark edge tiles)
+    exit_tiles = _place_camp_exits(tiles, width, height, center_x, center_y)
+    game_map.camp_exit_tiles = exit_tiles  # type: ignore[attr-defined]
+
     # Expose camp metadata
     game_map.camp_center = (center_x, center_y)  # type: ignore[attr-defined]
     game_map.camp_fire_pos = (center_x, center_y)  # type: ignore[attr-defined]
 
     return game_map
+
+
+def _place_camp_exits(
+    tiles: List[List],
+    map_width: int,
+    map_height: int,
+    center_x: int,
+    center_y: int,
+) -> List[tuple[int, int]]:
+    """
+    Place exit points on edges of the camp map.
+    Since camps are small, we'll place exits on all four edges (3 tiles wide each).
+    
+    Returns:
+        List of (x, y) tile coordinates that are exit points
+    """
+    exit_tiles: List[tuple[int, int]] = []
+    exit_width = 3  # 3 tiles wide exits for camps (smaller than villages)
+    
+    # Top edge exit (centered horizontally)
+    top_exit_start = max(1, center_x - exit_width // 2)
+    top_exit_end = min(map_width - 1, top_exit_start + exit_width)
+    for x in range(top_exit_start, top_exit_end):
+        if 0 <= x < map_width and 0 < map_height:
+            # Ensure it's walkable (ground tile)
+            tiles[0][x] = CAMP_GROUND_TILE
+            exit_tiles.append((x, 0))
+    
+    # Bottom edge exit (centered horizontally)
+    bottom_exit_start = max(1, center_x - exit_width // 2)
+    bottom_exit_end = min(map_width - 1, bottom_exit_start + exit_width)
+    for x in range(bottom_exit_start, bottom_exit_end):
+        if 0 <= x < map_width and map_height > 0:
+            # Ensure it's walkable (ground tile)
+            tiles[map_height - 1][x] = CAMP_GROUND_TILE
+            exit_tiles.append((x, map_height - 1))
+    
+    # Left edge exit (centered vertically)
+    left_exit_start = max(1, center_y - exit_width // 2)
+    left_exit_end = min(map_height - 1, left_exit_start + exit_width)
+    for y in range(left_exit_start, left_exit_end):
+        if 0 < map_width and 0 <= y < map_height:
+            # Ensure it's walkable (ground tile)
+            tiles[y][0] = CAMP_GROUND_TILE
+            exit_tiles.append((0, y))
+    
+    # Right edge exit (centered vertically)
+    right_exit_start = max(1, center_y - exit_width // 2)
+    right_exit_end = min(map_height - 1, right_exit_start + exit_width)
+    for y in range(right_exit_start, right_exit_end):
+        if map_width > 0 and 0 <= y < map_height:
+            # Ensure it's walkable (ground tile)
+            tiles[y][map_width - 1] = CAMP_GROUND_TILE
+            exit_tiles.append((map_width - 1, y))
+    
+    return exit_tiles
 
 
 

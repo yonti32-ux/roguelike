@@ -812,6 +812,8 @@ class BattleScene:
         unit.gx = new_gx
         unit.gy = new_gy
         unit.current_movement_points -= move_cost
+        # Round to int to handle fractional costs (diagonal movement)
+        unit.current_movement_points = max(0, int(round(unit.current_movement_points)))
         
         # Execute attacks of opportunity from all eligible reactors
         # Note: Reactions happen after movement (classic D&D style)
@@ -855,6 +857,8 @@ class BattleScene:
         final_gx, final_gy = final_pos
         unit.gx, unit.gy = final_gx, final_gy
         unit.current_movement_points -= total_cost
+        # Round to int to handle fractional costs (diagonal movement)
+        unit.current_movement_points = max(0, int(round(unit.current_movement_points)))
         
         # Execute attacks of opportunity for the final position
         # (Check disengagement from starting position to final position)
@@ -1130,6 +1134,15 @@ class BattleScene:
                     self._log(f"No enemy in range for {skill.name}!")
                 return False
             target_unit = candidates[0]
+        elif skill.target_mode == "any_enemy":
+            max_range = int(getattr(skill, "range_tiles", 1) or 1)
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+            candidates = self._enemies_in_range(unit, max_range, use_chebyshev=use_chebyshev)
+            if not candidates:
+                if not for_ai:
+                    self._log(f"No enemy in range for {skill.name}!")
+                return False
+            target_unit = candidates[0]
 
         return self._use_skill_targeted(unit, skill, target_unit, for_ai=for_ai)
 
@@ -1153,7 +1166,7 @@ class BattleScene:
         # Verify target is valid for this skill
         if skill.target_mode == "self":
             target_unit = unit
-        elif skill.target_mode == "adjacent_enemy":
+        elif skill.target_mode in ("adjacent_enemy", "any_enemy"):
             if target_unit is None:
                 if not for_ai:
                     self._log(f"No target selected for {skill.name}!")
@@ -1186,7 +1199,7 @@ class BattleScene:
         skill.stamina_cost = rank_stamina_cost
         skill.mana_cost = rank_mana_cost
         
-        can_use, error_msg = unit.has_resources_for_skill(skill)
+        can_use, error_msg = unit.has_resources_for_skill(skill, self.combat)
         if not can_use:
             # Restore original costs
             skill.stamina_cost = original_stamina
@@ -1329,7 +1342,7 @@ class BattleScene:
                 return False
             
             # Check resources
-            can_use, error_msg = unit.has_resources_for_skill(skill)
+            can_use, error_msg = unit.has_resources_for_skill(skill, self.combat)
             if not can_use:
                 if error_msg:
                     self._log(error_msg)
@@ -1348,7 +1361,7 @@ class BattleScene:
             is_melee = weapon_range == 1
             valid_targets = self._enemies_in_range(unit, weapon_range, use_chebyshev=is_melee)
         elif action_type == "skill" and skill is not None:
-            if skill.target_mode == "adjacent_enemy":
+            if skill.target_mode in ("adjacent_enemy", "any_enemy"):
                 max_range = int(getattr(skill, "range_tiles", 1) or 1)
                 use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
                 valid_targets = self._enemies_in_range(unit, max_range, use_chebyshev=use_chebyshev)
@@ -1485,15 +1498,14 @@ class BattleScene:
 
         if self._try_move_unit(unit, dx, dy):
             self._log(f"{unit.name} moves.")
-            # Don't end turn if movement points remain
-            if unit.current_movement_points <= 0:
-                self._next_turn()
+            # Note: Turn does not end automatically when movement points are exhausted
+            # Player can still attack/use skills or manually end turn with TAB/Guard
         else:
             self._log("You can't move there.")
     
     def _enter_movement_mode(self, unit: BattleUnit) -> None:
         """Enter movement mode to select destination with pathfinding."""
-        if unit.current_movement_points <= 0:
+        if unit.current_movement_points < 0.1:
             self._log(f"{unit.name} has no movement points remaining!")
             return
         
@@ -1542,9 +1554,8 @@ class BattleScene:
             path_length = len(self.movement_path) - 1
             self._log(f"{unit.name} moves {path_length} square(s).")
             self._exit_movement_mode()
-            # End turn if no movement points remain
-            if unit.current_movement_points <= 0:
-                self._next_turn()
+            # Note: Turn does not end automatically when movement points are exhausted
+            # Player can still attack/use skills or manually end turn with TAB/Guard
         else:
             self._log("Not enough movement points for that path!")
 
@@ -1992,6 +2003,16 @@ class BattleScene:
                     pass
                 return
 
+        # End Turn action
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.END_TURN, event):
+                self._next_turn()
+                return
+        else:
+            if event.key == pygame.K_TAB:
+                self._next_turn()
+                return
+
         # Guard (dedicated action) - no targeting needed
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.GUARD, event):
@@ -2101,15 +2122,16 @@ class BattleScene:
 
         unit = self._active_unit()
 
-        # Only enemies act automatically; players/companions are driven by input.
-        if unit.side != "enemy":
+        # Enemies and AI-controlled allies act automatically; players/companions are driven by input.
+        is_ai_controlled = getattr(unit, "is_ai_controlled", False)
+        if unit.side != "enemy" and not is_ai_controlled:
             return
 
         self.enemy_timer -= dt
         if self.enemy_timer > 0.0:
             return
 
-        # Execute AI turn
+        # Execute AI turn (for enemies or AI-controlled allies)
         self.ai.execute_ai_turn(unit)
 
     # ------------ Drawing ------------
@@ -2332,7 +2354,9 @@ class BattleScene:
                     skill_slots = getattr(active, "skill_slots", [])
                     slot_width = 140  # Match the new size in hud_battle.py
                     slot_spacing = 12
-                    hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing
+                    # Account for guard button if unit has guard skill
+                    guard_width = (slot_width + slot_spacing) if "guard" in active.skills else 0
+                    hotbar_w = len(skill_slots) * (slot_width + slot_spacing) - slot_spacing + guard_width
                     # Center the hotbar horizontally
                     hotbar_x = (screen_w - hotbar_w) // 2
                     # Position it prominently above the hint line with more spacing
@@ -2412,8 +2436,23 @@ class BattleScene:
                             pass
                     guard_part = f" | {guard_key} guard"
                 
+                # --- End Turn hint ----
+                end_turn_part = ""
+                if input_manager is not None:
+                    try:
+                        end_turn_keys = input_manager.get_bindings(InputAction.END_TURN)
+                        if end_turn_keys:
+                            end_turn_labels = [pygame.key.name(k).upper() for k in sorted(end_turn_keys)]
+                            if end_turn_labels:
+                                end_turn_key = "/".join(end_turn_labels)
+                                end_turn_part = f" | {end_turn_key} end turn"
+                    except (AttributeError, TypeError):
+                        pass
+                else:
+                    end_turn_part = " | TAB end turn"
+                
                 hint_text = self.font.render(
-                    f"{name_prefix}: move WASD/arrows | {atk_part}{guard_part} | Shift+Arrows pan camera",
+                    f"{name_prefix}: move WASD/arrows | {atk_part}{guard_part}{end_turn_part} | Shift+Arrows pan camera",
                     True,
                     (180, 180, 180),
                 )

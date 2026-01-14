@@ -12,51 +12,58 @@ from systems.economy import (
     calculate_shop_buy_price,
     calculate_shop_sell_price,
 )
+from ui.screen_constants import (
+    COLOR_TITLE,
+    COLOR_SUBTITLE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_TEXT_DIMMER,
+    COLOR_TEXT_DIMMEST,
+    COLOR_GOLD,
+    COLOR_CATEGORY,
+    COLOR_STATUS,
+    COLOR_SELECTED_BG,
+    COLOR_SELECTED_TEXT,
+    COLOR_TAB_ACTIVE,
+    COLOR_TAB_INACTIVE,
+    COLOR_FOOTER,
+    MARGIN_X,
+    MARGIN_Y_TOP,
+    MARGIN_Y_START,
+    MARGIN_Y_FOOTER,
+    LINE_HEIGHT_SMALL,
+    LINE_HEIGHT_MEDIUM,
+    LINE_HEIGHT_LARGE,
+    LINE_HEIGHT_TITLE,
+    LINE_HEIGHT_ITEM,
+    SPACING_SECTION,
+    TAB_SPACING,
+    TAB_X_OFFSET,
+    INDENT_DEFAULT,
+    INDENT_INFO,
+    MAX_DESC_LENGTH,
+    ITEM_NAME_HEIGHT,
+    ITEM_INFO_HEIGHT,
+    ITEM_MIN_SPACING,
+)
+from ui.screen_components import (
+    CharacterHeaderInfo,
+    CharacterStats,
+    build_item_stats_summary,
+    get_rarity_color,
+    build_item_info_line,
+    render_category_header,
+    draw_equipment_section,
+    render_stats_section,
+    render_perks_section,
+    render_character_header,
+    draw_screen_header,
+    draw_screen_footer,
+)
 
 if TYPE_CHECKING:
     from engine.core.game import Game
     from systems.inventory import Inventory, ItemDef
-
-# UI Constants
-# Colors
-COLOR_TITLE = (240, 240, 200)
-COLOR_SUBTITLE = (220, 220, 180)
-COLOR_TEXT = (220, 220, 220)
-COLOR_TEXT_DIM = (200, 200, 200)
-COLOR_TEXT_DIMMER = (180, 180, 180)
-COLOR_TEXT_DIMMEST = (170, 170, 170)
-COLOR_GOLD = (230, 210, 120)
-COLOR_CATEGORY = (200, 200, 150)
-COLOR_STATUS = (180, 200, 220)
-COLOR_SELECTED_BG = (60, 60, 90, 210)
-COLOR_SELECTED_TEXT = (255, 255, 200)
-COLOR_TAB_ACTIVE = (255, 255, 200)
-COLOR_TAB_INACTIVE = (150, 150, 150)
-COLOR_FOOTER = (160, 160, 160)
-
-# Spacing
-MARGIN_X = 40
-MARGIN_Y_TOP = 30
-MARGIN_Y_START = 90
-MARGIN_Y_FOOTER = 50
-LINE_HEIGHT_SMALL = 22
-LINE_HEIGHT_MEDIUM = 24
-LINE_HEIGHT_LARGE = 26
-LINE_HEIGHT_TITLE = 28
-LINE_HEIGHT_ITEM = 38
-SPACING_SECTION = 30
-
-# Layout
-TAB_SPACING = 120
-TAB_X_OFFSET = 400
-INDENT_DEFAULT = 20
-INDENT_INFO = 24
-
-# Item display
-MAX_DESC_LENGTH = 80
-ITEM_NAME_HEIGHT = 20
-ITEM_INFO_HEIGHT = 18
-ITEM_MIN_SPACING = 4
 
 
 def _safe_getattr(game: "Game", attr: str, default: Any = None) -> Any:
@@ -67,104 +74,7 @@ def _safe_getattr(game: "Game", attr: str, default: Any = None) -> Any:
     return getattr(game, attr, default)
 
 
-def _build_item_stats_summary(stats: Dict[str, float]) -> str:
-    """
-    Build a compact one-line summary from an item's stats dict.
-
-    Example: "ATK +2  DEF +1  HP +10"
-    """
-    if not stats:
-        return ""
-
-    # Preferred order for well-known stats
-    preferred_order = [
-        "attack",
-        "defense",
-        "max_hp",
-        "hp",
-        "max_stamina",
-        "max_mana",
-        "range",
-        "crit_chance",
-    ]
-
-    def _label_for(key: str) -> str:
-        mapping = {
-            "attack": "ATK",
-            "defense": "DEF",
-            "max_hp": "HP",
-            "hp": "HP",
-            "max_stamina": "STA",
-            "max_mana": "MANA",
-            "range": "RNG",
-            "crit_chance": "CRIT",
-        }
-        return mapping.get(key, key.upper())
-
-    def _fmt_value(value: float) -> str:
-        # Show integers without .0, small non-int values with one decimal.
-        if isinstance(value, int) or value.is_integer():
-            v = int(value)
-        else:
-            v = round(value, 1)
-        sign = "+" if v >= 0 else ""
-        return f"{sign}{v}"
-
-    parts: List[str] = []
-
-    # First render preferred keys in order
-    for key in preferred_order:
-        if key in stats:
-            parts.append(f"{_label_for(key)} {_fmt_value(float(stats[key]))}")
-
-    # Then add any remaining keys in alphabetical order
-    remaining_keys = sorted(k for k in stats.keys() if k not in preferred_order)
-    for key in remaining_keys:
-        parts.append(f"{_label_for(key)} {_fmt_value(float(stats[key]))}")
-
-    return "  ".join(parts)
-
-
-def _get_rarity_color(rarity: str) -> tuple[int, int, int]:
-    """
-    Get a display color for an item based on its rarity.
-    
-    Falls back to a neutral color if the rarity is unknown.
-    """
-    rarity_key = (rarity or "").lower()
-    palette = {
-        "common": (220, 220, 220),
-        "uncommon": (140, 220, 140),   # soft green
-        "rare": (140, 180, 255),       # soft blue
-        "epic": (200, 150, 255),       # purple
-        "legendary": (255, 200, 120),  # orange/gold
-    }
-    return palette.get(rarity_key, (220, 220, 220))
-
-
-def _build_item_info_line(item_def: "ItemDef", include_description: bool = False) -> str:
-    """
-    Build a single compact line for item info.
-
-    By default this only returns a compact stats summary so we don't spam
-    long descriptions in lists. If include_description is True, a short
-    description snippet is appended after the stats.
-    """
-    stats_summary = _build_item_stats_summary(getattr(item_def, "stats", {}) or {})
-    if not include_description:
-        return stats_summary
-
-    desc = (getattr(item_def, "description", "") or "").strip()
-    if not desc:
-        return stats_summary
-
-    # Keep descriptions short so the UI doesn't get bloated horizontally.
-    if len(desc) > MAX_DESC_LENGTH:
-        desc = desc[: MAX_DESC_LENGTH - 3] + "..."
-
-    if stats_summary:
-        return f"{stats_summary}  |  {desc}"
-    return desc
+# Item utility functions are now imported from ui.screen_components
 
 
 def _resolve_focus_character(
@@ -356,94 +266,10 @@ def _get_all_equipped_items(game: "Game") -> dict[str, list[tuple[str, str]]]:
     return equipped_by
 
 
-def _render_category_header(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    slot: str,
-    x: int,
-    y: int,
-) -> int:
-    """
-    Render a category header (e.g., "--- Weapon ---").
-    
-    Returns:
-        Y position after the header
-    """
-    slot_display = slot.capitalize()
-    if slot == "misc":
-        slot_display = "Miscellaneous"
-    category_surf = ui_font.render(f"--- {slot_display} ---", True, COLOR_CATEGORY)
-    screen.blit(category_surf, (x, y))
-    return y + LINE_HEIGHT_MEDIUM
+# Rendering functions are now imported from ui.screen_components
 
 
-def _draw_equipment_section(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    x: int,
-    y: int,
-    equipped_map: dict,
-    indent: int = 0,
-) -> int:
-    """
-    Draw equipment section showing weapon, armor, trinket.
-    
-    Returns:
-        Y position after the section
-    """
-    equipped_title = ui_font.render("Equipped:", True, COLOR_SUBTITLE)
-    screen.blit(equipped_title, (x, y))
-    y += LINE_HEIGHT_TITLE
-    
-    # Use all equipment slots from the inventory (new system has 9 slots)
-    # Order them logically: weapon, then armor pieces, then accessories
-    slot_order = ["weapon", "helmet", "armor", "gloves", "boots", "shield", "cloak", "ring", "amulet"]
-    # Filter to only show slots that exist in equipped_map (or show all if equipped_map is None)
-    if equipped_map is not None:
-        slots = [slot for slot in slot_order if slot in equipped_map]
-    else:
-        slots = slot_order
-    for slot in slots:
-        item_def = None
-        if equipped_map:
-            item_id = equipped_map.get(slot)
-            if item_id:
-                item_def = get_item_def(item_id)
-        if item_def is None:
-            line = f"{slot.capitalize()}: (none)"
-        else:
-            line = f"{slot.capitalize()}: {item_def.name}"
-        t = ui_font.render(line, True, COLOR_TEXT)
-        screen.blit(t, (x + indent, y))
-        y += LINE_HEIGHT_MEDIUM
-    
-    return y
-
-
-@dataclass
-class CharacterHeaderInfo:
-    """Container for character header display data."""
-    name: str
-    class_name: str
-    level: int
-    xp: int
-    xp_next: Optional[int]
-    gold: Optional[int]  # None means don't show gold (companions)
-
-
-@dataclass
-class CharacterStats:
-    """Container for character stats data."""
-    hp: int
-    max_hp: int
-    attack: int
-    defense: int
-    skill_power: float
-    max_stamina: int = 0
-    current_stamina: int = 0
-    max_mana: int = 0
-    current_mana: int = 0
-
+# CharacterHeaderInfo and CharacterStats are imported from ui.screen_components
 
 @dataclass
 class ProcessedInventory:
@@ -512,7 +338,7 @@ def _render_inventory_item_list(
                         break
             
             if category_has_visible and last_shown_category != slot:
-                y = _render_category_header(screen, ui_font, slot, right_x, y)
+                y = render_category_header(screen, ui_font, slot, right_x, y)
                 last_shown_category = slot
         else:
             # Check if this item should be visible
@@ -525,7 +351,7 @@ def _render_inventory_item_list(
             if visible_start <= item_global_idx < visible_end:
                 # Show category header if this is the first item in this category
                 if last_shown_category != slot:
-                    y = _render_category_header(screen, ui_font, slot, right_x, y)
+                    y = render_category_header(screen, ui_font, slot, right_x, y)
                     last_shown_category = slot
                 
                 item_def = get_item_def(item_id)
@@ -557,7 +383,7 @@ def _render_inventory_item_list(
                 
                 # One-line stats/description, slightly dimmer and indented.
                 # Show extra info (description) for the currently selected item.
-                info_line = _build_item_info_line(item_def, include_description=is_selected)
+                info_line = build_item_info_line(item_def, include_description=is_selected)
                 if info_line:
                     item_height += ITEM_INFO_HEIGHT
                 else:
@@ -583,7 +409,7 @@ def _render_inventory_item_list(
                 line = f"{selection_marker}{item_def.name}{rarity_label}{equipped_marker}"
 
                 # Base color from rarity, then brighten for equipped/selected
-                base_color = _get_rarity_color(rarity)
+                base_color = get_rarity_color(rarity)
                 if is_selected:
                     item_color = tuple(min(255, c + 40) for c in base_color)
                 elif equipped_marker:
@@ -786,51 +612,7 @@ def _calculate_character_stats(
         )
 
 
-def _render_stats_section(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    stats: CharacterStats,
-    x: int,
-    y: int,
-) -> int:
-    """
-    Render stats section.
-    
-    Args:
-        screen: Surface to render on
-        ui_font: Font to use
-        stats: CharacterStats to display
-        x: X position
-        y: Y position to start
-    
-    Returns:
-        Y position after stats section
-    """
-    stats_title = ui_font.render("Stats:", True, (220, 220, 180))
-    screen.blit(stats_title, (x, y))
-    y += 26
-    
-    stats_lines = [
-        f"HP: {stats.hp}/{stats.max_hp}",
-        f"Attack: {stats.attack}",
-        f"Defense: {stats.defense}",
-    ]
-    
-    # Add resource pools if they exist
-    if stats.max_stamina > 0:
-        stats_lines.append(f"Stamina: {stats.current_stamina}/{stats.max_stamina}")
-    if stats.max_mana > 0:
-        stats_lines.append(f"Mana: {stats.current_mana}/{stats.max_mana}")
-    
-    if stats.skill_power != 1.0:
-        stats_lines.append(f"Skill Power: {stats.skill_power:.2f}x")
-    
-    for line in stats_lines:
-        t = ui_font.render(line, True, (220, 220, 220))
-        screen.blit(t, (x + 20, y))
-        y += 24
-    
-    return y
+# render_stats_section is now imported from ui.screen_components
 
 
 def _get_character_header_info(
@@ -907,171 +689,10 @@ def _get_character_header_info(
         )
 
 
-def _render_character_header(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    header_info: CharacterHeaderInfo,
-    floor: int,
-    x: int,
-    y: int,
-) -> int:
-    """
-    Render character header (name, level, XP, gold, floor).
-    
-    Args:
-        screen: Surface to render on
-        ui_font: Font to use
-        header_info: Header data to display
-        floor: Current floor number
-        x: X position
-        y: Y position to start
-    
-    Returns:
-        Y position after the header
-    """
-    # Name and class
-    name_line = ui_font.render(
-        f"{header_info.name} ({header_info.class_name})",
-        True,
-        (230, 230, 230),
-    )
-    screen.blit(name_line, (x, y))
-    y += 28
-    
-    # Floor
-    floor_line = ui_font.render(f"Floor: {floor}", True, (200, 200, 200))
-    screen.blit(floor_line, (x, y))
-    y += 26
-    
-    # XP
-    if header_info.xp_next is not None and header_info.xp_next > 0:
-        xp_text_str = f"Level {header_info.level}  XP {header_info.xp}/{header_info.xp_next}"
-    else:
-        xp_text_str = f"Level {header_info.level}  XP {header_info.xp}"
-    xp_line = ui_font.render(xp_text_str, True, (220, 220, 180))
-    screen.blit(xp_line, (x, y))
-    y += 26
-    
-    # Gold (only for hero)
-    if header_info.gold is not None:
-        gold_line = ui_font.render(f"Gold: {header_info.gold}", True, (230, 210, 120))
-        screen.blit(gold_line, (x, y))
-        y += 30
-    else:
-        y += 4  # Small spacing if no gold line
-    
-    return y
+# render_character_header is now imported from ui.screen_components
 
 
-def _render_perks_section(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    perk_ids: List[str],
-    x: int,
-    y: int,
-    empty_message: str = "None yet. Level up to choose perks!",
-) -> int:
-    """
-    Render a perks list section.
-    
-    Args:
-        screen: Surface to render on
-        ui_font: Font to use for rendering
-        perk_ids: List of perk IDs to display
-        x: X position to start rendering
-        y: Y position to start rendering
-        empty_message: Message to show when no perks
-    
-    Returns:
-        Y position after the perks section
-    """
-    perks_title = ui_font.render("Perks:", True, (220, 220, 180))
-    screen.blit(perks_title, (x, y))
-    y += 28
-    
-    if not perk_ids:
-        no_perks = ui_font.render(empty_message, True, (180, 180, 180))
-        screen.blit(no_perks, (x, y))
-        return y + 22  # Return position after empty message
-    
-    getter = getattr(perk_system, "get_perk", None)
-    if not callable(getter):
-        getter = getattr(perk_system, "get", None)
-    
-    for pid in perk_ids:
-        perk_def = None
-        if callable(getter):
-            try:
-                perk_def = getter(pid)
-            except KeyError:
-                perk_def = None
-        
-        if perk_def is None:
-            pretty_name = pid.replace("_", " ").title()
-            line = f"- {pretty_name}"
-        else:
-            branch = getattr(perk_def, "branch_name", None)
-            if branch:
-                line = f"- {branch}: {perk_def.name}"
-            else:
-                line = f"- {perk_def.name}"
-        t = ui_font.render(line, True, (210, 210, 210))
-        screen.blit(t, (x, y))
-        y += 22
-    
-    return y
-
-
-def _draw_screen_header(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    title: str,
-    current_screen: str,
-    available_screens: List[str],
-    w: int,
-) -> None:
-    """Draw header with title and tab indicators."""
-    # Title
-    title_surf = ui_font.render(title, True, COLOR_TITLE)
-    screen.blit(title_surf, (MARGIN_X, MARGIN_Y_TOP))
-    
-    # Tab indicators
-    tab_x = w - TAB_X_OFFSET
-    tab_y = MARGIN_Y_TOP
-    
-    for i, screen_name in enumerate(available_screens):
-        is_current = screen_name == current_screen
-        tab_text = screen_name.capitalize()
-        if is_current:
-            tab_color = COLOR_TAB_ACTIVE
-            # Draw underline
-            tab_surf = ui_font.render(tab_text, True, tab_color)
-            screen.blit(tab_surf, (tab_x + i * TAB_SPACING, tab_y))
-            pygame.draw.line(
-                screen,
-                tab_color,
-                (tab_x + i * TAB_SPACING, tab_y + 22),
-                (tab_x + i * TAB_SPACING + tab_surf.get_width(), tab_y + 22),
-                2,
-            )
-        else:
-            tab_color = COLOR_TAB_INACTIVE
-            tab_surf = ui_font.render(tab_text, True, tab_color)
-            screen.blit(tab_surf, (tab_x + i * TAB_SPACING, tab_y))
-
-
-def _draw_screen_footer(
-    screen: pygame.Surface,
-    ui_font: pygame.font.Font,
-    hints: List[str],
-    w: int,
-    h: int,
-) -> None:
-    """Draw footer with navigation hints."""
-    footer_y = h - MARGIN_Y_FOOTER
-    for i, hint in enumerate(hints):
-        hint_surf = ui_font.render(hint, True, COLOR_FOOTER)
-        screen.blit(hint_surf, (MARGIN_X, footer_y + i * LINE_HEIGHT_SMALL))
+# render_perks_section, draw_screen_header, and draw_screen_footer are now imported from ui.screen_components
 
 
 def draw_inventory_fullscreen(game: "Game") -> None:
@@ -1083,13 +704,13 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     # Fill background
     screen.fill(COLOR_BG)
     
-    # Get available screens for tabs
-    available_screens = ["inventory", "character", "skills"]
+    # Get available screens for tabs (keep consistent across screens)
+    available_screens = ["inventory", "character", "skills", "quests"]
     if _safe_getattr(game, "show_shop", False):
         available_screens.append("shop")
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Inventory", "inventory", available_screens, w)
+    draw_screen_header(screen, ui_font, "Inventory", "inventory", available_screens, w)
     
     inv = _safe_getattr(game, "inventory")
     
@@ -1122,7 +743,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         y += SPACING_SECTION
     
     # Equipped section
-    y = _draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=INDENT_DEFAULT)
+    y = draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=INDENT_DEFAULT)
     
     # Right column: Backpack items
     right_x = w // 2 + MARGIN_X
@@ -1240,7 +861,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         "Up/Down: select item | Enter/Space: equip | Q/E: switch character | PgUp/PgDn: page",
         "F1-F7: filter | Ctrl+S: sort | Ctrl+F: search | Ctrl+R: reset | TAB: switch screen | I/ESC: close"
     ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def draw_character_sheet_fullscreen(game: "Game") -> None:
@@ -1258,7 +879,7 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
         available_screens.append("shop")
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Character Sheet", "character", available_screens, w)
+    draw_screen_header(screen, ui_font, "Character Sheet", "character", available_screens, w)
     
     # Resolve focus character
     focused_is_hero, focused_comp, focused_template = _resolve_focus_character(
@@ -1282,7 +903,7 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
         
         # Get header info and render header
         header_info = _get_character_header_info(game, is_hero=True)
-        y = _render_character_header(screen, ui_font, header_info, game.floor, left_x, y)
+        y = render_character_header(screen, ui_font, header_info, game.floor, left_x, y)
         
         # Get stats for display
         stats = _calculate_character_stats(game, is_hero=True)
@@ -1291,13 +912,13 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
         hero_name = header_info.name
         
         # Render stats section
-        y = _render_stats_section(screen, ui_font, stats, left_x, y)
+        y = render_stats_section(screen, ui_font, stats, left_x, y)
         
         # Perks - middle column
         mid_x = w // 2 - 100
         y = 90
         perk_ids = getattr(game.hero_stats, "perks", []) or []
-        y = _render_perks_section(
+        y = render_perks_section(
             screen, ui_font, perk_ids, mid_x, y,
             empty_message="None yet. Level up to choose perks!"
         )
@@ -1399,11 +1020,11 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
         header_info = _get_character_header_info(
             game, is_hero=False, comp=comp, template=focused_template
         )
-        y = _render_character_header(screen, ui_font, header_info, game.floor, left_x, y)
+        y = render_character_header(screen, ui_font, header_info, game.floor, left_x, y)
         
         # Get and render stats section
         stats = _calculate_character_stats(game, is_hero=False, comp=comp)
-        y = _render_stats_section(screen, ui_font, stats, left_x, y)
+        y = render_stats_section(screen, ui_font, stats, left_x, y)
         
         # Perks
         mid_x = w // 2 - 100
@@ -1411,7 +1032,7 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
         perk_ids: List[str] = []
         if comp is not None:
             perk_ids = getattr(comp, "perks", []) or []
-        y = _render_perks_section(
+        y = render_perks_section(
             screen, ui_font, perk_ids, mid_x, y,
             empty_message="This companion has no perks yet."
         )
@@ -1420,7 +1041,7 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
     hints = [
         "Q/E: switch character | TAB: switch screen | C/ESC: close"
     ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def _sort_items_by_type(item_ids: List[str]) -> List[str]:
@@ -1485,7 +1106,7 @@ def draw_shop_fullscreen(game: "Game") -> None:
     available_screens = ["inventory", "character", "skills", "shop"]
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Dungeon Merchant", "shop", available_screens, w)
+    draw_screen_header(screen, ui_font, "Dungeon Merchant", "shop", available_screens, w)
     
     mode = getattr(game, "shop_mode", "buy")
     mode_label = "BUY" if mode == "buy" else "SELL"
@@ -1627,7 +1248,7 @@ def draw_shop_fullscreen(game: "Game") -> None:
                 info_y += 24
 
                 # Stats + optional description (shown only for the selected item)
-                info_line = _build_item_info_line(selected_def, include_description=True)
+                info_line = build_item_info_line(selected_def, include_description=True)
                 if info_line:
                     info_surf = ui_font.render(info_line, True, (190, 190, 190))
                     screen.blit(info_surf, (info_x, info_y))
@@ -1643,7 +1264,7 @@ def draw_shop_fullscreen(game: "Game") -> None:
             "Up/Down: move • Enter/Space: sell • 1–9: quick sell",
             "Shift+TAB: switch to BUY • TAB: switch screen • I/C: jump to screen • ESC: close"
         ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def draw_skill_screen_fullscreen(game: "Game") -> None:
@@ -1661,7 +1282,7 @@ def draw_skill_screen_fullscreen(game: "Game") -> None:
         available_screens.append("shop")
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Skill Allocation", "skills", available_screens, w)
+    draw_screen_header(screen, ui_font, "Skill Allocation", "skills", available_screens, w)
     
     # Get skill screen core instance
     skill_screen_core = getattr(game, "skill_screen", None)
@@ -1679,7 +1300,7 @@ def draw_skill_screen_fullscreen(game: "Game") -> None:
         "Arrow Keys/WASD: pan | +/-: zoom | Click/Enter: select/upgrade | Q/E: switch character",
         "TAB: switch screen | T/ESC: close"
     ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def draw_recruitment_fullscreen(game: "Game") -> None:
@@ -1699,7 +1320,7 @@ def draw_recruitment_fullscreen(game: "Game") -> None:
         available_screens.append("recruitment")
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Companion Recruitment", "recruitment", available_screens, w)
+    draw_screen_header(screen, ui_font, "Companion Recruitment", "recruitment", available_screens, w)
     
     # Get available companions
     from systems.village.companion_generation import AvailableCompanion
@@ -1883,7 +1504,7 @@ def draw_recruitment_fullscreen(game: "Game") -> None:
         "Up/Down: move • Enter/Space: recruit • 1–9: quick recruit",
         "TAB: switch screen • I/C: jump to screen • ESC: close"
     ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def draw_quest_fullscreen(game: "Game") -> None:
@@ -1903,7 +1524,7 @@ def draw_quest_fullscreen(game: "Game") -> None:
         available_screens.append("recruitment")
     
     # Draw header with tabs
-    _draw_screen_header(screen, ui_font, "Quests", "quests", available_screens, w)
+    draw_screen_header(screen, ui_font, "Quests", "quests", available_screens, w)
     
     # Get elder ID and quests - if elder_id is None, show all quests
     elder_id = getattr(game, "current_elder_id", None)
@@ -2091,7 +1712,7 @@ def draw_quest_fullscreen(game: "Game") -> None:
         f"Up/Down: move • Enter/Space: {action_text.lower()} • 1–9: quick select",
         "TAB: switch tab • I/C/T/J: jump to screen • J: toggle quests • ESC: close"
     ]
-    _draw_screen_footer(screen, ui_font, hints, w, h)
+    draw_screen_footer(screen, ui_font, hints, w, h)
 
 
 def _wrap_text(text: str, font, max_width: int) -> List[str]:
