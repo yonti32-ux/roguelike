@@ -63,4 +63,13 @@ class TimeSystem:
             return "dusk"
         else:
             return "night"
+    
+    def get_total_hours(self) -> float:
+        """
+        Get total time in hours since start.
+        
+        Returns:
+            Total hours as a float (days * 24 + hours + minutes/60)
+        """
+        return self.days * 24.0 + self.hours + self.minutes / 60.0
 

@@ -10,6 +10,7 @@ from .terrain import TerrainType, TERRAIN_GRASS
 if TYPE_CHECKING:
     from ..poi.base import PointOfInterest
     from .party_manager import PartyManager
+    from world.time.time_system import TimeSystem
 
 
 class OverworldMap:
@@ -49,7 +50,9 @@ class OverworldMap:
         
         # Player state
         self.player_position: Tuple[int, int] = (0, 0)
-        self.explored_tiles: Set[Tuple[int, int]] = set()
+        # Track when each tile was last seen (for time-based visibility)
+        # Key: (x, y) tuple, Value: timestamp in hours (from TimeSystem)
+        self.explored_tiles: Dict[Tuple[int, int], float] = {}
         
         # POIs stored by ID
         self.pois: Dict[str, "PointOfInterest"] = {}
@@ -63,8 +66,9 @@ class OverworldMap:
         from ..factions import FactionManager
         self.faction_manager: Optional["FactionManager"] = None
         
-        # Mark starting position as explored
-        self.explore_tile(self.player_position[0], self.player_position[1])
+        # Mark starting position as explored (with no timestamp - will be updated when player moves)
+        # Using a very old timestamp so it will expire quickly if time system isn't available
+        self.explore_tile(self.player_position[0], self.player_position[1], current_time=-999999.0)
     
     def get_tile(self, x: int, y: int) -> Optional[TerrainType]:
         """
@@ -118,16 +122,51 @@ class OverworldMap:
             return False
         return tile.walkable
     
-    def explore_tile(self, x: int, y: int) -> None:
-        """Mark a tile as explored."""
+    def explore_tile(self, x: int, y: int, current_time: Optional[float] = None) -> None:
+        """
+        Mark a tile as explored.
+        
+        Args:
+            x: Tile X coordinate
+            y: Tile Y coordinate
+            current_time: Current time in hours (from TimeSystem.get_total_hours()).
+                         If None, tile will be marked but without timestamp (for backwards compatibility).
+        """
         if self.in_bounds(x, y):
-            self.explored_tiles.add((x, y))
+            if current_time is not None:
+                self.explored_tiles[(x, y)] = current_time
+            else:
+                # For backwards compatibility, use a very old timestamp so it expires quickly
+                # This handles cases where time isn't provided
+                self.explored_tiles[(x, y)] = -999999.0
     
-    def is_explored(self, x: int, y: int) -> bool:
-        """Check if a tile has been explored."""
-        return (x, y) in self.explored_tiles
+    def is_explored(self, x: int, y: int, current_time: Optional[float] = None, timeout_hours: float = 2.0) -> bool:
+        """
+        Check if a tile has been explored and is still visible (within timeout).
+        
+        Args:
+            x: Tile X coordinate
+            y: Tile Y coordinate
+            current_time: Current time in hours. If None, uses old behavior (always visible once explored).
+            timeout_hours: Hours after which explored tiles fade out. Default 2.0 hours.
+        
+        Returns:
+            True if tile was explored and is still within timeout period
+        """
+        tile_pos = (x, y)
+        if tile_pos not in self.explored_tiles:
+            return False
+        
+        # If no current_time provided, use old behavior (always visible once explored)
+        if current_time is None:
+            return True
+        
+        # Check if tile was seen within timeout period
+        last_seen = self.explored_tiles[tile_pos]
+        time_since_seen = current_time - last_seen
+        return time_since_seen <= timeout_hours
     
-    def set_player_position(self, x: int, y: int, sight_radius: int = 8) -> bool:
+    def set_player_position(self, x: int, y: int, sight_radius: int = 8, current_time: Optional[float] = None) -> bool:
         """
         Set the player's position on the overworld.
         
@@ -135,6 +174,7 @@ class OverworldMap:
             x: Tile X coordinate
             y: Tile Y coordinate
             sight_radius: Radius of tiles to explore around player
+            current_time: Current time in hours (from TimeSystem.get_total_hours())
             
         Returns:
             True if position is valid and set, False otherwise
@@ -147,10 +187,10 @@ class OverworldMap:
         self.player_position = (x, y)
         
         # Explore tiles within sight radius (circular area)
-        self.explore_area(x, y, sight_radius)
+        self.explore_area(x, y, sight_radius, current_time)
         return True
     
-    def explore_area(self, center_x: int, center_y: int, radius: int) -> None:
+    def explore_area(self, center_x: int, center_y: int, radius: int, current_time: Optional[float] = None) -> None:
         """
         Explore all tiles within a radius of the center point.
         
@@ -158,6 +198,7 @@ class OverworldMap:
             center_x: Center X coordinate
             center_y: Center Y coordinate
             radius: Exploration radius in tiles
+            current_time: Current time in hours (from TimeSystem.get_total_hours())
         """
         radius_sq = radius * radius
         for dy in range(-radius, radius + 1):
@@ -171,7 +212,7 @@ class OverworldMap:
                 y = center_y + dy
                 
                 if self.in_bounds(x, y):
-                    self.explore_tile(x, y)
+                    self.explore_tile(x, y, current_time)
     
     def get_player_position(self) -> Tuple[int, int]:
         """Get the player's current position."""

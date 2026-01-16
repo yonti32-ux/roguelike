@@ -139,9 +139,12 @@ def _handle_overworld_cheat(game: "Game", key: int) -> bool:
     if key == pygame.K_F1:
         if hasattr(game, "overworld_map") and game.overworld_map is not None:
             # Explore all tiles
+            current_time = None
+            if hasattr(game, "time_system") and game.time_system is not None:
+                current_time = game.time_system.get_total_hours()
             for y in range(game.overworld_map.height):
                 for x in range(game.overworld_map.width):
-                    game.overworld_map.explore_tile(x, y)
+                    game.overworld_map.explore_tile(x, y, current_time=current_time)
             # Discover all POIs
             pois_discovered = 0
             for poi in game.overworld_map.get_all_pois():

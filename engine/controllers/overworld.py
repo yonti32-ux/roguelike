@@ -34,11 +34,51 @@ class OverworldController:
         if game.overworld_map is None:
             return
         
-        # Block input if overlays are open
-        if game.is_overlay_open():
+        if event.type != pygame.KEYDOWN:
             return
         
-        if event.type != pygame.KEYDOWN:
+        # Toggle overworld tutorial (H key) - works at any time
+        if event.key == pygame.K_h:
+            game.show_overworld_tutorial = not getattr(game, "show_overworld_tutorial", False)
+            if getattr(game, "show_overworld_tutorial", False):
+                # Close other overlays when opening tutorial
+                if hasattr(game, "show_exploration_log"):
+                    game.show_exploration_log = False
+                # Initialize scroll offset if not exists
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+            return
+        
+        # Handle tutorial scrolling and closing (works even when tutorial is open)
+        if getattr(game, "show_overworld_tutorial", False):
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_h:
+                game.show_overworld_tutorial = False
+                game.overworld_tutorial_scroll_offset = 0
+                return
+            # Handle scrolling with arrow keys
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+                game.overworld_tutorial_scroll_offset = max(0, game.overworld_tutorial_scroll_offset - 20)
+                return
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+                game.overworld_tutorial_scroll_offset += 20
+                return
+            if event.key == pygame.K_PAGEUP:
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+                game.overworld_tutorial_scroll_offset = max(0, game.overworld_tutorial_scroll_offset - 200)
+                return
+            if event.key == pygame.K_PAGEDOWN:
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+                game.overworld_tutorial_scroll_offset += 200
+                return
+        
+        # Block input if overlays are open (but tutorial was handled above)
+        if game.is_overlay_open():
             return
         
         input_manager = getattr(game, "input_manager", None)
@@ -138,12 +178,21 @@ class OverworldController:
             return
     
     def handle_mouse_wheel(self, event: pygame.event.Event) -> None:
-        """Handle mouse wheel events for zooming."""
+        """Handle mouse wheel events for zooming or tutorial scrolling."""
         if event.type == pygame.MOUSEWHEEL:
-            if event.y > 0:
-                self.zoom_in()
-            elif event.y < 0:
-                self.zoom_out()
+            game = self.game
+            # Handle mouse wheel for tutorial scrolling
+            if getattr(game, "show_overworld_tutorial", False):
+                if not hasattr(game, "overworld_tutorial_scroll_offset"):
+                    game.overworld_tutorial_scroll_offset = 0
+                # Scroll tutorial (negative y means scroll up)
+                game.overworld_tutorial_scroll_offset = max(0, game.overworld_tutorial_scroll_offset - event.y * 30)
+            else:
+                # Normal zoom behavior
+                if event.y > 0:
+                    self.zoom_in()
+                elif event.y < 0:
+                    self.zoom_out()
     
     def zoom_in(self) -> None:
         """Zoom in on the overworld map."""
@@ -241,8 +290,13 @@ class OverworldController:
         config = OverworldConfig.load()
         sight_radius = config.sight_radius
         
+        # Get current time for exploration tracking
+        current_time = None
+        if game.time_system is not None:
+            current_time = game.time_system.get_total_hours()
+        
         # Move player (this will also explore tiles in sight radius)
-        if game.overworld_map.set_player_position(new_x, new_y, sight_radius=sight_radius):
+        if game.overworld_map.set_player_position(new_x, new_y, sight_radius=sight_radius, current_time=current_time):
             self._last_move_time = 0.0
             # Store the direction we moved in (for arrow rendering)
             self.last_direction = direction

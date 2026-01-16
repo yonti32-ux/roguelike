@@ -37,6 +37,9 @@
   },
   "sight": {
     "radius": 8
+  },
+  "exploration": {
+    "memory_timeout_hours": 12.0
   }
 }
 

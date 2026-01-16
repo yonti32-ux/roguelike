@@ -82,8 +82,30 @@ def draw_overworld(game: "Game") -> None:
             rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
             
             # Calculate tile color
-            if not game.overworld_map.is_explored(x, y):
-                # Unexplored tiles: very dark gray/black
+            # Get current time and timeout from config
+            from world.overworld import OverworldConfig
+            config = OverworldConfig.load()
+            current_time = None
+            if game.time_system is not None:
+                current_time = game.time_system.get_total_hours()
+            
+            # Calculate distance from player for sight radius check
+            dx = abs(x - player_x)
+            dy = abs(y - player_y)
+            distance = max(dx, dy)  # Chebyshev distance
+            is_within_sight = distance <= config.sight_radius
+            
+            # Tiles within sight radius are always visible (regardless of timeout)
+            # Tiles outside sight radius need to check timeout
+            if is_within_sight:
+                # Within sight radius - always visible if explored
+                is_visible = game.overworld_map.is_explored(x, y, current_time=None, timeout_hours=0.0)
+            else:
+                # Outside sight radius - check timeout
+                is_visible = game.overworld_map.is_explored(x, y, current_time=current_time, timeout_hours=config.memory_timeout_hours)
+            
+            if not is_visible:
+                # Unexplored tiles or tiles that have faded: very dark gray/black
                 color = (20, 20, 20)
             else:
                 tile = game.overworld_map.get_tile(x, y)
@@ -91,17 +113,13 @@ def draw_overworld(game: "Game") -> None:
                     # Dark gray for missing tiles
                     color = (40, 40, 40)
                 else:
-                    # Calculate distance from player for brightness
-                    dx = abs(x - player_x)
-                    dy = abs(y - player_y)
-                    distance = max(dx, dy)  # Chebyshev distance
-                    
                     # Dim explored but not currently visible tiles
+                    # Tiles within sight radius are brighter, tiles outside are dimmer
                     if (x, y) == (player_x, player_y):
                         # Current tile: full brightness
                         color = tile.color
-                    elif distance <= 3:
-                        # Very close tiles: nearly full brightness
+                    elif is_within_sight:
+                        # Tiles within sight radius: nearly full brightness
                         factor = 0.9
                         color = (
                             int(tile.color[0] * factor),
@@ -109,7 +127,7 @@ def draw_overworld(game: "Game") -> None:
                             int(tile.color[2] * factor),
                         )
                     else:
-                        # Explored tiles further away: dimmed
+                        # Explored tiles outside sight radius: dimmed (memory)
                         factor = 0.7
                         color = (
                             int(tile.color[0] * factor),
@@ -276,6 +294,12 @@ def draw_overworld(game: "Game") -> None:
         else:
             # Clear tooltip if not hovering over anything
             game.tooltip.current_tooltip = None
+    
+    # Overworld tutorial overlay
+    if getattr(game, "show_overworld_tutorial", False):
+        from ui.overworld_tutorial import draw_overworld_tutorial
+        if hasattr(game, "ui_font"):
+            draw_overworld_tutorial(screen, game.ui_font, game)
 
 
 def _draw_roaming_parties(
@@ -316,17 +340,30 @@ def _draw_roaming_parties(
             continue
         
         # Draw if explored OR within sight radius (parties are visible if nearby)
-        if not game.overworld_map.is_explored(px, py):
-            # Check if within sight radius
-            from world.overworld import OverworldConfig
-            config = OverworldConfig.load()
-            sight_radius = config.sight_radius
-            
-            dx = abs(px - player_x)
-            dy = abs(py - player_y)
-            distance = max(dx, dy)  # Chebyshev distance
-            if distance > sight_radius:
-                continue  # Too far away, don't show
+        # Get current time and timeout from config for exploration check
+        from world.overworld import OverworldConfig
+        config = OverworldConfig.load()
+        current_time = None
+        if game.time_system is not None:
+            current_time = game.time_system.get_total_hours()
+        
+        # Calculate distance from player for sight radius check
+        dx = abs(px - player_x)
+        dy = abs(py - player_y)
+        distance = max(dx, dy)  # Chebyshev distance
+        is_within_sight = distance <= config.sight_radius
+        
+        # Parties within sight radius are always visible (even if not explored yet)
+        # Parties outside sight radius need to be explored and within timeout
+        if is_within_sight:
+            # Within sight radius - always visible
+            is_visible = True
+        else:
+            # Outside sight radius - check if explored and within timeout
+            is_visible = game.overworld_map.is_explored(px, py, current_time=current_time, timeout_hours=config.memory_timeout_hours)
+        
+        if not is_visible:
+            continue  # Not visible, don't show
         
         # Get party type for color/icon
         party_type = get_party_type(party.party_type_id)
@@ -395,7 +432,7 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
         screen.blit(pos_surface, (10, 40))
     
     # Instructions
-    help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character"
+    help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character | H: Tutorial"
     help_surface = font.render(help_text, True, (200, 200, 200))
     screen.blit(help_surface, (10, screen.get_height() - 30))
     

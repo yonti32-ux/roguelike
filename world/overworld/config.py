@@ -57,6 +57,7 @@ class OverworldConfig:
     
     # Sight/exploration settings
     sight_radius: int = 8
+    memory_timeout_hours: float = 12.0  # How long explored tiles stay visible (only for tiles outside sight radius)
     
     # Zoom settings
     default_zoom_index: int = 1  # Index into zoom levels (1 = 75% default)
@@ -121,6 +122,10 @@ class OverworldConfig:
             sight_data = data.get("sight", {})
             config.sight_radius = sight_data.get("radius", config.sight_radius)
             
+            # Exploration settings
+            exploration_data = data.get("exploration", {})
+            config.memory_timeout_hours = exploration_data.get("memory_timeout_hours", config.memory_timeout_hours)
+            
             # Zoom settings
             zoom_data = data.get("zoom", {})
             config.default_zoom_index = zoom_data.get("default_index", config.default_zoom_index)
@@ -170,6 +175,9 @@ class OverworldConfig:
                 },
                 "sight": {
                     "radius": self.sight_radius,
+                },
+                "exploration": {
+                    "memory_timeout_hours": self.memory_timeout_hours,
                 },
                 "zoom": {
                     "default_index": self.default_zoom_index,
