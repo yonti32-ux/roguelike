@@ -71,6 +71,13 @@ def draw_overworld(game: "Game") -> None:
     end_x = min(game.overworld_map.width, start_x + viewport_tiles_x)
     end_y = min(game.overworld_map.height, start_y + viewport_tiles_y)
 
+    # PERFORMANCE: Load config and time ONCE per frame, not per tile
+    from world.overworld import OverworldConfig
+    config = OverworldConfig.load()
+    current_time = None
+    if game.time_system is not None:
+        current_time = game.time_system.get_total_hours()
+
     # Draw terrain tiles
     # Note: pygame.draw.rect is actually faster than blitting many small surfaces
     # Surface caching increased calls from 21M to 43M and time from 8s to 16s
@@ -82,30 +89,25 @@ def draw_overworld(game: "Game") -> None:
             rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
             
             # Calculate tile color
-            # Get current time and timeout from config
-            from world.overworld import OverworldConfig
-            config = OverworldConfig.load()
-            current_time = None
-            if game.time_system is not None:
-                current_time = game.time_system.get_total_hours()
-            
             # Calculate distance from player for sight radius check
             dx = abs(x - player_x)
             dy = abs(y - player_y)
             distance = max(dx, dy)  # Chebyshev distance
             is_within_sight = distance <= config.sight_radius
             
-            # Tiles within sight radius are always visible (regardless of timeout)
-            # Tiles outside sight radius need to check timeout
-            if is_within_sight:
-                # Within sight radius - always visible if explored
-                is_visible = game.overworld_map.is_explored(x, y, current_time=None, timeout_hours=0.0)
-            else:
-                # Outside sight radius - check timeout
-                is_visible = game.overworld_map.is_explored(x, y, current_time=current_time, timeout_hours=config.memory_timeout_hours)
+            # Check if tile was ever explored (regardless of timeout)
+            tile_pos = (x, y)
+            was_explored = tile_pos in game.overworld_map.explored_tiles
             
-            if not is_visible:
-                # Unexplored tiles or tiles that have faded: very dark gray/black
+            # Check if within timeout (for tiles outside sight radius)
+            is_within_timeout = True
+            if current_time is not None and was_explored and not is_within_sight:
+                last_seen = game.overworld_map.explored_tiles.get(tile_pos, 0.0)
+                time_since_seen = current_time - last_seen
+                is_within_timeout = time_since_seen <= config.memory_timeout_hours
+            
+            if not was_explored:
+                # Unexplored tiles: black (fog of war)
                 color = (20, 20, 20)
             else:
                 tile = game.overworld_map.get_tile(x, y)
@@ -113,8 +115,7 @@ def draw_overworld(game: "Game") -> None:
                     # Dark gray for missing tiles
                     color = (40, 40, 40)
                 else:
-                    # Dim explored but not currently visible tiles
-                    # Tiles within sight radius are brighter, tiles outside are dimmer
+                    # Determine brightness based on visibility state
                     if (x, y) == (player_x, player_y):
                         # Current tile: full brightness
                         color = tile.color
@@ -126,9 +127,18 @@ def draw_overworld(game: "Game") -> None:
                             int(tile.color[1] * factor),
                             int(tile.color[2] * factor),
                         )
-                    else:
-                        # Explored tiles outside sight radius: dimmed (memory)
+                    elif is_within_timeout:
+                        # Explored tiles outside sight radius but within timeout: dimmed (memory)
                         factor = 0.7
+                        color = (
+                            int(tile.color[0] * factor),
+                            int(tile.color[1] * factor),
+                            int(tile.color[2] * factor),
+                        )
+                    else:
+                        # Explored tiles outside sight radius and past timeout: very dim (old memory)
+                        # Still visible but very faint - you can see the layout but not details
+                        factor = 0.15  # Very dim, but still visible
                         color = (
                             int(tile.color[0] * factor),
                             int(tile.color[1] * factor),
@@ -204,8 +214,13 @@ def draw_overworld(game: "Game") -> None:
         
         # Draw level indicator for dungeons (scale font with zoom)
         if poi.poi_type == "dungeon":
+            # PERFORMANCE: Cache font by size to avoid creating new fonts every frame
             font_size = max(8, int(12 * zoom))
-            font = pygame.font.Font(None, font_size)
+            if not hasattr(game, "_overworld_font_cache"):
+                game._overworld_font_cache = {}
+            if font_size not in game._overworld_font_cache:
+                game._overworld_font_cache[font_size] = pygame.font.Font(None, font_size)
+            font = game._overworld_font_cache[font_size]
             level_text = font.render(str(poi.level), True, (255, 255, 255))
             text_rect = level_text.get_rect(center=(screen_x, screen_y))
             screen.blit(level_text, text_rect)
@@ -257,7 +272,7 @@ def draw_overworld(game: "Game") -> None:
     if game.overworld_map.party_manager is not None:
         hovered_party = _draw_roaming_parties(
             game, screen, start_x, start_y, end_x, end_y, tile_size, zoom, 
-            player_x, player_y, mouse_x, mouse_y
+            player_x, player_y, mouse_x, mouse_y, config, current_time
         )
     
     # Draw UI overlay
@@ -315,6 +330,8 @@ def _draw_roaming_parties(
     player_y: int,
     mouse_x: int,
     mouse_y: int,
+    config,  # OverworldConfig instance
+    current_time: Optional[float],  # Current time from time_system
 ) -> Optional["RoamingParty"]:
     """
     Draw roaming parties on the overworld and detect hover.
@@ -339,13 +356,10 @@ def _draw_roaming_parties(
         if not (start_x <= px < end_x and start_y <= py < end_y):
             continue
         
-        # Draw if explored OR within sight radius (parties are visible if nearby)
-        # Get current time and timeout from config for exploration check
-        from world.overworld import OverworldConfig
-        config = OverworldConfig.load()
-        current_time = None
-        if game.time_system is not None:
-            current_time = game.time_system.get_total_hours()
+        # Parties are only visible if:
+        # 1. Within sight radius (always visible, even if not explored)
+        # 2. Outside sight radius but explored AND within timeout (old memory still shows parties)
+        # Parties on expired tiles (past timeout) are NOT visible (you can see layout but not parties)
         
         # Calculate distance from player for sight radius check
         dx = abs(px - player_x)
@@ -354,16 +368,25 @@ def _draw_roaming_parties(
         is_within_sight = distance <= config.sight_radius
         
         # Parties within sight radius are always visible (even if not explored yet)
-        # Parties outside sight radius need to be explored and within timeout
         if is_within_sight:
-            # Within sight radius - always visible
             is_visible = True
         else:
-            # Outside sight radius - check if explored and within timeout
-            is_visible = game.overworld_map.is_explored(px, py, current_time=current_time, timeout_hours=config.memory_timeout_hours)
+            # Outside sight radius - must be explored AND within timeout
+            # Past timeout tiles show terrain but NOT parties
+            if current_time is not None:
+                tile_pos = (px, py)
+                if tile_pos not in game.overworld_map.explored_tiles:
+                    is_visible = False
+                else:
+                    last_seen = game.overworld_map.explored_tiles[tile_pos]
+                    time_since_seen = current_time - last_seen
+                    is_visible = time_since_seen <= config.memory_timeout_hours
+            else:
+                # Fallback if no time system
+                is_visible = game.overworld_map.is_explored(px, py, current_time=None, timeout_hours=0.0)
         
         if not is_visible:
-            continue  # Not visible, don't show
+            continue  # Not visible, don't show party
         
         # Get party type for color/icon
         party_type = get_party_type(party.party_type_id)
@@ -405,8 +428,13 @@ def _draw_roaming_parties(
         
         # Draw icon character if zoom is high enough
         if zoom >= 0.5:
+            # PERFORMANCE: Cache font by size to avoid creating new fonts every frame
             font_size = max(8, int(10 * zoom))
-            font = pygame.font.Font(None, font_size)
+            if not hasattr(game, "_overworld_font_cache"):
+                game._overworld_font_cache = {}
+            if font_size not in game._overworld_font_cache:
+                game._overworld_font_cache[font_size] = pygame.font.Font(None, font_size)
+            font = game._overworld_font_cache[font_size]
             icon_text = font.render(party_type.icon, True, (255, 255, 255))
             text_rect = icon_text.get_rect(center=(screen_x, screen_y))
             screen.blit(icon_text, text_rect)
@@ -416,7 +444,10 @@ def _draw_roaming_parties(
 
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
     """Draw UI overlay (time, position, etc.)."""
-    font = pygame.font.Font(None, 24)
+    # PERFORMANCE: Cache UI font to avoid creating it every frame
+    if not hasattr(game, "_overworld_ui_font"):
+        game._overworld_ui_font = pygame.font.Font(None, 24)
+    font = game._overworld_ui_font
     
     # Time display
     if game.time_system is not None:
@@ -449,7 +480,10 @@ def _draw_message(game: "Game", screen: pygame.Surface) -> None:
     if not hasattr(game, "last_message") or not game.last_message:
         return
     
-    font = pygame.font.Font(None, 24)
+    # PERFORMANCE: Reuse cached UI font
+    if not hasattr(game, "_overworld_ui_font"):
+        game._overworld_ui_font = pygame.font.Font(None, 24)
+    font = game._overworld_ui_font
     text_surface = font.render(game.last_message, True, (255, 255, 255))
     
     # Center at bottom

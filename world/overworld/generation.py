@@ -622,104 +622,147 @@ class WorldGenerator:
                     tiles[y][x] = TERRAIN_BEACH
                 # Northern mountains and snow (with blending)
                 elif is_north:
-                    # Much lower thresholds for north - create mountain ranges
-                    north_mountain_threshold = highland_threshold + 0.1  # Mountains start at medium-high elevation
-                    north_snow_threshold = mountain_threshold - 0.15  # Snow at lower elevation in north
+                    # Very aggressive thresholds for north - create lots of snow and mountains
+                    north_snow_threshold = highland_threshold + 0.05  # Snow appears at low-medium elevation
+                    north_mountain_threshold = highland_threshold - 0.02  # Mountains start very early
                     
-                    # In north, prioritize mountains and snow
+                    # In north, prioritize snow and mountains
                     if height_val > north_snow_threshold:
-                        # High elevation in north = snow
+                        # Medium-high elevation in north = snow (very common)
                         tiles[y][x] = TERRAIN_SNOW
                     elif height_val > north_mountain_threshold:
-                        # Medium-high elevation in north = mountains (or snow if very high)
-                        if height_val > mountain_threshold - 0.1 or north_influence > 0.7:
+                        # Medium elevation in north = mountains (or snow if strong north)
+                        if north_influence > 0.4 or height_val > highland_threshold:
                             tiles[y][x] = TERRAIN_SNOW
                         else:
                             tiles[y][x] = TERRAIN_MOUNTAIN
-                    elif height_val > highland_threshold:
-                        # Medium elevation in north = mountains or forest
-                        if north_influence > 0.5:
-                            # Strong north influence = mountains
+                    elif height_val > highland_threshold - 0.05:
+                        # Low-medium elevation in north = mountains or forest
+                        if north_influence > 0.3:
                             tiles[y][x] = TERRAIN_MOUNTAIN
-                        elif moisture_val > 0.6:
+                        elif moisture_val > 0.5:
                             tiles[y][x] = TERRAIN_FOREST
-                        else:
-                            tiles[y][x] = TERRAIN_MOUNTAIN
-                    elif height_val > lowland_threshold:
-                        # Low-medium elevation in north = forest or plains
-                        if moisture_val > 0.5:
-                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.3:
+                            tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_PLAINS
+                    elif height_val > lowland_threshold:
+                        # Low-medium elevation in north = forest, grass, or plains (more forest)
+                        if moisture_val > 0.5:
+                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.35:
+                            tiles[y][x] = TERRAIN_GRASS
+                        elif moisture_val > 0.2:
+                            tiles[y][x] = TERRAIN_PLAINS
+                        else:
+                            tiles[y][x] = TERRAIN_GRASS
                     else:
-                        # Low elevation in north = plains or grass
-                        if moisture_val > 0.4:
+                        # Low elevation in north = forest, grass, or plains (more forest)
+                        if moisture_val > 0.45:
+                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.3:
                             tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_PLAINS
                 # Southern desert zone (with blending)
-                elif is_south or (is_strongly_south and height_val < highland_threshold):
+                elif is_south:
                     if height_val > mountain_threshold:
                         tiles[y][x] = TERRAIN_MOUNTAIN
                     elif height_val > highland_threshold:
-                        # Highlands in south = mountains or dry forest
-                        if moisture_val > 0.6:
+                        # Highlands in south = mountains, forest, or grass
+                        if moisture_val > 0.55:
                             tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.3:
+                            tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_MOUNTAIN
                     elif height_val > lowland_threshold:
-                        # Medium elevation in south = desert or dry plains
-                        if moisture_val > 0.5:
+                        # Medium elevation in south = desert, plains, grass, or forest (more desert)
+                        if moisture_val > 0.55:
+                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.4:
                             tiles[y][x] = TERRAIN_PLAINS
-                        elif moisture_val > 0.2:
+                        elif moisture_val > 0.25:
                             tiles[y][x] = TERRAIN_GRASS
+                        elif moisture_val > 0.1:
+                            # Mix of desert and grass - favor desert in south
+                            if south_influence > 0.3:
+                                tiles[y][x] = TERRAIN_DESERT
+                            else:
+                                tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_DESERT
                     else:
-                        # Low elevation in south = desert or dry plains
-                        if moisture_val > 0.4:
+                        # Low elevation in south = desert, plains, grass, or forest (more desert)
+                        if moisture_val > 0.5:
+                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.35:
                             tiles[y][x] = TERRAIN_PLAINS
                         elif moisture_val > 0.2:
                             tiles[y][x] = TERRAIN_GRASS
+                        elif moisture_val > 0.1:
+                            # Mix of desert and grass - favor desert in south
+                            if south_influence > 0.25:
+                                tiles[y][x] = TERRAIN_DESERT
+                            else:
+                                tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_DESERT
                 # Central/moderate climate zone (with latitude blending)
                 else:
-                    # Blend between north and south influences
+                    # Blend between north and south influences - more mixing and more forests
                     if height_val > mountain_threshold:
                         # Mountains - blend to snow if strong north influence
-                        if north_influence > 0.3 and height_val > mountain_threshold - 0.1:
+                        if north_influence > 0.2 and height_val > highland_threshold + 0.1:
                             tiles[y][x] = TERRAIN_SNOW
                         else:
                             tiles[y][x] = TERRAIN_MOUNTAIN
                     elif height_val > highland_threshold:
-                        # Highlands: forest or mountains (blend based on latitude)
+                        # Highlands: varied biomes (blend based on latitude, more forests)
                         if north_influence > 0.2:
                             tiles[y][x] = TERRAIN_MOUNTAIN
+                        elif south_influence > 0.25 and moisture_val < 0.2:
+                            tiles[y][x] = TERRAIN_DESERT
                         elif moisture_val > 0.5:
                             tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.35:
+                            tiles[y][x] = TERRAIN_GRASS
                         else:
-                            tiles[y][x] = TERRAIN_MOUNTAIN
+                            tiles[y][x] = TERRAIN_PLAINS
                     elif height_val > lowland_threshold:
-                        # Medium elevation: varied biomes (blend based on latitude)
-                        if south_influence > 0.3 and moisture_val < 0.3:
+                        # Medium elevation: varied biomes with more mixing and forests
+                        if south_influence > 0.2 and moisture_val < 0.3:
                             tiles[y][x] = TERRAIN_DESERT
-                        elif moisture_val > 0.7:
+                        elif moisture_val > 0.55:
                             tiles[y][x] = TERRAIN_FOREST
                         elif moisture_val > 0.4:
                             tiles[y][x] = TERRAIN_GRASS
-                        elif moisture_val > 0.2:
+                        elif moisture_val > 0.25:
                             tiles[y][x] = TERRAIN_PLAINS
+                        elif moisture_val > 0.1:
+                            # Mix between desert and grass
+                            if south_influence > north_influence:
+                                tiles[y][x] = TERRAIN_DESERT
+                            else:
+                                tiles[y][x] = TERRAIN_GRASS
                         else:
                             tiles[y][x] = TERRAIN_DESERT
                     else:
-                        # Low elevation: grass/plains (blend based on latitude)
-                        if south_influence > 0.3 and moisture_val < 0.3:
+                        # Low elevation: varied biomes with more mixing and forests
+                        if south_influence > 0.2 and moisture_val < 0.3:
                             tiles[y][x] = TERRAIN_DESERT
                         elif moisture_val > 0.5:
+                            tiles[y][x] = TERRAIN_FOREST
+                        elif moisture_val > 0.35:
                             tiles[y][x] = TERRAIN_GRASS
-                        elif moisture_val > 0.3:
+                        elif moisture_val > 0.25:
                             tiles[y][x] = TERRAIN_PLAINS
+                        elif moisture_val > 0.1:
+                            # Mix between desert and plains
+                            if south_influence > 0.15:
+                                tiles[y][x] = TERRAIN_DESERT
+                            else:
+                                tiles[y][x] = TERRAIN_PLAINS
                         else:
                             tiles[y][x] = TERRAIN_DESERT
         
