@@ -58,15 +58,14 @@ def filter_items(
     Returns:
         Filtered list of item IDs
     """
-    from systems.inventory import get_item_def
-    
     if filter_mode == FilterMode.ALL:
         return items
     
     filtered: List[str] = []
     
     for item_id in items:
-        item_def = get_item_def(item_id)
+        # Use inventory's method to resolve randomized items
+        item_def = inventory._get_item_def(item_id) if hasattr(inventory, "_get_item_def") else None
         if item_def is None:
             if filter_mode == FilterMode.MISC:
                 filtered.append(item_id)
@@ -98,6 +97,7 @@ def filter_items(
 def sort_items(
     items: List[str],
     sort_mode: SortMode,
+    inventory: Optional["Inventory"] = None,
 ) -> List[str]:
     """
     Sort items based on the current sort mode.
@@ -105,17 +105,21 @@ def sort_items(
     Args:
         items: List of item IDs
         sort_mode: Current sort mode
+        inventory: Optional inventory instance for resolving randomized items
     
     Returns:
         Sorted list of item IDs
     """
-    from systems.inventory import get_item_def
-    
     if sort_mode == SortMode.DEFAULT:
         # Default: group by slot, then by name
         items_by_slot: Dict[str, List[str]] = {}
         for item_id in items:
-            item_def = get_item_def(item_id)
+            # Use inventory's method if available, otherwise fall back to base
+            if inventory and hasattr(inventory, "_get_item_def"):
+                item_def = inventory._get_item_def(item_id)
+            else:
+                from systems.inventory import get_item_def
+                item_def = get_item_def(item_id)
             slot = item_def.slot if item_def else "misc"
             if slot not in items_by_slot:
                 items_by_slot[slot] = []
@@ -126,16 +130,16 @@ def sort_items(
         result: List[str] = []
         for slot in slot_order:
             if slot in items_by_slot:
-                result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x)))
+                result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x, inventory)))
         # Add any remaining slots
         for slot in sorted(items_by_slot.keys()):
             if slot not in slot_order:
-                result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x)))
+                result.extend(sorted(items_by_slot[slot], key=lambda x: _get_item_name(x, inventory)))
         return result
     
     # Sort by name
     if sort_mode == SortMode.NAME:
-        return sorted(items, key=lambda x: _get_item_name(x))
+        return sorted(items, key=lambda x: _get_item_name(x, inventory))
     
     # Sort by rarity (rarity order: common < uncommon < rare < epic < legendary)
     if sort_mode == SortMode.RARITY:
@@ -143,8 +147,8 @@ def sort_items(
         return sorted(
             items,
             key=lambda x: (
-                rarity_order.get(_get_item_rarity(x), -1),
-                _get_item_name(x)
+                rarity_order.get(_get_item_rarity(x, inventory), -1),
+                _get_item_name(x, inventory)
             ),
             reverse=True  # Higher rarity first
         )
@@ -153,34 +157,35 @@ def sort_items(
     if sort_mode == SortMode.ATTACK:
         return sorted(
             items,
-            key=lambda x: _get_item_stat(x, "attack"),
+            key=lambda x: _get_item_stat(x, "attack", inventory),
             reverse=True
         )
     
     if sort_mode == SortMode.DEFENSE:
         return sorted(
             items,
-            key=lambda x: _get_item_stat(x, "defense"),
+            key=lambda x: _get_item_stat(x, "defense", inventory),
             reverse=True
         )
     
     if sort_mode == SortMode.HP:
         return sorted(
             items,
-            key=lambda x: _get_item_stat(x, "max_hp"),
+            key=lambda x: _get_item_stat(x, "max_hp", inventory),
             reverse=True
         )
     
     return items
 
 
-def search_items(items: List[str], search_query: str) -> List[str]:
+def search_items(items: List[str], search_query: str, inventory: Optional["Inventory"] = None) -> List[str]:
     """
     Filter items by search query (searches in item name).
     
     Args:
         items: List of item IDs
         search_query: Search string (case-insensitive)
+        inventory: Optional inventory instance for resolving randomized items
     
     Returns:
         Filtered list of item IDs matching the search query
@@ -188,13 +193,16 @@ def search_items(items: List[str], search_query: str) -> List[str]:
     if not search_query:
         return items
     
-    from systems.inventory import get_item_def
-    
     query_lower = search_query.lower()
     filtered: List[str] = []
     
     for item_id in items:
-        item_def = get_item_def(item_id)
+        # Use inventory's method if available, otherwise fall back to base
+        if inventory and hasattr(inventory, "_get_item_def"):
+            item_def = inventory._get_item_def(item_id)
+        else:
+            from systems.inventory import get_item_def
+            item_def = get_item_def(item_id)
         if item_def is None:
             # Search in item ID if no definition
             if query_lower in item_id.lower():
@@ -210,24 +218,33 @@ def search_items(items: List[str], search_query: str) -> List[str]:
     return filtered
 
 
-def _get_item_name(item_id: str) -> str:
+def _get_item_name(item_id: str, inventory: Optional["Inventory"] = None) -> str:
     """Get item name for sorting."""
-    from systems.inventory import get_item_def
-    item_def = get_item_def(item_id)
+    if inventory and hasattr(inventory, "_get_item_def"):
+        item_def = inventory._get_item_def(item_id)
+    else:
+        from systems.inventory import get_item_def
+        item_def = get_item_def(item_id)
     return item_def.name if item_def else item_id
 
 
-def _get_item_rarity(item_id: str) -> str:
+def _get_item_rarity(item_id: str, inventory: Optional["Inventory"] = None) -> str:
     """Get item rarity for sorting."""
-    from systems.inventory import get_item_def
-    item_def = get_item_def(item_id)
+    if inventory and hasattr(inventory, "_get_item_def"):
+        item_def = inventory._get_item_def(item_id)
+    else:
+        from systems.inventory import get_item_def
+        item_def = get_item_def(item_id)
     return getattr(item_def, "rarity", "common") if item_def else "common"
 
 
-def _get_item_stat(item_id: str, stat_name: str) -> float:
+def _get_item_stat(item_id: str, stat_name: str, inventory: Optional["Inventory"] = None) -> float:
     """Get a stat value from an item for sorting."""
-    from systems.inventory import get_item_def
-    item_def = get_item_def(item_id)
+    if inventory and hasattr(inventory, "_get_item_def"):
+        item_def = inventory._get_item_def(item_id)
+    else:
+        from systems.inventory import get_item_def
+        item_def = get_item_def(item_id)
     if item_def:
         return float(item_def.stats.get(stat_name, 0.0))
     return 0.0

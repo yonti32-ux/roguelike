@@ -164,7 +164,8 @@ def draw_enhanced_status_indicators(
     show_stacks: bool = True,
     vertical: bool = True,
     max_statuses: Optional[int] = None,
-) -> Tuple[int, int]:
+    return_icon_rects: bool = False,
+) -> Tuple[int, int, Optional[List[Tuple[StatusEffect, pygame.Rect]]]]:
     """
     Draw enhanced status indicators with timers and stack counts.
     
@@ -179,12 +180,13 @@ def draw_enhanced_status_indicators(
         show_stacks: Whether to show stack counts (default True)
         vertical: If True, stack vertically (default True)
         max_statuses: Maximum number of statuses to show (None = all)
+        return_icon_rects: If True, also return list of (status, rect) tuples for hover detection
     
     Returns:
-        Tuple of (final_x, final_y) position after drawing
+        Tuple of (final_x, final_y) position after drawing, and optionally list of (status, rect) tuples
     """
     if not statuses:
-        return x, y
+        return x, y, ([] if return_icon_rects else None)
     
     # Limit number of statuses if specified
     display_statuses = statuses[:max_statuses] if max_statuses else statuses
@@ -208,13 +210,23 @@ def draw_enhanced_status_indicators(
     
     # Draw all statuses
     current_x, current_y = x, y
-    for status, info in all_statuses:
-        current_x, current_y = _draw_single_status(
-            surface, font, current_x, current_y, status, info,
-            icon_size, show_timers, show_stacks, icon_spacing, vertical
-        )
+    icon_rects = [] if return_icon_rects else None
     
-    return current_x, current_y
+    for status, info in all_statuses:
+        result = _draw_single_status(
+            surface, font, current_x, current_y, status, info,
+            icon_size, show_timers, show_stacks, icon_spacing, vertical,
+            return_rect=return_icon_rects
+        )
+        
+        if return_icon_rects:
+            current_x, current_y, icon_rect = result
+            if icon_rect:
+                icon_rects.append((status, icon_rect))
+        else:
+            current_x, current_y = result
+    
+    return current_x, current_y, icon_rects
 
 
 def _draw_single_status(
@@ -229,12 +241,13 @@ def _draw_single_status(
     show_stacks: bool,
     icon_spacing: int,
     vertical: bool,
-) -> Tuple[int, int]:
+    return_rect: bool = False,
+) -> Tuple[int, int, Optional[pygame.Rect]]:
     """
     Draw a single status indicator.
     
     Returns:
-        Tuple of (next_x, next_y) for next status position
+        Tuple of (next_x, next_y) for next status position, and optionally the icon rect
     """
     # Get status properties
     duration = getattr(status, "duration", 0)
@@ -247,6 +260,23 @@ def _draw_single_status(
     # Create a small surface for the status indicator
     icon_surf = font.render(icon_text, True, color)
     surface.blit(icon_surf, (x, y))
+    
+    # Calculate icon rect for hover detection (include timer area if shown)
+    icon_rect = None
+    if return_rect:
+        icon_w = icon_surf.get_width()
+        icon_h = icon_surf.get_height()
+        # Expand rect to include timer if shown
+        if show_timers and duration > 0:
+            timer_text = str(duration)
+            timer_surf = font.render(timer_text, True, (180, 180, 180))
+            if vertical:
+                # Timer is to the right, so expand width
+                icon_w = icon_w + timer_surf.get_width() + 4  # Add padding
+            else:
+                icon_w = icon_w + timer_surf.get_width() + 4
+        # Make hover area a bit larger for easier clicking (add padding)
+        icon_rect = pygame.Rect(x - 2, y - 2, icon_w + 4, max(icon_h, icon_size) + 4)
     
     # Draw duration timer (small number below or to the right)
     next_x = x
@@ -290,7 +320,10 @@ def _draw_single_status(
         
         surface.blit(stack_surf, (stack_x, stack_y))
     
-    return next_x, next_y
+    if return_rect:
+        return next_x, next_y, icon_rect
+    else:
+        return next_x, next_y
 
 
 def get_status_tooltip(status: StatusEffect) -> str:

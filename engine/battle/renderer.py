@@ -16,7 +16,8 @@ from settings import (
 )
 from engine.battle.types import BattleUnit
 from ui.hud_utils import _draw_status_indicators, _calculate_hp_color
-from ui.status_display import draw_enhanced_status_indicators
+from ui.status_display import draw_enhanced_status_indicators, create_status_tooltip_data
+from systems.statuses import StatusEffect
 
 
 class BattleRenderer:
@@ -44,6 +45,13 @@ class BattleRenderer:
         except:
             # Fallback to a fixed larger size
             self.damage_font = pygame.font.Font(None, 30)
+        
+        # Track status icon positions for tooltip hover detection
+        # Format: {(unit_id, status_name): pygame.Rect}
+        self.status_icon_rects: Dict[Tuple[str, str], pygame.Rect] = {}
+        # Track status objects for tooltip data
+        # Format: {(unit_id, status_name): StatusEffect}
+        self.status_objects: Dict[Tuple[str, str], StatusEffect] = {}
     
     def draw_active_unit_panel(
         self,
@@ -421,18 +429,40 @@ class BattleRenderer:
 
             # Status icons above the HP bar (horizontal layout, going upward)
             icon_y = rect.y - 18
-            _draw_status_indicators(
-                surface,
-                self.font,
-                rect.x + 4,  # Start x position
-                icon_y,
-                has_guard=self.scene._has_status(unit, "guard"),
-                has_weakened=self.scene._has_status(unit, "weakened"),
-                has_stunned=self.scene._is_stunned(unit),
-                has_dot=self.scene._has_dot(unit),
-                icon_spacing=-18,  # Negative for upward
-                vertical=True,
-            )
+            if unit.statuses:
+                # Clear old status rects for this unit
+                # Use consistent ID format - prefer unit.id if available, otherwise use memory id
+                unit_id = getattr(unit, "id", None)
+                if unit_id is None:
+                    unit_id = f"battlefield_{id(unit)}"
+                else:
+                    unit_id = str(unit_id)
+                keys_to_remove = [k for k in self.status_icon_rects.keys() if k[0] == unit_id]
+                for key in keys_to_remove:
+                    del self.status_icon_rects[key]
+                
+                # Draw and track status icon positions
+                _, _, icon_rects = draw_enhanced_status_indicators(
+                    surface,
+                    self.font,
+                    rect.x + 4,  # Start x position
+                    icon_y,
+                    unit.statuses,
+                    icon_spacing=-18,  # Negative for upward stacking
+                    vertical=True,
+                    show_timers=True,
+                    show_stacks=True,
+                    max_statuses=None,  # Show all statuses
+                    return_icon_rects=True,
+                )
+                
+                # Store status icon rects and objects for hover detection
+                if icon_rects:
+                    for status, icon_rect in icon_rects:
+                        status_name = getattr(status, "name", getattr(status, "status_id", "unknown"))
+                        key = (str(unit_id), status_name)
+                        self.status_icon_rects[key] = icon_rect
+                        self.status_objects[key] = status
 
             # Cooldown indicator for hero's Power Strike
             hero = self.scene._hero_unit()
@@ -574,7 +604,19 @@ class BattleRenderer:
             # Draw from bottom up (negative spacing)
             icon_y = rect.y + rect.height - 2
             if unit.statuses:
-                draw_enhanced_status_indicators(
+                # Clear old status rects for this unit
+                # Use consistent ID format - prefer unit.id if available, otherwise use memory id
+                unit_id = getattr(unit, "id", None)
+                if unit_id is None:
+                    unit_id = f"battlefield_{id(unit)}"
+                else:
+                    unit_id = str(unit_id)
+                keys_to_remove = [k for k in self.status_icon_rects.keys() if k[0] == unit_id]
+                for key in keys_to_remove:
+                    del self.status_icon_rects[key]
+                
+                # Draw and track status icon positions
+                _, _, icon_rects = draw_enhanced_status_indicators(
                     surface,
                     self.font,
                     rect.x + 4,
@@ -585,7 +627,16 @@ class BattleRenderer:
                     show_timers=True,
                     show_stacks=True,
                     max_statuses=None,  # Show all statuses
+                    return_icon_rects=True,
                 )
+                
+                # Store status icon rects and objects for hover detection
+                if icon_rects:
+                    for status, icon_rect in icon_rects:
+                        status_name = getattr(status, "name", getattr(status, "status_id", "unknown"))
+                        key = (str(unit_id), status_name)
+                        self.status_icon_rects[key] = icon_rect
+                        self.status_objects[key] = status
 
             # Name label
             name_surf = self.font.render(unit.name, True, (230, 210, 210))
@@ -624,6 +675,9 @@ class BattleRenderer:
         
         # ---------------- Hit sparks (drawn after units) ----------------
         self.draw_hit_sparks(surface)
+        
+        # ---------------- Particles (drawn after sparks) ----------------
+        self.draw_particles(surface)
 
     def draw_floating_damage(self, surface: pygame.Surface) -> None:
         """Draw floating damage numbers that rise and fade, stacking vertically for same target."""
@@ -750,6 +804,26 @@ class BattleRenderer:
             else:
                 color = (255, 200, 100)  # Orange spark
                 pygame.draw.circle(surface, color, (x, y), size)
+    
+    def draw_particles(self, surface: pygame.Surface) -> None:
+        """Draw particle effects (for kills, explosions, etc.)."""
+        for particle in self.scene._particles:
+            x = int(particle["x"])
+            y = int(particle["y"])
+            timer = particle["timer"]
+            color = particle["color"]
+            size = particle.get("size", 3)
+            
+            # Fade out as timer decreases
+            max_time = particle.get("max_time", 1.0)
+            alpha = int(255 * (timer / max_time))
+            alpha = max(0, min(255, alpha))
+            
+            # Create colored surface with alpha
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            surface.blit(particle_surf, (x - size, y - size))
     
     def draw_damage_preview(self, surface: pygame.Surface, target: BattleUnit, normal_damage: int, crit_damage: Optional[int]) -> None:
         """Draw damage preview above the selected target."""
@@ -923,6 +997,26 @@ class BattleRenderer:
                     rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
                     pygame.draw.rect(surface, (255, 200, 150), rect, width=2)
 
+    def get_hovered_status(self, mouse_pos: Tuple[int, int]) -> Optional[StatusEffect]:
+        """
+        Check if mouse is hovering over a status icon and return the status.
+        
+        Args:
+            mouse_pos: (x, y) mouse position on screen
+            
+        Returns:
+            StatusEffect if hovering over a status icon, None otherwise
+        """
+        mx, my = mouse_pos
+        
+        # Check all status icon rects for collision
+        for key, rect in self.status_icon_rects.items():
+            if rect.collidepoint(mx, my):
+                status = self.status_objects.get(key)
+                if status:
+                    return status
+        return None
+    
     def draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int, ui_scale: float = 1.0) -> None:
         """Draw a small indicator showing the next few units in turn order."""
         if not self.scene.turn_order:

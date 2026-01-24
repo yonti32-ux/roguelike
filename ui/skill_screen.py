@@ -213,6 +213,18 @@ class SkillScreenCore:
         # Cached unlocked skills (refresh when focus changes)
         self._cached_unlocked_skills: Optional[List[str]] = None
         self._cached_focus_index: int = -1
+        
+        # Loadout manager state
+        self.loadout_mode: bool = False  # Toggle between skill tree and loadout manager
+        self.dragged_skill_id: Optional[str] = None  # Skill being dragged
+        self.dragged_slot_index: Optional[int] = None  # Slot being dragged from
+        self.hovered_slot_index: Optional[int] = None  # Slot being hovered over
+        self._help_icon_rect: Optional[pygame.Rect] = None
+        self._help_icon_hovered: bool = False
+        
+        # Store rectangles for accurate hover detection
+        self._slot_rects: List[pygame.Rect] = []
+        self._available_skill_rects: Dict[str, pygame.Rect] = {}
     
     def get_focused_entity(self) -> Tuple[bool, Optional[CompanionState], Optional[str]]:
         """
@@ -353,6 +365,13 @@ class SkillScreenCore:
         if self.cursor_timer >= 0.5:
             self.cursor_timer = 0.0
             self.cursor_visible = not self.cursor_visible
+        
+        # Update hover state using actual mouse position
+        try:
+            mouse_pos = pygame.mouse.get_pos()
+            self.hovered_slot_index = self.get_loadout_slot_at_pos(mouse_pos[0], mouse_pos[1])
+        except:
+            pass
     
     def reset_selection(self) -> None:
         """Reset selection when opening screen."""
@@ -422,12 +441,18 @@ class SkillScreenCore:
                 if skill_id in self.tree_layout.nodes:
                     self.tree_layout.nodes[skill_id].rank = self.get_skill_rank(skill_id)
             
-            # Draw visual skill tree
+            # Draw loadout manager on the left
+            self._draw_loadout_manager(screen, w, h, unlocked_skills)
+            
+            # Draw visual skill tree (centered, smaller when loadout manager is visible)
             self._draw_skill_tree(screen, w, h, skill_points)
             
             # Draw skill details panel on the right
             if self.selected_skill_id:
                 self._draw_skill_details(screen, w, h, self.selected_skill_id, skill_points)
+            
+            # Draw loadout help tooltip
+            self._draw_loadout_help_tooltip(screen, w, h)
     
     def _draw_skill_tree(self, screen: pygame.Surface, w: int, h: int, skill_points: int) -> None:
         """Draw the visual skill tree."""
@@ -718,4 +743,255 @@ class SkillScreenCore:
                 screen.blit(maxed_hint, (detail_x, detail_y))
         except KeyError:
             pass
+    
+    def _draw_loadout_manager(self, screen: pygame.Surface, w: int, h: int, unlocked_skills: List[str]) -> None:
+        """Draw the loadout manager panel on the left side."""
+        is_hero, comp, _ = self.get_focused_entity()
+        
+        # Get entity stats
+        if is_hero:
+            entity_stats = self.game.hero_stats
+        else:
+            if comp is None:
+                return
+            entity_stats = comp
+        
+        # Loadout panel on the left
+        panel_x = 40
+        panel_y = 160
+        panel_w = 320
+        panel_h = h - panel_y - 100
+        
+        # Panel background
+        panel_rect = pygame.Rect(panel_x - 10, panel_y - 10, panel_w, panel_h)
+        pygame.draw.rect(screen, (30, 30, 35), panel_rect)
+        pygame.draw.rect(screen, (80, 80, 90), panel_rect, 2)
+        
+        y = panel_y
+        
+        # Title with help icon
+        title = self.font.render("Loadout Manager", True, (220, 220, 180))
+        screen.blit(title, (panel_x, y))
+        
+        # Help icon (question mark)
+        help_icon_x = panel_x + title.get_width() + 10
+        help_icon_y = y + 2
+        help_icon_rect = pygame.Rect(help_icon_x, help_icon_y, 20, 20)
+        
+        # Check if hovering over help icon
+        mouse_pos = pygame.mouse.get_pos()
+        is_help_hovered = help_icon_rect.collidepoint(mouse_pos)
+        
+        # Draw help icon
+        help_color = (150, 200, 255) if is_help_hovered else (120, 120, 150)
+        pygame.draw.circle(screen, (40, 40, 50), (help_icon_x + 10, help_icon_y + 10), 10)
+        pygame.draw.circle(screen, help_color, (help_icon_x + 10, help_icon_y + 10), 10, 2)
+        help_text = self.font_small.render("?", True, help_color)
+        screen.blit(help_text, (help_icon_x + 6, help_icon_y + 2))
+        
+        # Store help icon rect for tooltip
+        self._help_icon_rect = help_icon_rect
+        self._help_icon_hovered = is_help_hovered
+        
+        y += 35
+        
+        # Current loadout selector
+        loadout_names = list(getattr(entity_stats, "skill_loadouts", {}).keys())
+        if not loadout_names:
+            # Ensure default loadout exists
+            entity_stats._ensure_default_loadout()
+            loadout_names = list(getattr(entity_stats, "skill_loadouts", {}).keys())
+        
+        current_loadout = getattr(entity_stats, "current_loadout", "default")
+        max_slots = getattr(entity_stats, "max_skill_slots", 4)
+        
+        # Loadout dropdown
+        loadout_label = self.font_small.render("Loadout:", True, (190, 190, 190))
+        screen.blit(loadout_label, (panel_x, y))
+        
+        loadout_text = self.font_small.render(f"{current_loadout} ▼", True, (220, 220, 220))
+        screen.blit(loadout_text, (panel_x + 80, y))
+        y += 30
+        
+        # Skill slots
+        slots_title = self.font_small.render("Skill Slots:", True, (190, 190, 190))
+        screen.blit(slots_title, (panel_x, y))
+        y += 25
+        
+        # Get current loadout slots
+        loadout_slots = entity_stats.get_current_loadout_slots()
+        
+        slot_height = 50
+        slot_spacing = 8
+        
+        # Clear stored rectangles
+        self._slot_rects = []
+        self._available_skill_rects = {}
+        
+        for i in range(max_slots):
+            slot_rect = pygame.Rect(panel_x, y, panel_w - 20, slot_height)
+            self._slot_rects.append(slot_rect)  # Store for hover detection
+            
+            # Determine slot state
+            is_hovered = (self.hovered_slot_index == i)
+            skill_id = loadout_slots[i] if i < len(loadout_slots) else None
+            
+            # Slot background
+            if is_hovered:
+                bg_color = (50, 50, 60)
+                border_color = (150, 200, 255)
+            elif skill_id:
+                bg_color = (40, 50, 40)
+                border_color = (100, 150, 100)
+            else:
+                bg_color = (25, 25, 30)
+                border_color = (60, 60, 70)
+            
+            pygame.draw.rect(screen, bg_color, slot_rect)
+            pygame.draw.rect(screen, border_color, slot_rect, 2)
+            
+            # Slot number
+            slot_num = self.font_small.render(f"{i+1}", True, (150, 150, 150))
+            screen.blit(slot_num, (panel_x + 5, y + 5))
+            
+            # Skill name or "Empty"
+            if skill_id:
+                try:
+                    skill = get_skill(skill_id)
+                    skill_name = skill.name
+                    if len(skill_name) > 20:
+                        skill_name = skill_name[:17] + "..."
+                    name_surf = self.font_small.render(skill_name, True, (220, 220, 220))
+                    screen.blit(name_surf, (panel_x + 30, y + 15))
+                except KeyError:
+                    empty_text = self.font_small.render("(Invalid)", True, (150, 100, 100))
+                    screen.blit(empty_text, (panel_x + 30, y + 15))
+            else:
+                empty_text = self.font_small.render("[Empty]", True, (120, 120, 120))
+                screen.blit(empty_text, (panel_x + 30, y + 15))
+            
+            # Remove button (X) if slot has a skill
+            if skill_id:
+                remove_rect = pygame.Rect(panel_x + panel_w - 35, y + 5, 25, 25)
+                pygame.draw.rect(screen, (80, 40, 40), remove_rect)
+                pygame.draw.rect(screen, (150, 80, 80), remove_rect, 1)
+                x_text = self.font_small.render("X", True, (220, 150, 150))
+                screen.blit(x_text, (panel_x + panel_w - 30, y + 8))
+            
+            y += slot_height + slot_spacing
+        
+        y += 15
+        
+        # Available skills list
+        available_title = self.font_small.render("Available Skills:", True, (190, 190, 190))
+        screen.blit(available_title, (panel_x, y))
+        y += 25
+        
+        # List of unlocked skills not in current loadout
+        available_rect = pygame.Rect(panel_x, y, panel_w - 20, panel_h - (y - panel_y) - 20)
+        pygame.draw.rect(screen, (20, 20, 25), available_rect)
+        pygame.draw.rect(screen, (60, 60, 70), available_rect, 1)
+        
+        skill_y = y + 5
+        skills_in_loadout = {sid for sid in loadout_slots if sid}
+        
+        for skill_id in unlocked_skills:
+            if skill_id == "guard":  # Guard has its own key
+                continue
+            
+            if skill_id in skills_in_loadout:
+                continue  # Skip skills already in loadout
+            
+            skill_rect = pygame.Rect(panel_x + 5, skill_y, panel_w - 30, 30)
+            self._available_skill_rects[skill_id] = skill_rect  # Store for hover detection
+            
+            # Check if this skill is being dragged
+            is_dragged = (self.dragged_skill_id == skill_id)
+            
+            if is_dragged:
+                bg_color = (60, 60, 80)
+                border_color = (150, 200, 255)
+            else:
+                bg_color = (35, 35, 40)
+                border_color = (80, 80, 90)
+            
+            pygame.draw.rect(screen, bg_color, skill_rect)
+            pygame.draw.rect(screen, border_color, skill_rect, 1)
+            
+            try:
+                skill = get_skill(skill_id)
+                skill_name = skill.name
+                if len(skill_name) > 25:
+                    skill_name = skill_name[:22] + "..."
+                name_surf = self.font_small.render(skill_name, True, (200, 200, 200))
+                screen.blit(name_surf, (panel_x + 10, skill_y + 7))
+            except KeyError:
+                pass
+            
+            skill_y += 35
+            if skill_y > panel_y + panel_h - 40:
+                break  # Don't overflow
+        
+        # Loadout management buttons
+        button_y = panel_y + panel_h - 50
+        button_w = 90
+        button_h = 30
+        
+        # New Loadout button
+        new_rect = pygame.Rect(panel_x, button_y, button_w, button_h)
+        pygame.draw.rect(screen, (40, 80, 40), new_rect)
+        pygame.draw.rect(screen, (80, 150, 80), new_rect, 1)
+        new_text = self.font_small.render("New", True, (200, 255, 200))
+        screen.blit(new_text, (panel_x + 30, button_y + 7))
+        
+        # Delete Loadout button (if not default)
+        if current_loadout != "default" and len(loadout_names) > 1:
+            del_rect = pygame.Rect(panel_x + button_w + 10, button_y, button_w, button_h)
+            pygame.draw.rect(screen, (80, 40, 40), del_rect)
+            pygame.draw.rect(screen, (150, 80, 80), del_rect, 1)
+            del_text = self.font_small.render("Delete", True, (255, 200, 200))
+            screen.blit(del_text, (panel_x + button_w + 25, button_y + 7))
+    
+    def get_loadout_slot_at_pos(self, x: int, y: int) -> Optional[int]:
+        """Get the slot index at screen position, or None."""
+        # Use stored rectangles for accurate detection
+        for i, slot_rect in enumerate(self._slot_rects):
+            if slot_rect.collidepoint(x, y):
+                return i
+        return None
+    
+    def get_available_skill_at_pos(self, x: int, y: int, unlocked_skills: List[str]) -> Optional[str]:
+        """Get the skill ID at screen position in available skills list, or None."""
+        # Use stored rectangles for accurate detection
+        for skill_id, skill_rect in self._available_skill_rects.items():
+            if skill_rect.collidepoint(x, y):
+                return skill_id
+        return None
+    
+    def _draw_loadout_help_tooltip(self, screen: pygame.Surface, w: int, h: int) -> None:
+        """Draw help tooltip for loadout manager."""
+        if not self._help_icon_hovered or self._help_icon_rect is None:
+            return
+        
+        from ui.tooltip import TooltipData
+        
+        tooltip_data = TooltipData(
+            title="Loadout Manager",
+            lines=[
+                "Drag skills from 'Available Skills' to slots to assign them.",
+                "Drag skills between slots to rearrange them.",
+                "Click X on a slot to remove a skill.",
+                "",
+                "Keyboard Shortcuts:",
+                "  N - Create new loadout",
+                "  1-9 - Switch between loadouts",
+                "  Delete - Delete current loadout",
+                "",
+                "Loadouts let you prepare different skill",
+                "configurations for different situations.",
+            ]
+        )
+        
+        mouse_pos = pygame.mouse.get_pos()
+        tooltip_data.draw(screen, self.font_small, mouse_pos)
 

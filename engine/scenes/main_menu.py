@@ -1,7 +1,9 @@
 import math
+import random
 import pygame
 
 from settings import COLOR_BG, FPS, TITLE
+from typing import List, Dict
 
 
 class MainMenuScene:
@@ -31,6 +33,30 @@ class MainMenuScene:
         
         # Simple animation timer for title/subtitle
         self.animation_timer: float = 0.0
+        
+        # Background particles for visual effect
+        self.particles: List[Dict] = []
+        self._init_particles()
+    
+    def _init_particles(self) -> None:
+        """Initialize background particles."""
+        w, h = self.screen.get_size()
+        # Create 30-40 particles
+        for _ in range(random.randint(30, 40)):
+            self.particles.append({
+                "x": random.uniform(0, w),
+                "y": random.uniform(0, h),
+                "vx": random.uniform(-20, 20),
+                "vy": random.uniform(-20, 20),
+                "size": random.uniform(1, 3),
+                "alpha": random.uniform(50, 150),
+                "color": random.choice([
+                    (100, 150, 255),  # Blue
+                    (150, 200, 255),  # Light blue
+                    (200, 150, 255),  # Purple
+                    (255, 200, 150),  # Orange
+                ]),
+            })
     
     def run(self) -> str | None:
         """
@@ -45,6 +71,25 @@ class MainMenuScene:
         while True:
             dt = clock.tick(FPS) / 1000.0
             self.animation_timer += dt
+            
+            # Update particles
+            w, h = self.screen.get_size()
+            for particle in self.particles:
+                particle["x"] += particle["vx"] * dt
+                particle["y"] += particle["vy"] * dt
+                
+                # Wrap around screen edges
+                if particle["x"] < 0:
+                    particle["x"] = w
+                elif particle["x"] > w:
+                    particle["x"] = 0
+                if particle["y"] < 0:
+                    particle["y"] = h
+                elif particle["y"] > h:
+                    particle["y"] = 0
+                
+                # Subtle pulsing alpha
+                particle["alpha"] = 50 + int(100 * abs(math.sin(self.animation_timer * 0.5 + particle["x"] * 0.01)))
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -92,6 +137,20 @@ class MainMenuScene:
         """Draw the main menu screen."""
         self.screen.fill(COLOR_BG)
         w, h = self.screen.get_size()
+        
+        # Draw background particles
+        for particle in self.particles:
+            x = int(particle["x"])
+            y = int(particle["y"])
+            size = int(particle["size"])
+            alpha = int(particle["alpha"])
+            color = particle["color"]
+            
+            # Draw particle with alpha
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            self.screen.blit(particle_surf, (x - size, y - size))
         
         # Title with subtle animation
         title_color = (255, 255, 210)

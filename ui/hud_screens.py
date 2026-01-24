@@ -17,6 +17,25 @@ if TYPE_CHECKING:
     from systems.inventory import Inventory, ItemDef
 
 
+def _resolve_item_def(item_id: str, inventory: Optional["Inventory"] = None) -> Optional["ItemDef"]:
+    """
+    Resolve an item definition, checking for randomized items first.
+    
+    Args:
+        item_id: Item ID to resolve
+        inventory: Optional inventory instance to check for randomized items
+    
+    Returns:
+        ItemDef if found, None otherwise
+    """
+    # If we have an inventory, use its method to resolve randomized items
+    if inventory is not None and hasattr(inventory, "_get_item_def"):
+        return inventory._get_item_def(item_id)
+    
+    # Fall back to base item definition
+    return get_item_def(item_id)
+
+
 def _build_item_stats_summary(stats: Dict[str, float]) -> str:
     """
     Build a compact one-line summary from an item's stats dict.
@@ -316,6 +335,7 @@ def _draw_equipment_section(
     y: int,
     equipped_map: dict,
     indent: int = 0,
+    inventory: Optional["Inventory"] = None,
 ) -> int:
     """
     Draw equipment section showing weapon, armor, trinket.
@@ -333,7 +353,8 @@ def _draw_equipment_section(
         if equipped_map:
             item_id = equipped_map.get(slot)
             if item_id:
-                item_def = get_item_def(item_id)
+                # Use inventory's method to resolve randomized items
+                item_def = _resolve_item_def(item_id, inventory)
         if item_def is None:
             line = f"{slot.capitalize()}: (none)"
         else:
@@ -446,7 +467,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         y += 30
     
     # Equipped section
-    y = _draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=20)
+    y = _draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=20, inventory=inv)
     
     # Right column: Backpack items
     right_x = w // 2 + 40
@@ -487,18 +508,18 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         all_equipped = _get_all_equipped_items(game)
         
         # Apply search first
-        filtered_items = search_items(all_items, search_query)
+        filtered_items = search_items(all_items, search_query, inv)
         
         # Apply filter
         filtered_items = filter_items(filtered_items, filter_mode, inv, all_equipped)
         
         # Apply sorting
-        sorted_items = sort_items(filtered_items, sort_mode)
+        sorted_items = sort_items(filtered_items, sort_mode, inv)
         
         # Group items by slot/category (for display with category headers)
         items_by_slot: Dict[str, List[str]] = {}
         for item_id in sorted_items:
-            item_def = get_item_def(item_id)
+            item_def = _resolve_item_def(item_id, inv)
             if item_def is None:
                 slot = "misc"
             else:
@@ -530,7 +551,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         else:
             # No category headers when sorting
             for item_id in sorted_items:
-                item_def = get_item_def(item_id)
+                item_def = _resolve_item_def(item_id, inv)
                 slot = item_def.slot if item_def else "misc"
                 flat_list.append((item_id, slot))
         
@@ -616,7 +637,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                             y += 24
                             last_shown_category = slot
                         
-                        item_def = get_item_def(item_id)
+                        item_def = _resolve_item_def(item_id, inv)
                         if item_def is None:
                             continue
                         
@@ -713,7 +734,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                 for item_id, (rect_x, rect_y, rect_width, rect_height) in item_positions.items():
                     item_rect = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
                     if item_rect.collidepoint(mx, my):
-                        hover_item_def = get_item_def(item_id)
+                        hover_item_def = _resolve_item_def(item_id, inv)
                         if hover_item_def:
                             hover_item_id = item_id
                             break
@@ -1177,9 +1198,10 @@ def draw_shop_fullscreen(game: "Game") -> None:
         # Get floor index for economy calculations
         floor_index = getattr(game, "floor", 1)
         
+        inv = getattr(game, "inventory", None)
         for i, item_id in enumerate(visible_items):
             actual_index = visible_start + i
-            item_def = get_item_def(item_id)
+            item_def = _resolve_item_def(item_id, inv)
             if item_def is None:
                 name = item_id
                 price = 0
@@ -1222,7 +1244,8 @@ def draw_shop_fullscreen(game: "Game") -> None:
             info_y = 110
 
             selected_id = active_list[cursor]
-            selected_def = get_item_def(selected_id)
+            inv = getattr(game, "inventory", None)
+            selected_def = _resolve_item_def(selected_id, inv)
 
             if selected_def is not None:
                 info_title = ui_font.render("Item Info:", True, (220, 220, 180))

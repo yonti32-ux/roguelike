@@ -13,7 +13,7 @@ from world.entities import Merchant  # NEW merchant NPC
 from world.entities import Trap  # NEW: traps
 from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
-from systems.loot import roll_chest_loot, get_shop_stock_for_floor
+from systems.loot import roll_chest_loot, roll_chest_consumable, get_shop_stock_for_floor
 from systems.events import get_event_def, EventResult  # NEW
 from systems.traps import get_trap_def, TrapResult  # NEW: trap system
 from systems.economy import (
@@ -510,8 +510,11 @@ class ExplorationController:
         # Mark as opened regardless of loot outcome
         chest.opened = True
 
-        # Roll item loot first
+        # Roll item loot
         item_id = roll_chest_loot(game.floor)
+        
+        # Roll consumable loot (separate from items)
+        consumable_id = roll_chest_consumable(game.floor)
 
         # Roll some gold for the chest as well
         # Floors deeper → more gold
@@ -522,34 +525,58 @@ class ExplorationController:
         if hasattr(game.hero_stats, "add_gold"):
             gained_gold = game.hero_stats.add_gold(gold_amount)
 
-        # Build message based on what we actually got
-        if item_id is None:
-            if gained_gold > 0:
-                game.last_message = f"You open the chest and find {gained_gold} gold."
+        # Collect all loot items for message
+        loot_items = []
+        item_color = None
+
+        # Add item to inventory if it dropped
+        if item_id is not None:
+            game.inventory.add_item(item_id, randomized=True)
+            # Store floor index for randomization context
+            if not hasattr(game.inventory, "_current_floor"):
+                game.inventory._current_floor = game.floor
             else:
-                game.last_message = "The chest is empty."
+                game.inventory._current_floor = game.floor
+
+            item_def = get_item_def(item_id)
+            item_name = item_def.name if item_def is not None else item_id
+            rarity = getattr(item_def, "rarity", None) if item_def is not None else None
+            item_color = get_rarity_color(rarity) if rarity else None
+            loot_items.append(item_name)
+
+        # Add consumable to inventory if it dropped
+        if consumable_id is not None:
+            game.inventory.add_item(consumable_id, randomized=False)
+            from systems.consumables import get_consumable
+            consumable_def = get_consumable(consumable_id)
+            consumable_name = consumable_def.name if consumable_def is not None else consumable_id
+            loot_items.append(consumable_name)
+
+        # Build message based on what we actually got
+        if not loot_items and gained_gold == 0:
+            game.last_message = "The chest is empty."
             return
 
-        # Add item to inventory (with randomization enabled)
-        game.inventory.add_item(item_id, randomized=True)
-        # Store floor index for randomization context
-        if not hasattr(game.inventory, "_current_floor"):
-            game.inventory._current_floor = game.floor
-        else:
-            game.inventory._current_floor = game.floor
-
-        item_def = get_item_def(item_id)
-        item_name = item_def.name if item_def is not None else item_id
-        rarity = getattr(item_def, "rarity", None) if item_def is not None else None
-        color = get_rarity_color(rarity) if rarity else None
-
+        # Construct message with all loot
+        msg_parts = []
+        if loot_items:
+            if len(loot_items) == 1:
+                msg_parts.append(loot_items[0])
+            else:
+                # Join items with commas, and "and" before the last one
+                msg_parts.append(", ".join(loot_items[:-1]) + f" and {loot_items[-1]}")
+        
         if gained_gold > 0:
-            msg = f"You open the chest and find: {item_name} and {gained_gold} gold."
-        else:
-            msg = f"You open the chest and find: {item_name}."
+            if msg_parts:
+                msg_parts.append(f"{gained_gold} gold")
+            else:
+                msg_parts.append(f"{gained_gold} gold")
 
-        if color is not None and hasattr(game, "add_message_colored"):
-            game.add_message_colored(msg, color)
+        msg = f"You open the chest and find: {', '.join(msg_parts)}."
+
+        # Use colored message if we have an item with rarity
+        if item_color is not None and hasattr(game, "add_message_colored"):
+            game.add_message_colored(msg, item_color)
         else:
             game.last_message = msg
 
@@ -732,8 +759,14 @@ class ExplorationController:
         # Deduct gold directly; HeroStats.add_gold is for positive amounts only.
         game.hero_stats.gold = hero_gold - price
 
+        # Set floor context for item randomization
+        if not hasattr(game.inventory, "_current_floor"):
+            game.inventory._current_floor = floor_index
+        else:
+            game.inventory._current_floor = floor_index
+
         # Grant the item
-        game.inventory.add_item(item_id)
+        game.inventory.add_item(item_id, randomized=True)
         item_name = getattr(item_def, "name", item_id)
         game.last_message = f"You buy {item_name} for {price} gold."
 
@@ -1002,7 +1035,8 @@ class ExplorationController:
             return
 
         # 4) Try trap detection/disarming
-        trap = self._find_trap_near_player(max_distance_px=TILE_SIZE // 2)
+        # Use TILE_SIZE (larger than trigger radius) so player can disarm from adjacent tiles
+        trap = self._find_trap_near_player(max_distance_px=TILE_SIZE)
         if trap is not None:
             if trap.triggered or trap.disarmed:
                 game.last_message = "The trap has already been triggered or disarmed."

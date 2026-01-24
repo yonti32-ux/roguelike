@@ -6,8 +6,10 @@ from typing import Optional, List, Dict
 # Works both as part of the "systems" package and if run locally for testing
 try:
     from .inventory import ItemDef, all_items
+    from .consumables import ConsumableDef, all_consumables
 except ImportError:  # fallback if not imported as a package
     from inventory import ItemDef, all_items
+    from consumables import ConsumableDef, all_consumables
 
 
 # ----------------- Rarity weighting -----------------
@@ -67,6 +69,17 @@ def _weighted_choice(items: List[ItemDef], weights: List[float]) -> Optional[Ite
     return chosen
 
 
+def _weighted_choice_consumable(consumables: List[ConsumableDef], weights: List[float]) -> Optional[ConsumableDef]:
+    """Weighted choice for consumables."""
+    if not consumables:
+        return None
+    if len(consumables) == 1:
+        return consumables[0]
+
+    chosen = random.choices(consumables, weights=weights, k=1)[0]
+    return chosen
+
+
 # ----------------- Drop chances -----------------
 
 def battle_drop_chance(floor_index: int) -> float:
@@ -89,6 +102,42 @@ def chest_drop_chance(floor_index: int) -> float:
     """
     base = 0.80 + min(0.15, floor_index * 0.02)  # up to +15%
     return max(0.0, min(0.95, base))  # 80% -> 95%
+
+
+def chest_consumable_drop_chance(floor_index: int) -> float:
+    """
+    Chance that a consumable drops from a chest.
+    
+    Chests have a good chance of containing consumables.
+    Starts at 50% and scales up to 75% at deeper floors.
+    """
+    base = 0.50 + min(0.25, floor_index * 0.04)  # up to +25% at deeper floors
+    return max(0.0, min(0.75, base))  # 50% -> 75%
+
+
+def battle_consumable_drop_chance(floor_index: int) -> float:
+    """
+    Chance that a consumable drops from a normal battle.
+    
+    Consumables drop more frequently than items since they're more common.
+    Starts at 35% and scales up to 60% at deeper floors.
+    """
+    base = 0.35 + min(0.25, floor_index * 0.05)  # up to +25% at deeper floors
+    return max(0.0, min(0.60, base))  # 35% -> 60%
+
+
+def _candidate_consumables() -> List[ConsumableDef]:
+    """
+    Return all consumable defs that are valid for random drops.
+    
+    Focuses on basic consumables (common and uncommon rarity).
+    """
+    candidates: List[ConsumableDef] = []
+    for cons in all_consumables():
+        # Prioritize common and uncommon consumables for drops
+        if cons.rarity.lower() in ("common", "uncommon"):
+            candidates.append(cons)
+    return candidates
 
 
 # ----------------- Public API -----------------
@@ -139,6 +188,74 @@ def roll_chest_loot(floor_index: int) -> Optional[str]:
         weights.append(_rarity_weight(it.rarity, floor_index, source="chest"))
 
     chosen = _weighted_choice(items, weights)
+    return chosen.id if chosen is not None else None
+
+
+def roll_battle_consumable(floor_index: int) -> Optional[str]:
+    """
+    Roll for a consumable drop from a normal battle.
+    
+    This is separate from item loot - consumables drop independently
+    and more frequently to encourage their use.
+    
+    Returns:
+        consumable_id (str) if something drops, or None if no consumable this time.
+    """
+    # First: decide if a consumable drops at all
+    if random.random() > battle_consumable_drop_chance(floor_index):
+        return None
+
+    consumables = _candidate_consumables()
+    if not consumables:
+        return None
+
+    # Weight by rarity - common consumables are more likely
+    weights: List[float] = []
+    for cons in consumables:
+        # Common consumables get higher weight
+        if cons.rarity.lower() == "common":
+            weight = 70.0
+        elif cons.rarity.lower() == "uncommon":
+            weight = 30.0
+        else:
+            weight = 10.0
+        weights.append(weight)
+
+    chosen = _weighted_choice_consumable(consumables, weights)
+    return chosen.id if chosen is not None else None
+
+
+def roll_chest_consumable(floor_index: int) -> Optional[str]:
+    """
+    Roll for a consumable drop from a chest.
+    
+    This is separate from item loot - consumables drop independently
+    from chests to provide more variety in rewards.
+    
+    Returns:
+        consumable_id (str) if something drops, or None if no consumable this time.
+    """
+    # First: decide if a consumable drops at all
+    if random.random() > chest_consumable_drop_chance(floor_index):
+        return None
+
+    consumables = _candidate_consumables()
+    if not consumables:
+        return None
+
+    # Weight by rarity - common consumables are more likely
+    weights: List[float] = []
+    for cons in consumables:
+        # Common consumables get higher weight
+        if cons.rarity.lower() == "common":
+            weight = 70.0
+        elif cons.rarity.lower() == "uncommon":
+            weight = 30.0
+        else:
+            weight = 10.0
+        weights.append(weight)
+
+    chosen = _weighted_choice_consumable(consumables, weights)
     return chosen.id if chosen is not None else None
 
 

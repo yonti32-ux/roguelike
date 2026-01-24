@@ -85,12 +85,19 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
     hs = game.hero_stats
     base = getattr(hs, "base_stats", None)
 
+    # Get equipment bonuses from inventory
+    equipment_mods = {}
+    if game.inventory is not None:
+        equipment_mods = game.inventory.total_stat_modifiers()
+
     # ---- Max HP ----
     max_hp = getattr(hs, "max_hp", None)
     if max_hp is None and base is not None:
         max_hp = getattr(base, "max_hp", getattr(base, "hp", None))
     if max_hp is None:
         max_hp = getattr(game.player, "max_hp", 10)
+    # Add equipment bonuses
+    max_hp += int(equipment_mods.get("max_hp", 0))
     game.player.max_hp = max_hp
     if full_heal:
         game.player.hp = max_hp
@@ -103,6 +110,8 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
         attack_val = getattr(base, "attack", getattr(base, "atk", None))
     if attack_val is None:
         attack_val = getattr(game.player, "attack", 1)
+    # Add equipment bonuses
+    attack_val += int(equipment_mods.get("attack", 0))
 
     # keep both names in sync so exploration & battle use same value
     game.player.attack = attack_val
@@ -114,6 +123,8 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
         defense_val = getattr(base, "defense", getattr(base, "def_", None))
     if defense_val is None:
         defense_val = getattr(game.player, "defense", 0)
+    # Add equipment bonuses
+    defense_val += int(equipment_mods.get("defense", 0))
     game.player.defense = defense_val
 
     # ---- Derived stats ----
@@ -127,6 +138,9 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
     # HeroStats already exposes max_stamina / max_mana properties.
     max_sta = max(0, int(getattr(hs, "max_stamina", 0)))
     max_mana = max(0, int(getattr(hs, "max_mana", 0)))
+    # Add equipment bonuses
+    max_sta += int(equipment_mods.get("max_stamina", 0))
+    max_mana += int(equipment_mods.get("max_mana", 0))
 
     game.player.max_stamina = max_sta
     game.player.max_mana = max_mana

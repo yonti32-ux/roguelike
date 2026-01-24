@@ -190,6 +190,9 @@ def _serialize_hero_stats(hero_stats: HeroStats) -> Dict[str, Any]:
         "base": _serialize_stat_block(hero_stats.base),
         "perks": list(hero_stats.perks),
         "skill_slots": hero_stats.skill_slots,
+        "skill_loadouts": hero_stats.skill_loadouts,
+        "current_loadout": hero_stats.current_loadout,
+        "max_skill_slots": hero_stats.max_skill_slots,
         "skill_points": hero_stats.skill_points,
         "skill_ranks": dict(hero_stats.skill_ranks),
     }
@@ -234,6 +237,9 @@ def _serialize_companion(companion: CompanionState) -> Dict[str, Any]:
         "perks": list(companion.perks),
         "equipped": dict(companion.equipped),
         "skill_slots": companion.skill_slots,
+        "skill_loadouts": getattr(companion, "skill_loadouts", {}),
+        "current_loadout": getattr(companion, "current_loadout", "default"),
+        "max_skill_slots": getattr(companion, "max_skill_slots", 4),
         "skill_points": companion.skill_points,
         "skill_ranks": dict(companion.skill_ranks),
     }
@@ -384,6 +390,11 @@ def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any]) -> None
     hero_stats.hero_name = data.get("hero_name", "Adventurer")
     hero_stats.perks = list(data.get("perks", []))
     hero_stats.skill_slots = list(data.get("skill_slots", [None, None, None, None]))
+    hero_stats.skill_loadouts = dict(data.get("skill_loadouts", {}))
+    hero_stats.current_loadout = data.get("current_loadout", "default")
+    hero_stats.max_skill_slots = int(data.get("max_skill_slots", 4))
+    # Ensure default loadout exists
+    hero_stats._ensure_default_loadout()
     hero_stats.skill_points = data.get("skill_points", 0)
     hero_stats.skill_ranks = dict(data.get("skill_ranks", {}))
     
@@ -426,9 +437,14 @@ def _deserialize_companion(data: Dict[str, Any]) -> CompanionState:
         perks=list(data.get("perks", [])),
         equipped=dict(data.get("equipped", {"weapon": None, "armor": None, "trinket": None})),
         skill_slots=list(data.get("skill_slots", [None, None, None, None])),
+        skill_loadouts=dict(data.get("skill_loadouts", {})),
+        current_loadout=data.get("current_loadout", "default"),
+        max_skill_slots=int(data.get("max_skill_slots", 4)),
         skill_points=data.get("skill_points", 0),
         skill_ranks=dict(data.get("skill_ranks", {})),
     )
+    # Ensure default loadout exists for backward compatibility
+    companion._ensure_default_loadout()
     return companion
 
 

@@ -221,7 +221,70 @@ class BattleCombat:
             "is_kill": is_kill,
         })
         
+        # Trigger screen effects based on damage
+        if is_crit:
+            # Big flash for crits
+            self.scene.trigger_screen_flash(color=(255, 255, 150), intensity=0.4)
+            self.scene.trigger_screen_shake(intensity=0.8)
+        elif damage >= 20:
+            # Medium shake for big hits
+            self.scene.trigger_screen_shake(intensity=0.5)
+        elif damage >= 10:
+            # Small shake for medium hits
+            self.scene.trigger_screen_shake(intensity=0.3)
+        
+        if is_kill:
+            # Extra shake for kills
+            self.scene.trigger_screen_shake(intensity=0.6)
+            # Create particle explosion effect
+            self._create_kill_particles(target)
+        
         return damage
+    
+    def _create_kill_particles(self, target: BattleUnit) -> None:
+        """Create particle explosion effect when an enemy dies."""
+        import random
+        import math
+        
+        # Get target position in screen space
+        target_x = self.scene.grid_origin_x + target.gx * self.scene.cell_size + self.scene.cell_size // 2
+        target_y = self.scene.grid_origin_y + target.gy * self.scene.cell_size + self.scene.cell_size // 2
+        
+        # Create 15-20 particles
+        num_particles = random.randint(15, 20)
+        colors = [
+            (255, 200, 100),  # Orange
+            (255, 150, 50),   # Dark orange
+            (255, 100, 0),    # Red-orange
+            (200, 50, 50),    # Red
+        ]
+        
+        for _ in range(num_particles):
+            # Random velocity in all directions
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(100, 300)
+            vx = math.cos(angle) * speed
+            vy = math.sin(angle) * speed - random.uniform(50, 150)  # Slight upward bias
+            
+            # Random lifetime
+            lifetime = random.uniform(0.5, 1.2)
+            
+            # Random color from palette
+            color = random.choice(colors)
+            
+            # Random size
+            size = random.randint(2, 5)
+            
+            self.scene._particles.append({
+                "x": float(target_x),
+                "y": float(target_y),
+                "vx": vx,
+                "vy": vy,
+                "timer": lifetime,
+                "max_time": lifetime,
+                "color": color,
+                "size": size,
+            })
     
     def get_damage_preview(self, unit: BattleUnit, target: BattleUnit) -> Tuple[Optional[int], Optional[int]]:
         """

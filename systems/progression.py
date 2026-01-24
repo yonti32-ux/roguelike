@@ -42,9 +42,20 @@ class HeroStats:
 
     # Hotbar-style skill layout; indices 0–3 map to SKILL_1..SKILL_4.
     # Values are skill IDs (strings) or None.
+    # DEPRECATED: Use skill_loadouts instead. This is kept for backward compatibility.
     skill_slots: List[Optional[str]] = field(
         default_factory=lambda: [None, None, None, None]
     )
+
+    # Skill loadout system: named loadouts for different skill configurations
+    # Format: {"loadout_name": [skill_id1, skill_id2, ...]}
+    skill_loadouts: Dict[str, List[Optional[str]]] = field(default_factory=dict)
+    
+    # Current active loadout name (defaults to "default" if not set)
+    current_loadout: str = "default"
+    
+    # Maximum number of skill slots (can be increased by perks)
+    max_skill_slots: int = 4
 
     # Skill progression system
     # Available skill points to spend on upgrading skills
@@ -194,6 +205,12 @@ class HeroStats:
         # as the first slotted offensive skill if available.
         self.skill_slots = [None, None, None, None]
         self.ensure_default_skill_slots(["power_strike"])
+        
+        # Initialize loadout system with default loadout
+        self.skill_loadouts = {}
+        self.current_loadout = "default"
+        self.max_skill_slots = 4
+        self._ensure_default_loadout()
 
     # ------------------------------------------------------------------
     # Convenience properties (so older code still works)
@@ -277,11 +294,90 @@ class HeroStats:
         elif available:
             ordered.append(available[0])
 
-        # Pad to 4 entries
-        while len(ordered) < 4:
+        # Pad to max_skill_slots entries
+        while len(ordered) < self.max_skill_slots:
             ordered.append(None)
 
-        self.skill_slots = ordered[:4]
+        self.skill_slots = ordered[:self.max_skill_slots]
+    
+    def _ensure_default_loadout(self) -> None:
+        """Ensure the default loadout exists and is populated from skill_slots."""
+        if "default" not in self.skill_loadouts:
+            # Migrate from skill_slots if available
+            if any(slot for slot in self.skill_slots):
+                self.skill_loadouts["default"] = list(self.skill_slots)
+            else:
+                # Create empty default loadout
+                self.skill_loadouts["default"] = [None] * self.max_skill_slots
+    
+    def get_current_loadout_slots(self) -> List[Optional[str]]:
+        """Get the skill slots for the current active loadout."""
+        self._ensure_default_loadout()
+        
+        # If current loadout doesn't exist, use default
+        if self.current_loadout not in self.skill_loadouts:
+            self.current_loadout = "default"
+            self._ensure_default_loadout()
+        
+        loadout = self.skill_loadouts.get(self.current_loadout, [])
+        
+        # Ensure loadout has correct length
+        while len(loadout) < self.max_skill_slots:
+            loadout.append(None)
+        
+        # Trim to max_skill_slots
+        return loadout[:self.max_skill_slots]
+    
+    def set_loadout_slot(self, loadout_name: str, slot_index: int, skill_id: Optional[str]) -> bool:
+        """Set a skill in a specific slot of a loadout. Returns True if successful."""
+        if slot_index < 0 or slot_index >= self.max_skill_slots:
+            return False
+        
+        if loadout_name not in self.skill_loadouts:
+            # Create new loadout
+            self.skill_loadouts[loadout_name] = [None] * self.max_skill_slots
+        
+        loadout = self.skill_loadouts[loadout_name]
+        while len(loadout) < self.max_skill_slots:
+            loadout.append(None)
+        
+        loadout[slot_index] = skill_id
+        return True
+    
+    def create_loadout(self, loadout_name: str, copy_from: Optional[str] = None) -> bool:
+        """Create a new loadout. If copy_from is provided, copies from that loadout."""
+        if loadout_name in self.skill_loadouts:
+            return False  # Loadout already exists
+        
+        if copy_from and copy_from in self.skill_loadouts:
+            self.skill_loadouts[loadout_name] = list(self.skill_loadouts[copy_from])
+        else:
+            self.skill_loadouts[loadout_name] = [None] * self.max_skill_slots
+        
+        return True
+    
+    def delete_loadout(self, loadout_name: str) -> bool:
+        """Delete a loadout. Cannot delete the default loadout."""
+        if loadout_name == "default":
+            return False
+        
+        if loadout_name in self.skill_loadouts:
+            del self.skill_loadouts[loadout_name]
+            # If we deleted the current loadout, switch to default
+            if self.current_loadout == loadout_name:
+                self.current_loadout = "default"
+            return True
+        return False
+    
+    def switch_loadout(self, loadout_name: str) -> bool:
+        """Switch to a different loadout. Returns True if successful."""
+        self._ensure_default_loadout()
+        if loadout_name in self.skill_loadouts:
+            self.current_loadout = loadout_name
+            # Sync to skill_slots for backward compatibility
+            self.skill_slots = self.get_current_loadout_slots()
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Skill rank helpers

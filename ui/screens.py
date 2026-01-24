@@ -114,17 +114,40 @@ class InventoryScreen:
                 game.cycle_inventory_focus(+1)
                 return
 
-        # Get inventory and group items by slot/category
+        # Get inventory
         inventory = getattr(game, "inventory", None)
         if inventory is None:
             return
 
-        from systems.inventory import get_item_def
+        # Apply the same filtering, sorting, and search as the display code
+        from ui.inventory_enhancements import FilterMode, SortMode, filter_items, sort_items, search_items
+        from ui.hud_screens import _get_all_equipped_items
         
-        # Group items by slot
+        filter_mode = getattr(game, "inventory_filter", FilterMode.ALL)
+        sort_mode = getattr(game, "inventory_sort", SortMode.DEFAULT)
+        search_query = getattr(game, "inventory_search", "") or ""
+        
+        all_items = list(inventory.items)
+        all_equipped = _get_all_equipped_items(game)
+        
+        # Apply search first
+        filtered_items = search_items(all_items, search_query, inventory)
+        
+        # Apply filter
+        filtered_items = filter_items(filtered_items, filter_mode, inventory, all_equipped)
+        
+        # Apply sorting
+        sorted_items = sort_items(filtered_items, sort_mode, inventory)
+        
+        # Group items by slot/category (for display with category headers)
         items_by_slot: Dict[str, List[str]] = {}
-        for item_id in inventory.items:
-            item_def = get_item_def(item_id)
+        for item_id in sorted_items:
+            # Use inventory's method to resolve randomized items
+            if hasattr(inventory, "_get_item_def"):
+                item_def = inventory._get_item_def(item_id)
+            else:
+                from systems.inventory import get_item_def
+                item_def = get_item_def(item_id)
             if item_def is None:
                 slot = "misc"
             else:
@@ -136,20 +159,34 @@ class InventoryScreen:
         # Build flat list with category markers: (item_id or None for category header, slot_name)
         flat_list: List[tuple[Optional[str], str]] = []
         slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
-        for slot in slot_order:
-            if slot in items_by_slot and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
         
-        # Add any remaining slots not in the preferred order
-        for slot in sorted(items_by_slot.keys()):
-            if slot not in slot_order and items_by_slot[slot]:
-                flat_list.append((None, slot))  # Category header
-                for item_id in items_by_slot[slot]:
-                    flat_list.append((item_id, slot))
+        # If sorting is not default, don't show category headers
+        show_categories = sort_mode == SortMode.DEFAULT
         
-        total_items = len([x for x in flat_list if x[0] is not None])  # Count only actual items
+        if show_categories:
+            for slot in slot_order:
+                if slot in items_by_slot and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+            
+            # Add any remaining slots not in the preferred order
+            for slot in sorted(items_by_slot.keys()):
+                if slot not in slot_order and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+        else:
+            # No category headers when sorting
+            for item_id in sorted_items:
+                if hasattr(inventory, "_get_item_def"):
+                    item_def = inventory._get_item_def(item_id)
+                else:
+                    from systems.inventory import get_item_def
+                    item_def = get_item_def(item_id)
+                slot = item_def.slot if item_def else "misc"
+                flat_list.append((item_id, slot))
+        
         cursor = getattr(game, "inventory_cursor", 0)
         page_size = getattr(game, "inventory_page_size", 20)
         
@@ -161,9 +198,6 @@ class InventoryScreen:
         # Clamp cursor to valid range
         cursor = max(0, min(cursor, len(item_indices) - 1))
         game.inventory_cursor = cursor
-        
-        # Get current item index in flat_list
-        current_flat_index = item_indices[cursor]
         
         # Cursor navigation (up / down)
         if input_manager is not None:
@@ -287,7 +321,13 @@ class InventoryScreen:
                 if 0 <= cursor < len(item_indices):
                     item_id = flat_list[item_indices[cursor]][0]
                     if item_id:
-                        item_def = get_item_def(item_id)
+                        inv = getattr(game, "inventory", None)
+                        # Use inventory's method to resolve randomized items
+                        if inv and hasattr(inv, "_get_item_def"):
+                            item_def = inv._get_item_def(item_id)
+                        else:
+                            from systems.inventory import get_item_def
+                            item_def = get_item_def(item_id)
                         if item_def is not None and item_def.slot == "consumable":
                             # Use consumable instead of equipping it.
                             if hasattr(game, "use_consumable_from_inventory"):
@@ -300,7 +340,13 @@ class InventoryScreen:
                 if 0 <= cursor < len(item_indices):
                     item_id = flat_list[item_indices[cursor]][0]
                     if item_id:
-                        item_def = get_item_def(item_id)
+                        inv = getattr(game, "inventory", None)
+                        # Use inventory's method to resolve randomized items
+                        if inv and hasattr(inv, "_get_item_def"):
+                            item_def = inv._get_item_def(item_id)
+                        else:
+                            from systems.inventory import get_item_def
+                            item_def = get_item_def(item_id)
                         if item_def is not None and item_def.slot == "consumable":
                             if hasattr(game, "use_consumable_from_inventory"):
                                 game.use_consumable_from_inventory(item_id)
@@ -583,22 +629,110 @@ class SkillScreen(BaseScreen):
 
     def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
         if event.type != pygame.KEYDOWN:
-            # Handle mouse events for skill tree interaction
+            # Handle mouse events for skill tree interaction and loadout management
             skill_screen_core = getattr(game, "skill_screen", None)
             if skill_screen_core is not None:
+                # Only access pos for mouse events
+                if hasattr(event, "pos"):
+                    mx, my = event.pos
+                else:
+                    return
+                
                 # Mouse click support
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
-                        mx, my = event.pos
+                        # Only allow dragging if hovering over a valid element
+                        unlocked_skills = skill_screen_core.get_unlocked_skills()
+                        
+                        # Check if clicking on a loadout slot
+                        slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
+                        if slot_index is not None:
+                            is_hero, comp, _ = skill_screen_core.get_focused_entity()
+                            entity_stats = game.hero_stats if is_hero else comp
+                            
+                            if entity_stats:
+                                panel_x = 40
+                                panel_w = 320
+                                panel_y = 160
+                                slot_start_y = panel_y + 60
+                                slot_height = 50
+                                slot_spacing = 8
+                                y = slot_start_y + slot_index * (slot_height + slot_spacing)
+                                
+                                # Check if clicking remove button (X)
+                                remove_rect = pygame.Rect(panel_x + panel_w - 35, y + 5, 25, 25)
+                                if remove_rect.collidepoint(mx, my):
+                                    # Remove skill from slot
+                                    loadout_slots = entity_stats.get_current_loadout_slots()
+                                    if slot_index < len(loadout_slots) and loadout_slots[slot_index]:
+                                        entity_stats.set_loadout_slot(entity_stats.current_loadout, slot_index, None)
+                                        # Sync to skill_slots
+                                        entity_stats.skill_slots = entity_stats.get_current_loadout_slots()
+                                        game.add_message("Skill removed from loadout")
+                                else:
+                                    # Start dragging from slot
+                                    loadout_slots = entity_stats.get_current_loadout_slots()
+                                    if slot_index < len(loadout_slots) and loadout_slots[slot_index]:
+                                        skill_screen_core.dragged_skill_id = loadout_slots[slot_index]
+                                        skill_screen_core.dragged_slot_index = slot_index
+                            return
+                        
+                        # Check if clicking on available skill (only if hovering)
+                        skill_id = skill_screen_core.get_available_skill_at_pos(mx, my, unlocked_skills)
+                        if skill_id:
+                            # Only start drag if actually hovering over the skill
+                            skill_screen_core.dragged_skill_id = skill_id
+                            skill_screen_core.dragged_slot_index = None
+                            return
+                        
+                        # Check if clicking on skill tree node
                         clicked_skill_id = skill_screen_core.get_node_at_screen_pos(
                             mx, my, game.screen.get_width(), game.screen.get_height()
                         )
                         if clicked_skill_id:
                             skill_screen_core.selected_skill_id = clicked_skill_id
+                    
                     elif event.button == 4:  # Mouse wheel up
                         skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
                     elif event.button == 5:  # Mouse wheel down
                         skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+                
+                # Mouse button release (drop skill)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1 and skill_screen_core.dragged_skill_id:
+                        is_hero, comp, _ = skill_screen_core.get_focused_entity()
+                        entity_stats = game.hero_stats if is_hero else comp
+                        
+                        if entity_stats:
+                            # Check if dropping on a valid slot
+                            slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
+                            if slot_index is not None:
+                                # If dragging from a slot, clear the old slot first
+                                if skill_screen_core.dragged_slot_index is not None:
+                                    if skill_screen_core.dragged_slot_index != slot_index:
+                                        entity_stats.set_loadout_slot(
+                                            entity_stats.current_loadout,
+                                            skill_screen_core.dragged_slot_index,
+                                            None
+                                        )
+                                
+                                # Set skill in new slot
+                                entity_stats.set_loadout_slot(
+                                    entity_stats.current_loadout,
+                                    slot_index,
+                                    skill_screen_core.dragged_skill_id
+                                )
+                                # Sync to skill_slots
+                                entity_stats.skill_slots = entity_stats.get_current_loadout_slots()
+                                game.add_message("Skill assigned to loadout")
+                            
+                            skill_screen_core.dragged_skill_id = None
+                            skill_screen_core.dragged_slot_index = None
+                
+                # Mouse motion (hover tracking)
+                elif event.type == pygame.MOUSEMOTION:
+                    # Update hover state using actual mouse position
+                    skill_screen_core.hovered_slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
             return
 
         input_manager = getattr(game, "input_manager", None)
@@ -695,6 +829,34 @@ class SkillScreen(BaseScreen):
         elif key == pygame.K_MINUS:
             skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
 
+        # Loadout management shortcuts
+        is_hero, comp, _ = skill_screen_core.get_focused_entity()
+        entity_stats = game.hero_stats if is_hero else comp
+        
+        if entity_stats:
+            # Create new loadout (N key)
+            if key == pygame.K_n:
+                loadout_names = list(getattr(entity_stats, "skill_loadouts", {}).keys())
+                new_name = f"loadout_{len(loadout_names)}"
+                if entity_stats.create_loadout(new_name, copy_from=entity_stats.current_loadout):
+                    entity_stats.switch_loadout(new_name)
+                    game.add_message(f"Created new loadout: {new_name}")
+            
+            # Switch loadout with number keys (1-9)
+            if pygame.K_1 <= key <= pygame.K_9:
+                loadout_index = key - pygame.K_1
+                loadout_names = sorted(list(getattr(entity_stats, "skill_loadouts", {}).keys()))
+                if loadout_index < len(loadout_names):
+                    entity_stats.switch_loadout(loadout_names[loadout_index])
+                    game.add_message(f"Switched to loadout: {loadout_names[loadout_index]}")
+            
+            # Delete current loadout (Delete key, but not default)
+            if key == pygame.K_DELETE:
+                current = getattr(entity_stats, "current_loadout", "default")
+                if current != "default":
+                    if entity_stats.delete_loadout(current):
+                        game.add_message(f"Deleted loadout: {current}")
+        
         # Upgrade selected skill with Enter/Space
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.CONFIRM, event):

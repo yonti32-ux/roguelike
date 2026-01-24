@@ -49,7 +49,10 @@ class Tooltip:
     
     def _create_tooltip_data(self, target: Any) -> Optional[TooltipData]:
         """Create tooltip data from a hover target."""
-        if isinstance(target, dict):
+        # If it's already a TooltipData object, return it directly
+        if isinstance(target, TooltipData):
+            return target
+        elif isinstance(target, dict):
             # Dictionary with tooltip info
             return TooltipData(
                 title=target.get("title", ""),

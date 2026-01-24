@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Tuple
 
 import math
 import random
@@ -91,6 +91,8 @@ from engine.battle.ai import BattleAI
 from engine.battle.reactions import BattleReactions, ReactionType
 from ..core.config import get_config
 from ui.ui_scaling import get_ui_scale, get_hud_panel_width, get_hud_spacing
+from ui.tooltip import Tooltip
+from ui.status_display import create_status_tooltip_data
 
 
 
@@ -191,6 +193,10 @@ class BattleScene:
         self.movement_target: Optional[tuple[int, int]] = None  # Target cell for movement
         self.mouse_hover_cell: Optional[tuple[int, int]] = None  # Cell currently hovered by mouse
         self.movement_key_press_count: int = 0  # Track number of movement key presses for looping
+        
+        # Tooltip system for status hover
+        self.tooltip = Tooltip()
+        self.mouse_pos: Tuple[int, int] = (0, 0)
 
         # --- Combat log ---
         self.log: List[str] = []
@@ -212,6 +218,21 @@ class BattleScene:
         
         # Animation timer for pulsing effects
         self.animation_time: float = 0.0
+        
+        # Screen shake effect
+        self.screen_shake: float = 0.0  # Current shake intensity (decays over time)
+        self.screen_shake_offset_x: float = 0.0
+        self.screen_shake_offset_y: float = 0.0
+        
+        # Screen flash effect (for crits)
+        self.screen_flash: float = 0.0  # Flash intensity (decays over time)
+        self.screen_flash_color: Tuple[int, int, int] = (255, 255, 255)
+        
+        # Particle effects for kills
+        self._particles: List[Dict] = []  # List of {x, y, vx, vy, timer, color, size}
+        
+        # Victory/defeat screen animation
+        self.victory_defeat_timer: float = 0.0  # Timer for victory/defeat screen animations
 
     def _init_hero_unit(self) -> BattleUnit:
         """Initialize the hero unit with skills, resources, and skill slots."""
@@ -290,13 +311,27 @@ class BattleScene:
             if pid == "sentinel":
                 self.reactions.grant_reaction_capability(hero_unit, ReactionType.ATTACK_OF_OPPORTUNITY)
 
-        # Prefer a persisted slot layout if present on the hero entity
-        # (e.g. synced from HeroStats.skill_slots). Fallback to auto layout.
-        hero_slots = getattr(self.player, "skill_slots", None)
-        if isinstance(hero_slots, list) and any(hero_slots):
-            self._apply_persisted_slots(hero_unit, hero_slots)
+        # Prefer loadout system, then persisted slot layout, then auto layout
+        hero_stats = getattr(self.player, "hero_stats", None)
+        if hero_stats:
+            # Use loadout system if available
+            loadout_slots = hero_stats.get_current_loadout_slots()
+            if any(loadout_slots):
+                self._apply_persisted_slots(hero_unit, loadout_slots)
+            else:
+                # Fallback to skill_slots for backward compatibility
+                hero_slots = getattr(self.player, "skill_slots", None)
+                if isinstance(hero_slots, list) and any(hero_slots):
+                    self._apply_persisted_slots(hero_unit, hero_slots)
+                else:
+                    self._auto_assign_skill_slots(hero_unit)
         else:
-            self._auto_assign_skill_slots(hero_unit)
+            # Legacy path: use skill_slots directly
+            hero_slots = getattr(self.player, "skill_slots", None)
+            if isinstance(hero_slots, list) and any(hero_slots):
+                self._apply_persisted_slots(hero_unit, hero_slots)
+            else:
+                self._auto_assign_skill_slots(hero_unit)
         
         return hero_unit
 
@@ -400,14 +435,20 @@ class BattleScene:
                         if pid == "sentinel":
                             self.reactions.grant_reaction_capability(companion_unit, ReactionType.ATTACK_OF_OPPORTUNITY)
 
-                # Use a persisted layout from CompanionState if possible,
-                # otherwise fall back to an automatic layout.
+                # Use loadout system, then persisted slot layout, then auto layout
                 applied_from_state = False
                 if comp_state is not None:
-                    state_slots = getattr(comp_state, "skill_slots", None)
-                    if isinstance(state_slots, list) and any(state_slots):
-                        self._apply_persisted_slots(companion_unit, state_slots)
+                    # Use loadout system if available
+                    loadout_slots = comp_state.get_current_loadout_slots()
+                    if any(loadout_slots):
+                        self._apply_persisted_slots(companion_unit, loadout_slots)
                         applied_from_state = True
+                    else:
+                        # Fallback to skill_slots for backward compatibility
+                        state_slots = getattr(comp_state, "skill_slots", None)
+                        if isinstance(state_slots, list) and any(state_slots):
+                            self._apply_persisted_slots(companion_unit, state_slots)
+                            applied_from_state = True
 
                 if not applied_from_state:
                     self._auto_assign_skill_slots(companion_unit)
@@ -1018,8 +1059,16 @@ class BattleScene:
             if sid not in ordered:
                 ordered.append(sid)
 
-        # Take at most MAX_SKILL_SLOTS skills for now.
-        unit.skill_slots = ordered[:MAX_SKILL_SLOTS]
+        # Take at most max_skill_slots skills (dynamic per unit)
+        max_slots = getattr(unit.entity, "max_skill_slots", None)
+        if max_slots is None:
+            # Try to get from hero_stats or companion state
+            hero_stats = getattr(unit.entity, "hero_stats", None)
+            if hero_stats:
+                max_slots = getattr(hero_stats, "max_skill_slots", MAX_SKILL_SLOTS)
+            else:
+                max_slots = MAX_SKILL_SLOTS
+        unit.skill_slots = ordered[:max_slots]
 
 
 
@@ -1050,11 +1099,32 @@ class BattleScene:
                 ordered.append(None)
                 continue
             ordered.append(sid)
-            if len(ordered) >= 4:
+            # Get max slots
+            max_slots = MAX_SKILL_SLOTS
+            hero_stats = getattr(unit.entity, "hero_stats", None)
+            if hero_stats:
+                max_slots = getattr(hero_stats, "max_skill_slots", MAX_SKILL_SLOTS)
+            else:
+                comp_state = getattr(unit.entity, "companion_state", None)
+                if comp_state:
+                    max_slots = getattr(comp_state, "max_skill_slots", MAX_SKILL_SLOTS)
+            
+            if len(ordered) >= max_slots:
                 break
 
-        # Ensure we always have MAX_SKILL_SLOTS entries to match SKILL_1..SKILL_4
-        while len(ordered) < MAX_SKILL_SLOTS:
+        # Get max slots for this unit
+        max_slots = MAX_SKILL_SLOTS
+        hero_stats = getattr(unit.entity, "hero_stats", None)
+        if hero_stats:
+            max_slots = getattr(hero_stats, "max_skill_slots", MAX_SKILL_SLOTS)
+        else:
+            # Try companion state
+            comp_state = getattr(unit.entity, "companion_state", None)
+            if comp_state:
+                max_slots = getattr(comp_state, "max_skill_slots", MAX_SKILL_SLOTS)
+        
+        # Ensure we always have max_slots entries
+        while len(ordered) < max_slots:
             ordered.append(None)
 
         # Strip trailing Nones so a fully-empty layout becomes [].
@@ -1617,8 +1687,11 @@ class BattleScene:
                 self.tutorial_scroll_offset = max(0, self.tutorial_scroll_offset - event.y * 30)
                 return True
         
-        # Handle mouse motion for path preview
+        # Handle mouse motion for path preview and tooltip
         if event.type == pygame.MOUSEMOTION:
+            # Update mouse position for tooltip
+            self.mouse_pos = event.pos
+            
             unit = self._active_unit()
             if unit and unit.side == "player" and self.status == "ongoing" and self.movement_mode:
                 grid_pos = self._screen_to_grid(event.pos[0], event.pos[1])
@@ -2072,6 +2145,15 @@ class BattleScene:
     def _find_ally_to_buff(self, unit: BattleUnit, max_range: int = 1) -> Optional[BattleUnit]:
         """Find an ally that could benefit from buffs (not already buffed). Delegates to AI module."""
         return self.ai.find_ally_to_buff(unit, max_range)
+    
+    def trigger_screen_shake(self, intensity: float = 1.0) -> None:
+        """Trigger a screen shake effect. Intensity should be between 0.0 and 1.0."""
+        self.screen_shake = max(self.screen_shake, intensity)  # Don't reduce if already shaking
+    
+    def trigger_screen_flash(self, color: Tuple[int, int, int] = (255, 255, 255), intensity: float = 0.3) -> None:
+        """Trigger a screen flash effect. Intensity should be between 0.0 and 1.0."""
+        self.screen_flash = max(self.screen_flash, intensity)  # Don't reduce if already flashing
+        self.screen_flash_color = color
 
     def update(self, dt: float) -> None:
         if self.status != "ongoing":
@@ -2079,6 +2161,31 @@ class BattleScene:
         
         # Update animation time for pulsing effects
         self.animation_time += dt
+        
+        # Update victory/defeat screen timer
+        if self.status in ("victory", "defeat"):
+            self.victory_defeat_timer += dt
+        
+        # Update screen shake
+        if self.screen_shake > 0:
+            # Decay shake intensity
+            self.screen_shake -= dt * 8.0  # Decay rate
+            self.screen_shake = max(0.0, self.screen_shake)
+            
+            # Generate random shake offset
+            if self.screen_shake > 0:
+                shake_intensity = self.screen_shake
+                self.screen_shake_offset_x = random.uniform(-shake_intensity, shake_intensity) * 5.0
+                self.screen_shake_offset_y = random.uniform(-shake_intensity, shake_intensity) * 5.0
+            else:
+                self.screen_shake_offset_x = 0.0
+                self.screen_shake_offset_y = 0.0
+        
+        # Update screen flash
+        if self.screen_flash > 0:
+            # Decay flash intensity
+            self.screen_flash -= dt * 10.0  # Fast decay for flash
+            self.screen_flash = max(0.0, self.screen_flash)
 
         # Update floating damage numbers
         for damage_info in self._floating_damage[:]:
@@ -2094,6 +2201,24 @@ class BattleScene:
             spark["timer"] -= dt
             if spark["timer"] <= 0:
                 self._hit_sparks.remove(spark)
+        
+        # Update particles
+        
+        # Update tooltip for status hover
+        hovered_status = self.renderer.get_hovered_status(self.mouse_pos)
+        if hovered_status:
+            tooltip_data = create_status_tooltip_data(hovered_status)
+            self.tooltip.update(dt, self.mouse_pos, tooltip_data)
+        else:
+            self.tooltip.update(dt, self.mouse_pos, None)
+        for particle in self._particles[:]:
+            particle["timer"] -= dt
+            particle["x"] += particle["vx"] * dt
+            particle["y"] += particle["vy"] * dt
+            # Apply gravity
+            particle["vy"] += 200.0 * dt  # Gravity
+            if particle["timer"] <= 0:
+                self._particles.remove(particle)
 
         # Camera movement (Shift + Arrow keys) - continuous movement while keys are held
         if self.targeting_mode is None:
@@ -2161,10 +2286,10 @@ class BattleScene:
         self.camera_x = max(-max_camera_offset, min(max_camera_offset, self.camera_x))
         self.camera_y = max(-max_camera_offset, min(max_camera_offset, self.camera_y))
         
-        # Apply camera offset
-        self.grid_origin_x = base_grid_x + int(self.camera_x)
+        # Apply camera offset + screen shake
+        self.grid_origin_x = base_grid_x + int(self.camera_x + self.screen_shake_offset_x)
         # Center the grid in the middle band, but never above the top_ui area
-        self.grid_origin_y = base_grid_y + int(self.camera_y)
+        self.grid_origin_y = base_grid_y + int(self.camera_y + self.screen_shake_offset_y)
 
         # ------------------------------------------------------------------
         # 2) Grid + units
@@ -2205,6 +2330,16 @@ class BattleScene:
             if not unit.is_alive:
                 continue
             is_active = (active_unit == unit)
+            # Use consistent unit ID - prefer unit.id if available, otherwise use memory id
+            unit_id = getattr(unit, "id", None)
+            if unit_id is None:
+                unit_id = f"battlefield_{id(unit)}"
+            else:
+                unit_id = str(unit_id)
+            status_tracker = {
+                "status_icon_rects": self.renderer.status_icon_rects,
+                "status_objects": self.renderer.status_objects,
+            }
             _draw_battle_unit_card(
                 surface,
                 self.font,
@@ -2222,6 +2357,8 @@ class BattleScene:
                 is_player=True,
                 statuses=getattr(unit, "statuses", []),
                 scale=ui_scale,
+                unit_id=str(unit_id),
+                status_tracker=status_tracker,
             )
         
         # Enemy unit cards (right side)
@@ -2232,6 +2369,11 @@ class BattleScene:
             if not unit.is_alive:
                 continue
             is_active = (active_unit == unit)
+            unit_id = getattr(unit, "id", f"enemy_{idx}")
+            status_tracker = {
+                "status_icon_rects": self.renderer.status_icon_rects,
+                "status_objects": self.renderer.status_objects,
+            }
             _draw_battle_unit_card(
                 surface,
                 self.font,
@@ -2249,6 +2391,8 @@ class BattleScene:
                 is_player=False,
                 statuses=getattr(unit, "statuses", []),
                 scale=ui_scale,
+                unit_id=str(unit_id),
+                status_tracker=status_tracker,
             )
         
         # Active unit HUD panel (center top) - keep existing for detailed info
@@ -2444,16 +2588,72 @@ class BattleScene:
             surface.blit(tutorial_hint, (screen_w - tutorial_hint.get_width() - 40, hint_y))
 
         elif self.status == "defeat":
+            # Animated defeat screen with fade-in
+            fade_alpha = min(200, int(self.victory_defeat_timer * 100))
+            
+            # Dark overlay
+            overlay = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, fade_alpha))
+            surface.blit(overlay, (0, 0))
+            
+            # Defeat text with pulsing effect
+            text_alpha = min(255, int(self.victory_defeat_timer * 200))
+            pulse = int(10 * abs(math.sin(self.victory_defeat_timer * 3.0)))
+            defeat_color = (255 + pulse, 80, 80)
+            
             dead_text = self.font.render(
                 "You died - press R to restart",
                 True,
-                (255, 80, 80),
+                defeat_color,
             )
             dead_x = 40
             dead_y = max(self.grid_origin_y - 30, 40)
-            surface.blit(dead_text, (dead_x, dead_y))
+            
+            # Fade in text
+            if text_alpha < 255:
+                text_surf = pygame.Surface((dead_text.get_width(), dead_text.get_height()), pygame.SRCALPHA)
+                text_surf.fill((*defeat_color, text_alpha))
+                text_surf.blit(dead_text, (0, 0))
+                surface.blit(text_surf, (dead_x, dead_y))
+            else:
+                surface.blit(dead_text, (dead_x, dead_y))
 
         elif self.status == "victory":
+            # Animated victory screen with fade-in and particles
+            fade_alpha = min(150, int(self.victory_defeat_timer * 80))
+            
+            # Light overlay (green tint for victory)
+            overlay = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+            overlay.fill((0, 100, 0, fade_alpha))
+            surface.blit(overlay, (0, 0))
+            
+            # Victory particles (confetti effect)
+            if self.victory_defeat_timer < 0.5:  # Only spawn particles in first 0.5s
+                if random.random() < 0.3:  # 30% chance per frame
+                    particle_x = random.uniform(0, screen_w)
+                    particle_y = -10
+                    particle_color = random.choice([
+                        (255, 255, 100),  # Yellow
+                        (100, 255, 100),  # Green
+                        (100, 200, 255),  # Blue
+                        (255, 150, 100),  # Orange
+                    ])
+                    self._particles.append({
+                        "x": particle_x,
+                        "y": particle_y,
+                        "vx": random.uniform(-50, 50),
+                        "vy": random.uniform(100, 200),
+                        "timer": random.uniform(2.0, 3.0),
+                        "max_time": random.uniform(2.0, 3.0),
+                        "color": particle_color,
+                        "size": random.randint(3, 6),
+                    })
+            
+            # Victory text with pulsing effect
+            text_alpha = min(255, int(self.victory_defeat_timer * 200))
+            pulse = int(15 * abs(math.sin(self.victory_defeat_timer * 2.0)))
+            victory_color = (120 + pulse, 220 + pulse, 120)
+            
             # Use the actual CONFIRM bindings for the victory hint
             confirm_part = "SPACE"
             input_manager = None
@@ -2479,6 +2679,17 @@ class BattleScene:
         # Draw log history viewer if active
         if self.show_log_history:
             self.renderer.draw_log_history(surface)
+        
+        # Draw screen flash overlay (for crits and big hits)
+        if self.screen_flash > 0:
+            flash_alpha = int(min(255, self.screen_flash * 255))
+            flash_surf = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+            flash_surf.fill((*self.screen_flash_color, flash_alpha))
+            surface.blit(flash_surf, (0, 0))
+        
+        # Draw status tooltip (if hovering over status icon)
+        if self.status == "ongoing":
+            self.tooltip.draw(surface, self.font)
         
         # Draw tutorial overlay if active (draws on top of everything, last)
         if self.show_tutorial:

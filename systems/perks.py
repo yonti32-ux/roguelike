@@ -190,6 +190,44 @@ def _apply_endurance_training(hero_stats: object) -> None:
     hero_stats.base.stamina_regen_bonus += 1
 
 
+# --- Skill slot expansion perks ---------------------------------------------
+
+def _apply_combat_mastery(hero_stats: object) -> None:
+    """Unlock 5th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
+
+
+def _apply_weapon_expertise(hero_stats: object) -> None:
+    """Unlock 6th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
+
+
+def _apply_legendary_warrior(hero_stats: object) -> None:
+    """Unlock 7th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
+
+
 # --- Perk trees -------------------------------------------------------------
 
 # ----------------- Vitality tree -----------------
@@ -590,6 +628,41 @@ register(Perk(
     tags=["offense", "skills", "mage"],
 ))
 
+# ----------------- Skill Slot Expansion perks -----------------
+
+register(Perk(
+    id="combat_mastery",
+    name="Combat Mastery",
+    description="Unlocks an additional skill slot (5 total).",
+    unlock_level=6,
+    branch="blade",
+    requires=["weapon_training_2"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_combat_mastery,
+))
+
+register(Perk(
+    id="weapon_expertise",
+    name="Weapon Expertise",
+    description="Unlocks an additional skill slot (6 total).",
+    unlock_level=10,
+    branch="blade",
+    requires=["combat_mastery"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_weapon_expertise,
+))
+
+register(Perk(
+    id="legendary_warrior",
+    name="Legendary Warrior",
+    description="Unlocks an additional skill slot (7 total).",
+    unlock_level=15,
+    branch="blade",
+    requires=["weapon_expertise"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_legendary_warrior,
+))
+
 
 # --- Helper functions used by the game --------------------------------------
 
@@ -760,6 +833,8 @@ class _DummyBaseStats:
         self.max_stamina: int = 0
         self.stamina_regen_bonus: int = 0
         self.mana_regen_bonus: int = 0
+        self.initiative: int = 0
+        self.movement_points_bonus: int = 0
 
 
 class _DummyHeroLike:
@@ -803,4 +878,6 @@ def total_stat_modifiers_for_perks(perk_ids: Iterable[str]) -> Dict[str, float]:
         "max_stamina": int(getattr(base, "max_stamina", 0)),
         "stamina_regen_bonus": int(getattr(base, "stamina_regen_bonus", 0)),
         "mana_regen_bonus": int(getattr(base, "mana_regen_bonus", 0)),
+        "initiative": int(getattr(base, "initiative", 0)),
+        "movement_points_bonus": int(getattr(base, "movement_points_bonus", 0)),
     }

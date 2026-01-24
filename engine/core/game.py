@@ -24,7 +24,7 @@ from systems.progression import HeroStats
 
 from systems import perks as perk_system
 from systems.inventory import Inventory, get_item_def
-from systems.loot import roll_battle_loot
+from systems.loot import roll_battle_loot, roll_battle_consumable
 from systems.party import CompanionState, get_companion, recalc_companion_stats_for_level
 
 from ui.hud_exploration import (
@@ -378,7 +378,11 @@ class Game:
                 "trinket": None,
             }
 
-        item_def = get_item_def(item_id)
+        # Use inventory's method to resolve randomized items
+        if self.inventory is not None and hasattr(self.inventory, "_get_item_def"):
+            item_def = self.inventory._get_item_def(item_id)
+        else:
+            item_def = get_item_def(item_id)
         if item_def is None:
             self.last_message = "That item cannot be equipped."
             return
@@ -1142,6 +1146,20 @@ class Game:
                 item_def = get_item_def(item_id)
                 item_name = item_def.name if item_def is not None else item_id
                 messages.append(f"You find {item_name} among the remains.")
+
+        # --- Consumable drop (separate from item loot) ---
+        # Roll for consumable loot (35-60% chance based on floor)
+        if self.inventory is not None:
+            consumable_id = roll_battle_consumable(self.floor)
+            if consumable_id is not None:
+                # Add consumable to inventory
+                self.inventory.add_item(consumable_id, randomized=False)
+                
+                # Get consumable name for message
+                from systems.consumables import get_consumable
+                consumable_def = get_consumable(consumable_id)
+                consumable_name = consumable_def.name if consumable_def is not None else consumable_id
+                messages.append(f"You find a {consumable_name} among the remains.")
 
         return messages
 

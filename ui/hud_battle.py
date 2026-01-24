@@ -27,6 +27,8 @@ def _draw_battle_unit_card(
     statuses: List = None,
     *,
     scale: float = 1.0,
+    unit_id: Optional[str] = None,
+    status_tracker: Optional[dict] = None,
 ) -> None:
     """
     Draw a battle unit card showing name, HP, resources, and status indicators.
@@ -111,7 +113,9 @@ def _draw_battle_unit_card(
     icon_x = x + width - padding_x - scale_value(14, scale)
     icon_y = y + padding_y
     if statuses:
-        draw_enhanced_status_indicators(
+        # Track status icon positions for tooltip if tracker provided
+        return_icon_rects = (status_tracker is not None and unit_id is not None)
+        _, _, icon_rects = draw_enhanced_status_indicators(
             surface,
             font,
             icon_x,
@@ -122,7 +126,30 @@ def _draw_battle_unit_card(
             show_timers=True,
             show_stacks=True,
             max_statuses=None,  # Show all statuses
+            return_icon_rects=return_icon_rects,
         )
+        
+        # Store status icon rects for hover detection if tracker provided
+        if return_icon_rects and icon_rects and status_tracker is not None:
+            # Clear old status rects for this unit
+            from systems.statuses import StatusEffect
+            status_icon_rects = status_tracker.get("status_icon_rects", {})
+            status_objects = status_tracker.get("status_objects", {})
+            
+            keys_to_remove = [k for k in status_icon_rects.keys() if k[0] == unit_id]
+            for key in keys_to_remove:
+                if key in status_icon_rects:
+                    del status_icon_rects[key]
+                if key in status_objects:
+                    del status_objects[key]
+            
+            # Store new status icon rects and objects
+            for status, icon_rect in icon_rects:
+                if isinstance(status, StatusEffect):
+                    status_name = getattr(status, "name", getattr(status, "status_id", "unknown"))
+                    key = (unit_id, status_name)
+                    status_icon_rects[key] = icon_rect
+                    status_objects[key] = status
 
 
 def _draw_battle_skill_hotbar(
