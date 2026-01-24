@@ -1,7 +1,10 @@
+import math
+import random
 import pygame
 
 from settings import COLOR_BG, FPS
 from systems.classes import all_classes
+from typing import List, Dict
 
 
 class CharacterCreationScene:
@@ -33,6 +36,31 @@ class CharacterCreationScene:
         # Simple blink for the name cursor
         self.cursor_visible: bool = True
         self.cursor_timer: float = 0.0
+        
+        # Background particles for visual effect
+        self.particles: List[Dict] = []
+        self.animation_timer: float = 0.0
+        self._init_particles()
+    
+    def _init_particles(self) -> None:
+        """Initialize background particles."""
+        w, h = self.screen.get_size()
+        # Create 40-50 particles
+        for _ in range(random.randint(40, 50)):
+            self.particles.append({
+                "x": random.uniform(0, w),
+                "y": random.uniform(0, h),
+                "vx": random.uniform(-20, 20),
+                "vy": random.uniform(-20, 20),
+                "size": random.uniform(1, 3),
+                "alpha": random.uniform(50, 150),
+                "color": random.choice([
+                    (100, 150, 255),  # Blue
+                    (150, 200, 255),  # Light blue
+                    (200, 150, 255),  # Purple
+                    (255, 200, 150),  # Orange
+                ]),
+            })
 
     def run(self) -> tuple[str, str] | None:
         """
@@ -43,12 +71,32 @@ class CharacterCreationScene:
 
         while True:
             dt = clock.tick(FPS) / 1000.0
+            self.animation_timer += dt
 
             # Cursor blink for name input
             self.cursor_timer += dt
             if self.cursor_timer >= 0.5:
                 self.cursor_timer = 0.0
                 self.cursor_visible = not self.cursor_visible
+            
+            # Update particles
+            w, h = self.screen.get_size()
+            for particle in self.particles:
+                particle["x"] += particle["vx"] * dt
+                particle["y"] += particle["vy"] * dt
+                
+                # Wrap around screen edges
+                if particle["x"] < 0:
+                    particle["x"] = w
+                elif particle["x"] > w:
+                    particle["x"] = 0
+                if particle["y"] < 0:
+                    particle["y"] = h
+                elif particle["y"] > h:
+                    particle["y"] = 0
+                
+                # Subtle pulsing alpha
+                particle["alpha"] = 50 + int(100 * abs(math.sin(self.animation_timer * 0.5 + particle["x"] * 0.01)))
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -147,6 +195,20 @@ class CharacterCreationScene:
     def draw(self) -> None:
         self.screen.fill(COLOR_BG)
         w, h = self.screen.get_size()
+        
+        # Draw background particles
+        for particle in self.particles:
+            x = int(particle["x"])
+            y = int(particle["y"])
+            size = int(particle["size"])
+            alpha = int(particle["alpha"])
+            color = particle["color"]
+            
+            # Draw particle with alpha
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            self.screen.blit(particle_surf, (x - size, y - size))
 
         title = self.font_title.render("Character Creation", True, (255, 255, 210))
         self.screen.blit(title, (w // 2 - title.get_width() // 2, 40))

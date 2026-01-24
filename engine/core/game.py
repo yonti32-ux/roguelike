@@ -171,6 +171,14 @@ class Game:
 
         # Short grace window after battles where enemies don't auto-engage
         self.post_battle_grace: float = 0.0
+        
+        # Battle transition effects
+        self.battle_transition_timer: float = 0.0
+        self.battle_transition_zoom: float = 1.0
+        
+        # Exploration effects
+        self._exploration_particles: List[Dict] = []  # Footsteps, alerts, etc.
+        self._last_player_pos: Optional[Tuple[float, float]] = None
 
         # Floor intro pause: enemies wait until the player makes the first move
         self.awaiting_floor_start: bool = True
@@ -1056,7 +1064,11 @@ class Game:
             )
 
 
-        # 4) Create battle scene with the entire group + current party.
+        # 4) Sync hero stats (including loadout) to player entity before battle
+        # This ensures the battle scene has the latest loadout configuration
+        apply_hero_stats_to_player(self, full_heal=False)
+        
+        # 5) Create battle scene with the entire group + current party.
         # Pass runtime CompanionState objects directly; BattleScene knows how
         # to use their own stats (HP / ATK / DEF / skill_power).
         party_list = getattr(self, "party", None) or []
@@ -1069,6 +1081,11 @@ class Game:
             companions=companions_for_battle,
             game=self,  # Pass game reference for inventory access
         )
+        
+        # Battle transition effect (screen flash and zoom)
+        self.battle_transition_timer = 0.5  # Half second transition
+        self.battle_transition_zoom = 1.0
+        
         self.enter_battle_mode()
 
     def restart_run(self) -> None:
@@ -1240,7 +1257,11 @@ class Game:
                 reward_msgs = self.roll_battle_reward()
                 messages.extend(reward_msgs)
 
-            # 4) Go back to exploration
+            # 4) Go back to exploration (with transition effect)
+            # Reset transition timer for smooth return
+            self.battle_transition_timer = 0.0
+            self.battle_transition_zoom = 1.0
+            
             self.enter_exploration_mode()
             self.battle_scene = None
 
@@ -1339,6 +1360,28 @@ class Game:
         if tooltip:
             mouse_pos = pygame.mouse.get_pos()
             tooltip.update(dt, mouse_pos, tooltip.hover_target)
+        
+        # Update battle transition effect
+        if hasattr(self, "battle_transition_timer") and self.battle_transition_timer > 0:
+            self.battle_transition_timer -= dt
+            # Zoom in effect (starts at 1.0, zooms to 1.2, then back)
+            if self.battle_transition_timer > 0.25:
+                # Zoom in phase
+                progress = (0.5 - self.battle_transition_timer) / 0.25
+                self.battle_transition_zoom = 1.0 + progress * 0.2
+            else:
+                # Zoom out phase
+                progress = self.battle_transition_timer / 0.25
+                self.battle_transition_zoom = 1.2 - progress * 0.2
+        
+        # Update exploration particles
+        if self.mode == GameMode.EXPLORATION:
+            for particle in self._exploration_particles[:]:
+                particle["timer"] -= dt
+                particle["x"] += particle["vx"] * dt
+                particle["y"] += particle["vy"] * dt
+                if particle["timer"] <= 0:
+                    self._exploration_particles.remove(particle)
         
         if self.mode == GameMode.EXPLORATION:
             if self.post_battle_grace > 0.0:
@@ -1506,7 +1549,11 @@ class Game:
 
         self.screen.fill(COLOR_BG)
 
+        # Apply battle transition zoom if active
         zoom = self.zoom
+        if hasattr(self, "battle_transition_timer") and self.battle_transition_timer > 0:
+            zoom = zoom * self.battle_transition_zoom
+        
         camera_x = getattr(self, "camera_x", 0.0)
         camera_y = getattr(self, "camera_y", 0.0)
 
@@ -1531,6 +1578,9 @@ class Game:
                 zoom=zoom,
             )
 
+        # Draw exploration particles (footsteps, alerts, etc.)
+        self._draw_exploration_particles(camera_x, camera_y, zoom)
+        
         # Draw the player on top of everything else
         self.player.draw(
             self.screen,
@@ -1538,6 +1588,10 @@ class Game:
             camera_y=camera_y,
             zoom=zoom,
         )
+        
+        # Draw battle transition overlay (screen flash)
+        if hasattr(self, "battle_transition_timer") and self.battle_transition_timer > 0:
+            self._draw_battle_transition()
 
         # HUD + overlays
         draw_exploration_ui(self)
@@ -1550,9 +1604,49 @@ class Game:
         # Pass the Game instance so the battle scene can read input bindings
         self.battle_scene.draw(self.screen, self)
         
+        # Draw battle transition overlay (screen flash) - also visible in battle mode
+        if hasattr(self, "battle_transition_timer") and self.battle_transition_timer > 0:
+            self._draw_battle_transition()
+        
         # Debug console (drawn on top of everything)
         if self.debug_console:
             self.debug_console.draw(game=self, clock=None)  # Clock passed from main loop
         # Note: Don't call pygame.display.flip() here - the main draw() method handles flipping
         # after all overlays are drawn to prevent flickering
+    
+    def _draw_exploration_particles(self, camera_x: float, camera_y: float, zoom: float) -> None:
+        """Draw exploration particle effects (footsteps, alerts, etc.)."""
+        for particle in self._exploration_particles:
+            # Convert to screen coordinates
+            sx = int((particle["x"] - camera_x) * zoom)
+            sy = int((particle["y"] - camera_y) * zoom)
+            
+            timer = particle["timer"]
+            max_time = particle["max_time"]
+            color = particle["color"]
+            size = particle["size"]
+            
+            # Fade out
+            alpha = int(255 * (timer / max_time))
+            alpha = max(0, min(255, alpha))
+            
+            if alpha > 0:
+                particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                particle_color = (*color, alpha)
+                pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+                self.screen.blit(particle_surf, (sx - size, sy - size))
+    
+    def _draw_battle_transition(self) -> None:
+        """Draw battle transition effect (screen flash and zoom)."""
+        screen_w, screen_h = self.screen.get_size()
+        
+        # Flash effect (red/orange tint) - stronger at start, fades out
+        progress = self.battle_transition_timer / 0.5
+        flash_alpha = int(255 * progress)  # Start at 255, fade to 0
+        flash_alpha = max(0, min(255, flash_alpha))
+        
+        if flash_alpha > 0:
+            flash_surf = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+            flash_surf.fill((255, 100, 50, flash_alpha))  # Red-orange flash
+            self.screen.blit(flash_surf, (0, 0))
 

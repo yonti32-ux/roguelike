@@ -674,6 +674,7 @@ def apply_perk_to_hero(hero_stats: object, perk: Perk) -> None:
     - Skips if the perk is already learned.
     - Uses the Perk.apply() hook to mutate base stats (max_hp, attack, etc.)
       when the perk has an apply_fn.
+    - Automatically adds granted skills to the default loadout.
     """
     # Make sure the hero has a perks list
     if not hasattr(hero_stats, "perks"):
@@ -681,7 +682,7 @@ def apply_perk_to_hero(hero_stats: object, perk: Perk) -> None:
 
     owned = getattr(hero_stats, "perks")
 
-    # Don’t double-apply the same perk
+    # Don't double-apply the same perk
     if perk.id in owned:
         return
 
@@ -690,6 +691,45 @@ def apply_perk_to_hero(hero_stats: object, perk: Perk) -> None:
 
     # Register as learned
     owned.append(perk.id)
+    
+    # Auto-assign granted skills to default loadout
+    if hasattr(perk, "grant_skills") and perk.grant_skills:
+        # Ensure loadout system is initialized
+        if not hasattr(hero_stats, "skill_loadouts"):
+            hero_stats.skill_loadouts = {}
+        if not hasattr(hero_stats, "current_loadout"):
+            hero_stats.current_loadout = "default"
+        if not hasattr(hero_stats, "max_skill_slots"):
+            hero_stats.max_skill_slots = 4
+        
+        # Ensure default loadout exists
+        if "default" not in hero_stats.skill_loadouts:
+            hero_stats.skill_loadouts["default"] = [None] * hero_stats.max_skill_slots
+        
+        # Get current default loadout
+        default_loadout = hero_stats.skill_loadouts["default"]
+        
+        # Ensure loadout has correct length
+        while len(default_loadout) < hero_stats.max_skill_slots:
+            default_loadout.append(None)
+        
+        # Add granted skills to first available slots (skip guard, it has its own key)
+        for skill_id in perk.grant_skills:
+            if skill_id == "guard":
+                continue  # Guard has its own dedicated key
+            
+            # Check if skill is already in loadout
+            if skill_id in default_loadout:
+                continue
+            
+            # Find first empty slot
+            for i in range(hero_stats.max_skill_slots):
+                if default_loadout[i] is None:
+                    default_loadout[i] = skill_id
+                    break
+        
+        # Sync to skill_slots for backward compatibility
+        hero_stats.skill_slots = default_loadout[:hero_stats.max_skill_slots]
 
 
 def apply_perk_to_companion(companion_state: object, perk: Perk) -> None:

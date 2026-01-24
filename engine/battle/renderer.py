@@ -143,6 +143,12 @@ class BattleRenderer:
 
     def draw_grid(self, surface: pygame.Surface) -> None:
         """Draw the battle grid with terrain and movement highlights."""
+        screen_w, screen_h = surface.get_size()
+        
+        # Draw ambient background particles (behind grid) - only if battle is ongoing
+        if self.scene.status == "ongoing":
+            self.draw_ambient_particles(surface, screen_w, screen_h)
+        
         # Draw reachable cells if in movement mode
         reachable_cells: Dict[tuple[int, int], int] = {}
         if self.scene.movement_mode:
@@ -369,7 +375,25 @@ class BattleRenderer:
         if ratio <= 0.0:
             return
 
-        fg_width = max(1, int(bar_width * ratio))
+        # Smooth animated HP drain - track previous HP
+        if not hasattr(self, "_hp_cache"):
+            self._hp_cache = {}
+        
+        unit_id = id(unit)
+        if unit_id not in self._hp_cache:
+            self._hp_cache[unit_id] = ratio
+        
+        # Smoothly interpolate towards current ratio
+        prev_ratio = self._hp_cache[unit_id]
+        if abs(prev_ratio - ratio) > 0.01:
+            # Animate towards target (smooth interpolation)
+            self._hp_cache[unit_id] = prev_ratio + (ratio - prev_ratio) * 0.15
+        else:
+            self._hp_cache[unit_id] = ratio
+        
+        display_ratio = self._hp_cache[unit_id]
+
+        fg_width = max(1, int(bar_width * display_ratio))
         # Use dynamic HP color (green→yellow→red) instead of fixed colors
         color = _calculate_hp_color(ratio)
         fg_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height)
@@ -399,6 +423,14 @@ class BattleRenderer:
                 self.scene.cell_size - 20,
             )
 
+            # Subtle idle breathing animation (very subtle scale pulse)
+            if active is not unit:
+                breath = 1.0 + 0.02 * abs(math.sin(self.scene.animation_time * 1.5))
+                rect_center = rect.center
+                rect.width = int((self.scene.cell_size - 20) * breath)
+                rect.height = int((self.scene.cell_size - 20) * breath)
+                rect.center = rect_center
+            
             # Body
             pygame.draw.rect(surface, COLOR_PLAYER, rect)
             # Highlight active unit with pulsing glow
@@ -515,12 +547,23 @@ class BattleRenderer:
 
             x = self.scene.grid_origin_x + unit.gx * self.scene.cell_size
             y = self.scene.grid_origin_y + unit.gy * self.scene.cell_size
+            
+            # Store original rect size for breathing animation
+            base_size = self.scene.cell_size - 20
             rect = pygame.Rect(
                 x + 10,
                 y + 10,
-                self.scene.cell_size - 20,
-                self.scene.cell_size - 20,
+                base_size,
+                base_size,
             )
+            
+            # Subtle idle breathing animation (very subtle scale pulse)
+            if active is not unit:
+                breath = 1.0 + 0.02 * abs(math.sin(self.scene.animation_time * 1.5))
+                rect_center = rect.center
+                rect.width = int(base_size * breath)
+                rect.height = int(base_size * breath)
+                rect.center = rect_center
 
             # Check if this enemy is elite
             is_elite = False
@@ -676,8 +719,14 @@ class BattleRenderer:
         # ---------------- Hit sparks (drawn after units) ----------------
         self.draw_hit_sparks(surface)
         
+        # ---------------- Skill casting effects (drawn after units) ----------------
+        self.draw_skill_effects(surface)
+        
         # ---------------- Particles (drawn after sparks) ----------------
         self.draw_particles(surface)
+        
+        # ---------------- Floating status texts (drawn after particles) ----------------
+        self.draw_floating_status_texts(surface)
 
     def draw_floating_damage(self, surface: pygame.Surface) -> None:
         """Draw floating damage numbers that rise and fade, stacking vertically for same target."""
@@ -805,6 +854,64 @@ class BattleRenderer:
                 color = (255, 200, 100)  # Orange spark
                 pygame.draw.circle(surface, color, (x, y), size)
     
+    def draw_skill_effects(self, surface: pygame.Surface) -> None:
+        """Draw skill casting visual effects."""
+        import math
+        for effect in self.scene._skill_effects:
+            # Recalculate position based on current grid position (for camera tracking)
+            if "gx" in effect and "gy" in effect:
+                gx = effect["gx"]
+                gy = effect["gy"]
+                x = int(self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2)
+                y = int(self.scene.grid_origin_y + gy * self.scene.cell_size + self.scene.cell_size // 2)
+            else:
+                # Fallback to stored screen position
+                x = int(effect.get("x", 0))
+                y = int(effect.get("y", 0))
+            
+            radius = int(effect["radius"])
+            timer = effect["timer"]
+            max_time = effect["max_time"]
+            color = effect["color"]
+            effect_type = effect.get("type", "caster_glow")
+            
+            if radius <= 0 or timer <= 0:
+                continue
+            
+            # Calculate alpha (fade out)
+            alpha = int(255 * (timer / max_time))
+            alpha = max(0, min(255, alpha))
+            
+            if effect_type == "caster_glow":
+                # Pulsing glow around caster
+                for i in range(3):
+                    glow_radius = radius - (i * 5)
+                    if glow_radius > 0:
+                        glow_alpha = int(alpha * (1.0 - i * 0.3))
+                        glow_surf = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(glow_surf, (*color, glow_alpha), (glow_radius, glow_radius), glow_radius)
+                        surface.blit(glow_surf, (x - glow_radius, y - glow_radius))
+            
+            elif effect_type == "aoe_expand":
+                # Expanding AoE circle
+                for i in range(2):
+                    circle_radius = int(radius - (i * 10))
+                    if circle_radius > 0:
+                        circle_alpha = int(alpha * (1.0 - i * 0.4))
+                        circle_surf = pygame.Surface((circle_radius * 2, circle_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(circle_surf, (*color, circle_alpha), (circle_radius, circle_radius), circle_radius, width=3)
+                        surface.blit(circle_surf, (x - circle_radius, y - circle_radius))
+            
+            elif effect_type == "target_impact":
+                # Impact effect on target
+                for i in range(4):
+                    impact_radius = int(radius * (1.0 - i * 0.25))
+                    if impact_radius > 0:
+                        impact_alpha = int(alpha * (1.0 - i * 0.2))
+                        impact_surf = pygame.Surface((impact_radius * 2, impact_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(impact_surf, (*color, impact_alpha), (impact_radius, impact_radius), impact_radius)
+                        surface.blit(impact_surf, (x - impact_radius, y - impact_radius))
+    
     def draw_particles(self, surface: pygame.Surface) -> None:
         """Draw particle effects (for kills, explosions, etc.)."""
         for particle in self.scene._particles:
@@ -824,6 +931,75 @@ class BattleRenderer:
             particle_color = (*color, alpha)
             pygame.draw.circle(particle_surf, particle_color, (size, size), size)
             surface.blit(particle_surf, (x - size, y - size))
+    
+    def draw_ambient_particles(self, surface: pygame.Surface, screen_w: int, screen_h: int) -> None:
+        """Draw subtle ambient background particles."""
+        for particle in self.scene._ambient_particles:
+            # Convert to screen coordinates (particles are in world space)
+            x = int(particle["x"] % screen_w)
+            y = int(particle["y"] % screen_h)
+            size = int(particle["size"])
+            alpha = int(particle["alpha"])
+            color = particle["color"]
+            
+            # Draw subtle particle
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            surface.blit(particle_surf, (x - size, y - size))
+    
+    def draw_floating_status_texts(self, surface: pygame.Surface) -> None:
+        """Draw floating status text effects."""
+        if not self.scene._floating_status_texts:
+            return
+        
+        for text_info in self.scene._floating_status_texts:
+            # Recalculate position based on current grid position (in case camera moved)
+            if "gx" in text_info and "gy" in text_info:
+                gx = text_info["gx"]
+                gy = text_info["gy"]
+                x = int(self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2)
+                y = int(self.scene.grid_origin_y + gy * self.scene.cell_size + self.scene.cell_size // 2 - text_info["y_offset"])
+            else:
+                # Fallback to stored screen position
+                x = int(text_info.get("x", 0))
+                y = int(text_info.get("y", 0) - text_info.get("y_offset", 0))
+            
+            text = text_info["text"]
+            color = text_info["color"]
+            timer = text_info["timer"]
+            
+            if timer <= 0:
+                continue
+            
+            # Fade out - start fully visible, fade over time
+            alpha = int(255 * (timer / 1.5))
+            alpha = max(0, min(255, alpha))
+            
+            if alpha <= 0:
+                continue
+            
+            # Use larger, bolder font for better visibility
+            try:
+                # Try to get a slightly larger font
+                large_font = pygame.font.Font(None, int(self.font.get_height() * 1.2))
+            except:
+                large_font = self.font
+            
+            # Render text with shadow for visibility
+            text_surf = large_font.render(text, True, color)
+            
+            # Draw shadow first (black outline for contrast)
+            shadow_surf = large_font.render(text, True, (0, 0, 0))
+            # Draw shadow multiple times for thicker outline
+            for offset_x, offset_y in [(2, 2), (-2, 2), (2, -2), (-2, -2), (0, 2), (0, -2), (2, 0), (-2, 0)]:
+                surface.blit(shadow_surf, (x - text_surf.get_width() // 2 + offset_x, y + offset_y))
+            
+            # Draw main text with alpha
+            text_alpha_surf = pygame.Surface(text_surf.get_size(), pygame.SRCALPHA)
+            text_alpha_surf.blit(text_surf, (0, 0))
+            text_alpha_surf.set_alpha(alpha)
+            surface.blit(text_alpha_surf, (x - text_surf.get_width() // 2, y))
     
     def draw_damage_preview(self, surface: pygame.Surface, target: BattleUnit, normal_damage: int, crit_damage: Optional[int]) -> None:
         """Draw damage preview above the selected target."""

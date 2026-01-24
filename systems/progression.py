@@ -211,6 +211,9 @@ class HeroStats:
         self.current_loadout = "default"
         self.max_skill_slots = 4
         self._ensure_default_loadout()
+        
+        # Auto-assign starting skills from class to default loadout
+        self._auto_assign_starting_skills_to_loadout(class_def)
 
     # ------------------------------------------------------------------
     # Convenience properties (so older code still works)
@@ -305,10 +308,22 @@ class HeroStats:
         if "default" not in self.skill_loadouts:
             # Migrate from skill_slots if available
             if any(slot for slot in self.skill_slots):
-                self.skill_loadouts["default"] = list(self.skill_slots)
+                # Copy skill_slots to default loadout
+                migrated = list(self.skill_slots)
+                # Ensure correct length
+                while len(migrated) < self.max_skill_slots:
+                    migrated.append(None)
+                self.skill_loadouts["default"] = migrated[:self.max_skill_slots]
             else:
                 # Create empty default loadout
                 self.skill_loadouts["default"] = [None] * self.max_skill_slots
+        else:
+            # Ensure default loadout has correct length
+            default = self.skill_loadouts["default"]
+            while len(default) < self.max_skill_slots:
+                default.append(None)
+            # Trim to max_skill_slots
+            self.skill_loadouts["default"] = default[:self.max_skill_slots]
     
     def get_current_loadout_slots(self) -> List[Optional[str]]:
         """Get the skill slots for the current active loadout."""
@@ -378,6 +393,109 @@ class HeroStats:
             self.skill_slots = self.get_current_loadout_slots()
             return True
         return False
+    
+    def _auto_assign_starting_skills_to_loadout(self, class_def) -> None:
+        """Auto-assign starting skills from class to default loadout."""
+        if not hasattr(class_def, "starting_skills"):
+            return
+        
+        # Ensure default loadout exists
+        self._ensure_default_loadout()
+        default_loadout = self.skill_loadouts["default"]
+        
+        # Ensure loadout has correct length
+        while len(default_loadout) < self.max_skill_slots:
+            default_loadout.append(None)
+        
+        # Add starting skills to first available slots (skip guard)
+        for skill_id in class_def.starting_skills:
+            if not skill_id or skill_id == "guard":
+                continue  # Guard has its own dedicated key
+            
+            # Check if skill is already in loadout
+            if skill_id in default_loadout:
+                continue
+            
+            # Find first empty slot
+            for i in range(self.max_skill_slots):
+                if default_loadout[i] is None:
+                    default_loadout[i] = skill_id
+                    break
+        
+        # Sync to skill_slots for backward compatibility
+        self.skill_slots = default_loadout[:self.max_skill_slots]
+    
+    def auto_assign_all_unlocked_skills_to_default_loadout(self) -> None:
+        """
+        Auto-assign all currently unlocked skills to the default loadout.
+        Useful for migrating existing saves or ensuring skills are assigned.
+        Only adds skills that aren't already in the loadout.
+        """
+        from ui.skill_screen import get_unlocked_skills_for_hero
+        from engine.core.game import Game
+        
+        # We need a game reference to get unlocked skills, but we can work around it
+        # by checking perks directly
+        self._ensure_default_loadout()
+        default_loadout = self.skill_loadouts["default"]
+        
+        # Ensure loadout has correct length
+        while len(default_loadout) < self.max_skill_slots:
+            default_loadout.append(None)
+        
+        # Get all skills from perks
+        from systems import perks as perk_system
+        from systems.classes import get_class
+        from systems.skills import get_skill, is_skill_available_for_class
+        
+        unlocked_skills = []
+        
+        # Get starting skills from class
+        try:
+            class_def = get_class(self.hero_class_id)
+            for skill_id in class_def.starting_skills:
+                if skill_id and skill_id not in unlocked_skills:
+                    try:
+                        get_skill(skill_id)
+                        if is_skill_available_for_class(skill_id, self.hero_class_id):
+                            unlocked_skills.append(skill_id)
+                    except KeyError:
+                        pass
+        except KeyError:
+            pass
+        
+        # Get skills from perks
+        for perk_id in self.perks:
+            try:
+                perk = perk_system.get(perk_id)
+                for skill_id in getattr(perk, "grant_skills", []):
+                    if skill_id and skill_id not in unlocked_skills:
+                        try:
+                            get_skill(skill_id)
+                            if is_skill_available_for_class(skill_id, self.hero_class_id):
+                                unlocked_skills.append(skill_id)
+                        except KeyError:
+                            pass
+            except Exception:
+                continue
+        
+        # Add unlocked skills to first available slots (skip guard and already-assigned)
+        for skill_id in unlocked_skills:
+            if skill_id == "guard":
+                continue
+            
+            # Check if already in loadout
+            if skill_id in default_loadout:
+                continue
+            
+            # Find first empty slot
+            for i in range(self.max_skill_slots):
+                if default_loadout[i] is None:
+                    default_loadout[i] = skill_id
+                    break
+        
+        # Sync to skill_slots for backward compatibility
+        self.skill_slots = default_loadout[:self.max_skill_slots]
 
     # ------------------------------------------------------------------
     # Skill rank helpers

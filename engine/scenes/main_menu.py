@@ -41,8 +41,8 @@ class MainMenuScene:
     def _init_particles(self) -> None:
         """Initialize background particles."""
         w, h = self.screen.get_size()
-        # Create 30-40 particles
-        for _ in range(random.randint(30, 40)):
+        # Create 45-55 particles (increased slightly)
+        for _ in range(random.randint(45, 55)):
             self.particles.append({
                 "x": random.uniform(0, w),
                 "y": random.uniform(0, h),

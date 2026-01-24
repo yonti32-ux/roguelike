@@ -349,13 +349,13 @@ class BattleAI:
         # Handle regeneration status (heal each turn)
         regen_status = next((s for s in unit.statuses if s.name == "regenerating"), None)
         if regen_status:
-            heal_amount = 2
-            current_hp = getattr(unit.entity, "hp", 0)
-            max_hp = getattr(unit.entity, "max_hp", 1)
-            new_hp = min(max_hp, current_hp + heal_amount)
-            setattr(unit.entity, "hp", new_hp)
-            if new_hp > current_hp:
-                self.scene._log(f"{unit.name} regenerates {heal_amount} HP.")
+                heal_amount = 2
+                current_hp = getattr(unit.entity, "hp", 0)
+                max_hp = getattr(unit.entity, "max_hp", 1)
+                new_hp = min(max_hp, current_hp + heal_amount)
+                setattr(unit.entity, "hp", new_hp)
+                if new_hp > current_hp:
+                    self.scene._log(f"{unit.name} regenerates {heal_amount} HP.")
 
         if self.scene._is_stunned(unit):
             self.scene._log(f"{unit.name} is stunned!")
@@ -724,7 +724,11 @@ class BattleAI:
             distance = max(dx, dy)
             if distance > 1:
                 # Continue moving towards target until movement points are exhausted
-                while unit.current_movement_points > 0:
+                # Add safety counter to prevent infinite loops
+                max_attempts = 50  # Safety limit
+                attempts = 0
+                while unit.current_movement_points > 0 and attempts < max_attempts:
+                    attempts += 1
                     moved = self.step_towards(unit, target)
                     if not moved:
                         # Can't move further (blocked, no path, etc.)
@@ -734,12 +738,6 @@ class BattleAI:
                     distance = max(dx, dy)
                     if distance <= 1:
                         # Reached target, no need to continue moving
-                        break
-                # Continue moving towards target until movement points are exhausted
-                while unit.current_movement_points > 0:
-                    moved = self.step_towards(unit, target)
-                    if not moved:
-                        # Can't move further (blocked, no path, etc.)
                         break
 
         self.scene._next_turn()

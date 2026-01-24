@@ -284,7 +284,26 @@ class ExplorationController:
             can_move, blocking_enemies, blocking_merchants = _can_player_move_to(new_x, new_y)
             
             if can_move:
+                old_x, old_y = game.player.x, game.player.y
                 game.player.move_to(new_x, new_y)
+                
+                # Add footstep particles
+                if hasattr(game, "_exploration_particles"):
+                    # Create subtle dust particles at feet
+                    foot_x = new_x + game.player.width // 2
+                    foot_y = new_y + game.player.height
+                    for _ in range(random.randint(2, 4)):
+                        game._exploration_particles.append({
+                            "x": foot_x + random.uniform(-5, 5),
+                            "y": foot_y + random.uniform(-3, 0),
+                            "vx": random.uniform(-10, 10),
+                            "vy": random.uniform(-5, 5),
+                            "timer": random.uniform(0.3, 0.6),
+                            "max_time": random.uniform(0.3, 0.6),
+                            "color": (120, 100, 80),  # Brown dust
+                            "size": random.randint(1, 2),
+                        })
+                
                 # Check for trap triggers after movement
                 self._check_trap_triggers(game)
             elif blocking_enemies:
@@ -509,6 +528,9 @@ class ExplorationController:
 
         # Mark as opened regardless of loot outcome
         chest.opened = True
+        
+        # Store chest position for pickup effect
+        chest_x, chest_y = chest.rect.center
 
         # Roll item loot
         item_id = roll_chest_loot(game.floor)
@@ -543,6 +565,31 @@ class ExplorationController:
             rarity = getattr(item_def, "rarity", None) if item_def is not None else None
             item_color = get_rarity_color(rarity) if rarity else None
             loot_items.append(item_name)
+            
+            # Add item pickup effect
+            if hasattr(game, "_exploration_particles"):
+                # Color based on rarity
+                pickup_colors = {
+                    "common": (200, 200, 200),
+                    "uncommon": (100, 255, 100),
+                    "rare": (100, 150, 255),
+                    "epic": (200, 100, 255),
+                    "legendary": (255, 200, 100),
+                }
+                color = pickup_colors.get(rarity, (255, 255, 200)) if rarity else (255, 255, 200)
+                
+                # Create pickup particles
+                for _ in range(random.randint(8, 12)):
+                    game._exploration_particles.append({
+                        "x": chest_x + random.uniform(-10, 10),
+                        "y": chest_y + random.uniform(-10, 10),
+                        "vx": random.uniform(-30, 30),
+                        "vy": random.uniform(-40, -10),  # Upward
+                        "timer": random.uniform(0.5, 1.0),
+                        "max_time": random.uniform(0.5, 1.0),
+                        "color": color,
+                        "size": random.randint(2, 4),
+                    })
 
         # Add consumable to inventory if it dropped
         if consumable_id is not None:
@@ -766,8 +813,35 @@ class ExplorationController:
             game.inventory._current_floor = floor_index
 
         # Grant the item
-        game.inventory.add_item(item_id, randomized=True)
-        item_name = getattr(item_def, "name", item_id)
+            game.inventory.add_item(item_id, randomized=True)
+            item_name = getattr(item_def, "name", item_id)
+            
+            # Add item pickup effect
+            if hasattr(game, "_exploration_particles") and chest is not None:
+                cx, cy = chest.rect.center
+                rarity = getattr(item_def, "rarity", None)
+                # Color based on rarity
+                pickup_colors = {
+                    "common": (200, 200, 200),
+                    "uncommon": (100, 255, 100),
+                    "rare": (100, 150, 255),
+                    "epic": (200, 100, 255),
+                    "legendary": (255, 200, 100),
+                }
+                color = pickup_colors.get(rarity, (255, 255, 200)) if rarity else (255, 255, 200)
+                
+                # Create pickup particles
+                for _ in range(random.randint(8, 12)):
+                    game._exploration_particles.append({
+                        "x": cx + random.uniform(-10, 10),
+                        "y": cy + random.uniform(-10, 10),
+                        "vx": random.uniform(-30, 30),
+                        "vy": random.uniform(-40, -10),  # Upward
+                        "timer": random.uniform(0.5, 1.0),
+                        "max_time": random.uniform(0.5, 1.0),
+                        "color": color,
+                        "size": random.randint(2, 4),
+                    })
         game.last_message = f"You buy {item_name} for {price} gold."
 
         # Remove the item from the merchant's stock so it's not infinite

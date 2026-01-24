@@ -183,6 +183,14 @@ def apply_hero_stats_to_player(game: "Game", full_heal: bool = False) -> None:
     perks_list = getattr(hs, "perks", None)
     if perks_list is not None:
         setattr(game.player, "perks", list(perks_list))
+    
+    # Sync skill loadout to player entity for battle
+    if hasattr(hs, "skill_loadouts") and hasattr(hs, "current_loadout"):
+        # Sync current loadout to player entity
+        loadout_slots = hs.get_current_loadout_slots()
+        setattr(game.player, "skill_slots", list(loadout_slots))
+        # Also store hero_stats reference for battle scene
+        setattr(game.player, "hero_stats", hs)
 
 
 def grant_xp_to_companions(

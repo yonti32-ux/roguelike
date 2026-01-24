@@ -395,6 +395,22 @@ def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any]) -> None
     hero_stats.max_skill_slots = int(data.get("max_skill_slots", 4))
     # Ensure default loadout exists
     hero_stats._ensure_default_loadout()
+    
+    # Migrate skills from skill_slots to default loadout if loadout is empty
+    # This handles old saves that don't have loadouts yet
+    if "default" in hero_stats.skill_loadouts:
+        default_loadout = hero_stats.skill_loadouts["default"]
+        # If default loadout is empty but skill_slots has skills, migrate them
+        if not any(default_loadout) and any(hero_stats.skill_slots):
+            for i, skill_id in enumerate(hero_stats.skill_slots):
+                if i < len(default_loadout) and skill_id:
+                    default_loadout[i] = skill_id
+    
+    # Auto-assign all unlocked skills to default loadout if it's still mostly empty
+    # This ensures new skills from perks get added automatically
+    default_loadout = hero_stats.skill_loadouts.get("default", [])
+    if default_loadout.count(None) >= len(default_loadout) // 2:  # If more than half empty
+        hero_stats.auto_assign_all_unlocked_skills_to_default_loadout()
     hero_stats.skill_points = data.get("skill_points", 0)
     hero_stats.skill_ranks = dict(data.get("skill_ranks", {}))
     

@@ -702,6 +702,26 @@ def init_companion_skill_slots(state: CompanionState, template: CompanionDef) ->
     state.current_loadout = "default"
     state.max_skill_slots = max_slots
     state._ensure_default_loadout()
+    
+    # Auto-assign skills from template to default loadout
+    if available:
+        default_loadout = state.skill_loadouts["default"]
+        # Ensure loadout has correct length
+        while len(default_loadout) < max_slots:
+            default_loadout.append(None)
+        
+        # Add available skills to first available slots
+        for skill_id in available:
+            if skill_id == "guard":
+                continue
+            # Find first empty slot
+            for i in range(max_slots):
+                if default_loadout[i] is None:
+                    default_loadout[i] = skill_id
+                    break
+        
+        # Sync to skill_slots
+        state.skill_slots = default_loadout[:max_slots]
 
 
 def register_companion(defn: CompanionDef) -> CompanionDef:

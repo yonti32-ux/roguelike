@@ -227,7 +227,11 @@ class PerkSelectionScene:
             perk_system.apply_perk_to_hero(self.game.hero_stats, perk)
             self.game.add_message(f"You chose perk: {perk.name}")
             
-            # Sync stats to player entity
+            # Auto-assign any newly granted skills to default loadout
+            # (This is already done in apply_perk_to_hero, but ensure loadout is synced)
+            self.game.hero_stats._ensure_default_loadout()
+            
+            # Sync stats to player entity (includes loadout sync)
             if self.game.player is not None:
                 self.game.apply_hero_stats_to_player(full_heal=False)
         

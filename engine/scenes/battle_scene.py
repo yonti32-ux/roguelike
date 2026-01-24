@@ -233,6 +233,17 @@ class BattleScene:
         
         # Victory/defeat screen animation
         self.victory_defeat_timer: float = 0.0  # Timer for victory/defeat screen animations
+        
+        # Ambient effects
+        self._ambient_particles: List[Dict] = []  # Background dust/motes
+        self._floating_status_texts: List[Dict] = []  # Floating text when statuses applied
+        self._init_ambient_particles()
+        
+        # Skill casting effects
+        self._skill_effects: List[Dict] = []  # List of {x, y, radius, timer, color, skill_id}
+        
+        # Movement trail effects
+        self._movement_trails: List[Dict] = {}  # Dict of unit_id -> List of trail positions
 
     def _init_hero_unit(self) -> BattleUnit:
         """Initialize the hero unit with skills, resources, and skill slots."""
@@ -700,6 +711,17 @@ class BattleScene:
         """
         Tick down statuses, apply DOT damage, and update HP.
         """
+        # Handle regeneration status (heal each turn) - for all units (player and enemy)
+        regen_status = next((s for s in unit.statuses if s.name == "regenerating"), None)
+        if regen_status:
+            heal_amount = 2
+            current_hp = getattr(unit.entity, "hp", 0)
+            max_hp = getattr(unit.entity, "max_hp", 1)
+            new_hp = min(max_hp, current_hp + heal_amount)
+            setattr(unit.entity, "hp", new_hp)
+            if new_hp > current_hp:
+                self._log(f"{unit.name} regenerates {heal_amount} HP.")
+        
         dot = tick_statuses(unit.statuses)
         if dot > 0:
             current_hp = getattr(unit.entity, "hp", 0)
@@ -731,14 +753,27 @@ class BattleScene:
             self._log(f"{unit.name} resists {status.name}!")
             return  # Status resisted, don't apply
         
+        is_new_status = True
         for existing in unit.statuses:
             if existing.name == status.name:
+                is_new_status = False
                 # Stackable statuses: increase stacks and refresh duration
                 if status.name == "diseased" and hasattr(status, "stacks"):
                     existing.stacks = getattr(existing, "stacks", 1) + getattr(status, "stacks", 1)
                     existing.duration = max(existing.duration, status.duration)
                     existing.flat_damage_each_turn = existing.stacks  # Damage scales with stacks
                     self._log(f"{unit.name}'s {status.name} stacks to {existing.stacks}!")
+                    # Show floating text for stacking
+                    status_colors = {
+                        "guard": (100, 200, 255),  # Blue
+                        "weakened": (255, 150, 150),  # Red
+                        "stunned": (255, 200, 100),  # Orange
+                        "poisoned": (100, 255, 100),  # Green
+                        "burned": (255, 150, 50),  # Orange-red
+                        "diseased": (150, 100, 255),  # Purple
+                    }
+                    color = status_colors.get(status.name.lower(), (200, 200, 200))
+                    self.add_floating_status_text(unit.gx, unit.gy, f"+{status.name.title()} (x{existing.stacks})", color)
                     return
                 # Non-stackable: refresh duration and values
                 existing.duration = max(existing.duration, status.duration)
@@ -748,8 +783,25 @@ class BattleScene:
                 existing.stunned = status.stunned
                 existing.stacks = status.stacks
                 return
-        unit.statuses.append(status)
-        self._log(f"{unit.name} is affected by {status.name}.")
+        
+        # New status added - show floating text
+        if is_new_status:
+            unit.statuses.append(status)
+            
+            # Color based on status type
+            status_colors = {
+                "guard": (100, 200, 255),  # Blue
+                "weakened": (255, 150, 150),  # Red
+                "stunned": (255, 200, 100),  # Orange
+                "poisoned": (100, 255, 100),  # Green
+                "burned": (255, 150, 50),  # Orange-red
+                "diseased": (150, 100, 255),  # Purple
+            }
+            color = status_colors.get(status.name.lower(), (200, 200, 200))
+            
+            # Store grid position instead of screen position (so it follows camera)
+            self.add_floating_status_text(unit.gx, unit.gy, f"+{status.name.title()}", color)
+            self._log(f"{unit.name} is affected by {status.name}.")
 
     # Terrain management methods have been moved to engine.battle.terrain.BattleTerrainManager
 
@@ -1249,6 +1301,9 @@ class BattleScene:
         rank_mana_cost = calculate_skill_cost_at_rank(skill.mana_cost, skill_rank, skill.id)
         rank_aoe_radius = calculate_skill_aoe_radius_at_rank(getattr(skill, "aoe_radius", 0), skill_rank, skill.id)
         
+        # Add skill casting visual effect (before consuming resources)
+        self._add_skill_cast_effect(unit, skill, target_unit, rank_aoe_radius)
+        
         # Check and consume resource costs (using rank-modified costs)
         # Temporarily modify skill costs for checking
         original_stamina = skill.stamina_cost
@@ -1335,6 +1390,34 @@ class BattleScene:
             for affected in affected_units:
                 self._add_status(affected, rank_status)
 
+        # Handle healing skills (like second_wind)
+        if skill.id == "second_wind":
+            # Restore 30% HP and stamina
+            current_hp = getattr(unit.entity, "hp", 0)
+            max_hp = getattr(unit.entity, "max_hp", 1)
+            heal_amount = max(1, int(max_hp * 0.3))
+            new_hp = min(max_hp, current_hp + heal_amount)
+            setattr(unit.entity, "hp", new_hp)
+            actual_heal = new_hp - current_hp
+            
+            # Restore 30% stamina
+            current_stamina = getattr(unit, "current_stamina", 0)
+            max_stamina = getattr(unit, "max_stamina", 1)
+            stamina_restore = max(1, int(max_stamina * 0.3))
+            new_stamina = min(max_stamina, current_stamina + stamina_restore)
+            setattr(unit, "current_stamina", new_stamina)
+            actual_stamina = new_stamina - current_stamina
+            
+            if actual_heal > 0 or actual_stamina > 0:
+                heal_msg = f"{unit.name} uses {skill.name} and restores"
+                parts = []
+                if actual_heal > 0:
+                    parts.append(f"{actual_heal} HP")
+                if actual_stamina > 0:
+                    parts.append(f"{actual_stamina} stamina")
+                if parts:
+                    self._log(f"{heal_msg} {', '.join(parts)}.")
+
         # Set cooldown (using rank-modified cooldown)
         if rank_cooldown > 0:
             unit.cooldowns[skill.id] = rank_cooldown
@@ -1375,8 +1458,12 @@ class BattleScene:
                 else:
                     self._log(f"{unit.name} uses {skill.name} on {target_unit.name} ({total_damage} dmg).")
         else:
+            # Non-damage skills (healing, buffs, etc.)
             if skill.id == "guard":
                 self._log(f"{unit.name} braces for impact.")
+            elif skill.id == "second_wind":
+                # Message already logged in healing section above
+                pass
             else:
                 self._log(f"{unit.name} uses {skill.name}.")
 
@@ -2154,6 +2241,89 @@ class BattleScene:
         """Trigger a screen flash effect. Intensity should be between 0.0 and 1.0."""
         self.screen_flash = max(self.screen_flash, intensity)  # Don't reduce if already flashing
         self.screen_flash_color = color
+    
+    def _init_ambient_particles(self) -> None:
+        """Initialize ambient background particles."""
+        # Create 15-20 subtle dust particles
+        for _ in range(random.randint(15, 20)):
+            self._ambient_particles.append({
+                "x": random.uniform(0, 1000),
+                "y": random.uniform(0, 800),
+                "vx": random.uniform(-5, 5),
+                "vy": random.uniform(-5, 5),
+                "size": random.uniform(1, 2),
+                "alpha": random.uniform(30, 80),
+                "color": random.choice([
+                    (150, 150, 180),  # Blue-gray
+                    (180, 150, 150),  # Red-gray
+                    (150, 180, 150),  # Green-gray
+                ]),
+            })
+    
+    def add_floating_status_text(self, gx: int, gy: int, text: str, color: Tuple[int, int, int]) -> None:
+        """Add floating text for status effects. Takes grid coordinates."""
+        self._floating_status_texts.append({
+            "gx": gx,  # Grid X
+            "gy": gy,  # Grid Y
+            "text": text,
+            "color": color,
+            "timer": 1.5,  # Duration
+            "y_offset": 0.0,
+        })
+    
+    def _add_skill_cast_effect(self, caster: BattleUnit, skill: Skill, target: Optional[BattleUnit], aoe_radius: int) -> None:
+        """Add visual effect when a skill is cast. Uses grid coordinates for camera tracking."""
+        # Color based on skill type
+        skill_colors = {
+            "guard": (100, 200, 255),  # Blue
+            "power_strike": (255, 200, 100),  # Orange
+            "fireball": (255, 100, 50),  # Red-orange
+            "lightning_bolt": (150, 200, 255),  # Light blue
+            "poison_blade": (100, 255, 100),  # Green
+        }
+        effect_color = skill_colors.get(skill.id, (200, 200, 255))
+        
+        # Caster glow (store grid position)
+        self._skill_effects.append({
+            "gx": caster.gx,  # Grid X
+            "gy": caster.gy,  # Grid Y
+            "radius": 0,
+            "max_radius": self.cell_size * 0.8,
+            "timer": 0.4,
+            "max_time": 0.4,
+            "color": effect_color,
+            "skill_id": skill.id,
+            "type": "caster_glow",
+        })
+        
+        # Target/AoE effect (store grid position)
+        if target is not None:
+            if aoe_radius > 0:
+                # AoE expanding circle
+                self._skill_effects.append({
+                    "gx": target.gx,  # Grid X
+                    "gy": target.gy,  # Grid Y
+                    "radius": 0,
+                    "max_radius": aoe_radius * self.cell_size,
+                    "timer": 0.5,
+                    "max_time": 0.5,
+                    "color": effect_color,
+                    "skill_id": skill.id,
+                    "type": "aoe_expand",
+                })
+            else:
+                # Single target impact
+                self._skill_effects.append({
+                    "gx": target.gx,  # Grid X
+                    "gy": target.gy,  # Grid Y
+                    "radius": 0,
+                    "max_radius": self.cell_size * 0.6,
+                    "timer": 0.3,
+                    "max_time": 0.3,
+                    "color": effect_color,
+                    "skill_id": skill.id,
+                    "type": "target_impact",
+                })
 
     def update(self, dt: float) -> None:
         if self.status != "ongoing":
@@ -2219,6 +2389,41 @@ class BattleScene:
             particle["vy"] += 200.0 * dt  # Gravity
             if particle["timer"] <= 0:
                 self._particles.remove(particle)
+        
+        # Update ambient particles
+        screen_w, screen_h = 1000, 800  # Approximate, will be updated in draw
+        for particle in self._ambient_particles:
+            particle["x"] += particle["vx"] * dt
+            particle["y"] += particle["vy"] * dt
+            
+            # Wrap around screen edges
+            if particle["x"] < 0:
+                particle["x"] = screen_w
+            elif particle["x"] > screen_w:
+                particle["x"] = 0
+            if particle["y"] < 0:
+                particle["y"] = screen_h
+            elif particle["y"] > screen_h:
+                particle["y"] = 0
+            
+            # Subtle pulsing alpha
+            particle["alpha"] = 30 + int(50 * abs(math.sin(self.animation_time * 0.3 + particle["x"] * 0.01)))
+        
+        # Update floating status texts
+        for text_info in self._floating_status_texts[:]:
+            text_info["timer"] -= dt
+            text_info["y_offset"] += dt * 30  # Float upward
+            if text_info["timer"] <= 0:
+                self._floating_status_texts.remove(text_info)
+        
+        # Update skill casting effects
+        for effect in self._skill_effects[:]:
+            effect["timer"] -= dt
+            # Expand radius over time
+            progress = 1.0 - (effect["timer"] / effect["max_time"])
+            effect["radius"] = effect["max_radius"] * progress
+            if effect["timer"] <= 0:
+                self._skill_effects.remove(effect)
 
         # Camera movement (Shift + Arrow keys) - continuous movement while keys are held
         if self.targeting_mode is None:

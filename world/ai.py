@@ -345,6 +345,22 @@ def update_enemy_ai(enemy: "Enemy", game: "Game", dt: float) -> None:
             enemy.ai_state = "chase"
             state = "chase"
             _alert_nearby_enemies(enemy, game, (px, py))
+            
+            # Add enemy alert visual effect
+            if hasattr(game, "_exploration_particles"):
+                ex, ey = enemy.rect.center
+                # Create alert particles (red/orange)
+                for _ in range(random.randint(5, 8)):
+                    game._exploration_particles.append({
+                        "x": ex + random.uniform(-10, 10),
+                        "y": ey + random.uniform(-10, 10),
+                        "vx": random.uniform(-20, 20),
+                        "vy": random.uniform(-20, 20),
+                        "timer": random.uniform(0.4, 0.8),
+                        "max_time": random.uniform(0.4, 0.8),
+                        "color": (255, 150, 100),  # Orange-red alert
+                        "size": random.randint(2, 4),
+                    })
     else:
         # No LoS this frame
         if state == "chase":
