@@ -1948,35 +1948,55 @@ class BattleScene:
         # Camera movement is handled in update() method for continuous movement
 
         # Movement (logical actions) - only when not targeting
-        # Single-step movement still works (legacy support)
+        # Single-step movement with diagonal support (checks simultaneous key presses)
+        # When a movement key is pressed, check what other movement keys are held for diagonals
+        keys_pressed = pygame.key.get_pressed()
+        dx, dy = 0, 0
+        
+        # Determine movement direction based on currently pressed keys
+        # This allows diagonal movement when multiple keys are pressed simultaneously
         if input_manager is not None:
-            if input_manager.event_matches_action(InputAction.MOVE_UP, event):
-                self._perform_move(unit, 0, -1)
-                return
-            if input_manager.event_matches_action(InputAction.MOVE_DOWN, event):
-                self._perform_move(unit, 0, 1)
-                return
-            if input_manager.event_matches_action(InputAction.MOVE_LEFT, event):
-                self._perform_move(unit, -1, 0)
-                return
-            if input_manager.event_matches_action(InputAction.MOVE_RIGHT, event):
-                self._perform_move(unit, 1, 0)
-                return
+            # Check InputManager for held keys (allows diagonal combinations)
+            if input_manager.is_action_pressed(InputAction.MOVE_UP):
+                dy -= 1
+            if input_manager.is_action_pressed(InputAction.MOVE_DOWN):
+                dy += 1
+            if input_manager.is_action_pressed(InputAction.MOVE_LEFT):
+                dx -= 1
+            if input_manager.is_action_pressed(InputAction.MOVE_RIGHT):
+                dx += 1
+            
+            # Only process movement if a movement key was just pressed
+            if (input_manager.event_matches_action(InputAction.MOVE_UP, event) or
+                input_manager.event_matches_action(InputAction.MOVE_DOWN, event) or
+                input_manager.event_matches_action(InputAction.MOVE_LEFT, event) or
+                input_manager.event_matches_action(InputAction.MOVE_RIGHT, event)):
+                if dx != 0 or dy != 0:
+                    # Clamp to valid diagonal/orthogonal directions (-1 to 1)
+                    dx = max(-1, min(1, dx))
+                    dy = max(-1, min(1, dy))
+                    self._perform_move(unit, dx, dy)
+                    return
         else:
-            move_keys = {
-                pygame.K_UP: (0, -1),
-                pygame.K_w: (0, -1),
-                pygame.K_DOWN: (0, 1),
-                pygame.K_s: (0, 1),
-                pygame.K_LEFT: (-1, 0),
-                pygame.K_a: (-1, 0),
-                pygame.K_RIGHT: (1, 0),
-                pygame.K_d: (1, 0),
-            }
-            if event.key in move_keys:
-                dx, dy = move_keys[event.key]
-                self._perform_move(unit, dx, dy)
-                return
+            # Fallback: direct key state checks for held keys
+            if keys_pressed[pygame.K_w] or keys_pressed[pygame.K_UP]:
+                dy -= 1
+            if keys_pressed[pygame.K_s] or keys_pressed[pygame.K_DOWN]:
+                dy += 1
+            if keys_pressed[pygame.K_a] or keys_pressed[pygame.K_LEFT]:
+                dx -= 1
+            if keys_pressed[pygame.K_d] or keys_pressed[pygame.K_RIGHT]:
+                dx += 1
+            
+            # Only process movement if a movement key was just pressed
+            if event.key in (pygame.K_UP, pygame.K_w, pygame.K_DOWN, pygame.K_s, 
+                            pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d):
+                if dx != 0 or dy != 0:
+                    # Clamp to valid diagonal/orthogonal directions (-1 to 1)
+                    dx = max(-1, min(1, dx))
+                    dy = max(-1, min(1, dy))
+                    self._perform_move(unit, dx, dy)
+                    return
 
         # Basic attack - enter targeting mode
         if input_manager is not None:

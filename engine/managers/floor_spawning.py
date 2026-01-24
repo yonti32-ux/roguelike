@@ -15,6 +15,7 @@ from systems.enemies import (
     is_elite_spawn,
     make_enemy_elite,
     UNIQUE_ROOM_ENEMIES,
+    UNIQUE_MIN_FLOOR,
 )
 from systems.events import EVENTS
 from systems.traps import TRAPS
@@ -168,6 +169,21 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
     spawned_unique_ids: set[str] = set()
     max_unique_per_floor = 2
 
+    # Track unique/boss pacing across floors so we don't spike difficulty
+    # too often in a row.
+    last_floor_had_unique: bool = bool(getattr(game, "last_floor_had_unique", False))
+    spawned_any_unique_this_floor: bool = False
+
+    # Track per-floor cap of elite enemies to avoid "all elites" packs,
+    # especially on early floors.
+    if floor_index <= 2:
+        max_elites_per_floor = 1
+    elif floor_index <= 4:
+        max_elites_per_floor = 2
+    else:
+        max_elites_per_floor = 3
+    elite_spawned_count = 0
+
     def can_use_tile(tx: int, ty: int) -> bool:
         if (tx, ty) in occupied_enemy_tiles:
             return False
@@ -203,14 +219,21 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
         # --- Chance to spawn a room-themed unique enemy instead of a pack ---
         spawned_unique_here = False
         if (
-            room_tag is not None
+            floor_index >= 3  # Delay unique "mini-boss" spawns to floor 3+
+            and room_tag is not None
             and room_tag in UNIQUE_ROOM_ENEMIES
             and len(spawned_unique_ids) < max_unique_per_floor
-            and random.random() < 0.15  # 15% chance at eligible anchors
+            # If the previous floor already had a unique, heavily reduce the
+            # chance this floor to avoid back-to-back spike encounters.
+            and (not last_floor_had_unique or random.random() < 0.25)
+            and random.random() < 0.15  # 15% base chance at eligible anchors
         ):
-            # Filter uniques that haven't spawned yet
+            # Filter uniques that haven't spawned yet and are unlocked for this floor
             available_uniques = [
-                uid for uid in UNIQUE_ROOM_ENEMIES[room_tag] if uid not in spawned_unique_ids
+                uid
+                for uid in UNIQUE_ROOM_ENEMIES[room_tag]
+                if uid not in spawned_unique_ids
+                and floor_index >= UNIQUE_MIN_FLOOR.get(uid, 1)
             ]
             if available_uniques:
                 unique_id = random.choice(available_uniques)
@@ -232,6 +255,20 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                     max_hp, attack_power, defense, xp_reward, initiative = compute_scaled_stats(
                         arch, floor_index
                     )
+
+                    # Extra scaling for uniques beyond their unlock floor so that
+                    # they remain threatening deeper in the dungeon without
+                    # being overwhelming when first introduced.
+                    min_floor_for_unique = UNIQUE_MIN_FLOOR.get(arch.id, 1)
+                    if floor_index > min_floor_for_unique:
+                        extra_floors = floor_index - min_floor_for_unique
+                        # +5% per floor after unlock, capped at +50%
+                        scale = 1.0 + 0.05 * extra_floors
+                        scale = max(1.0, min(scale, 1.5))
+                        max_hp = int(max_hp * scale)
+                        attack_power = int(attack_power * scale)
+                        defense = int(defense * scale)
+                        xp_reward = int(xp_reward * scale)
 
                     ex, ey = game_map.center_entity_on_tile(
                         spawn_tx, spawn_ty, enemy_width, enemy_height
@@ -263,6 +300,7 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
                     spawned_total += 1
                     spawned_unique_ids.add(unique_id)
                     spawned_unique_here = True
+                    spawned_any_unique_this_floor = True
 
         if spawned_unique_here or spawned_total >= max_total_enemies:
             continue
@@ -325,14 +363,23 @@ def spawn_enemies_for_floor(game: "Game", game_map: GameMap, floor_index: int) -
 
             # Enemies block movement in exploration
             setattr(enemy, "blocks_movement", True)
-            
-            # Elite system: randomly make this enemy elite
-            if is_elite_spawn(floor_index):
+
+            # Elite system: randomly make this enemy elite, but respect a
+            # per-floor cap so we don't flood early floors with elites.
+            if (
+                elite_spawned_count < max_elites_per_floor
+                and is_elite_spawn(floor_index)
+            ):
                 make_enemy_elite(enemy, floor_index)
+                elite_spawned_count += 1
 
             game_map.entities.append(enemy)
             occupied_enemy_tiles.add((spawn_tx, spawn_ty))
             spawned_total += 1
+
+    # Remember whether this floor spawned a unique so we can adjust pacing
+    # on the next floor (avoid back-to-back guaranteed uniques).
+    setattr(game, "last_floor_had_unique", spawned_any_unique_this_floor)
 
 
 def spawn_events_for_floor(game_map: GameMap, floor_index: int) -> None:

@@ -67,11 +67,27 @@ ENEMY_PACKS: Dict[str, EnemyPackTemplate] = {}
 
 # Mapping of room tags to special "unique" enemy archetype ids.
 # These are used as rare spawns in matching room types.
+# 
+# Note: these are effectively "mini-boss" style enemies. Their actual
+# minimum floor index is controlled by UNIQUE_MIN_FLOOR below so that
+# we can progressively unlock tougher uniques as the player descends.
 UNIQUE_ROOM_ENEMIES: Dict[str, List[str]] = {
     "graveyard": ["grave_warden"],
     "sanctum": ["sanctum_guardian"],
     "lair": ["pit_champion"],
     "treasure": ["hoard_mimic"],
+}
+
+# Minimum floor index at which a given unique can appear.
+# This lets us gate early-game difficulty and introduce tougher
+# uniques deeper into the dungeon.
+UNIQUE_MIN_FLOOR: Dict[str, int] = {
+    "grave_warden": 3,
+    "sanctum_guardian": 4,
+    "pit_champion": 5,
+    "hoard_mimic": 3,
+    # Future uniques (e.g., deeper lair/dragon-themed)
+    # "dragon_highlord": 6,
 }
 
 
@@ -1074,6 +1090,11 @@ ELITE_ATTACK_MULTIPLIER = 1.25  # +25% attack
 ELITE_DEFENSE_MULTIPLIER = 1.2  # +20% defense
 ELITE_XP_MULTIPLIER = 2.0  # +100% XP (elites are worth more)
 
+# Additional XP bonus just for "unique" enemies (room-themed mini-bosses).
+# This stacks on top of the elite multiplier so that uniques feel especially
+# rewarding to defeat.
+UNIQUE_XP_BONUS_MULTIPLIER = 1.5  # +50% XP on top of elite bonus
+
 
 def is_elite_spawn(floor_index: int, base_chance: float = BASE_ELITE_SPAWN_CHANCE) -> bool:
     """
@@ -1167,6 +1188,13 @@ def make_enemy_elite(enemy, floor_index: int) -> None:
         # Also update the original name for display
         setattr(enemy, "original_name", enemy_type)
     
+    # If this enemy is also marked as "unique" (room-themed mini-boss),
+    # give it an extra XP bonus to make the encounter feel especially
+    # rewarding.
+    if getattr(enemy, "is_unique", False):
+        boosted_xp = int(getattr(enemy, "xp_reward", elite_xp) * UNIQUE_XP_BONUS_MULTIPLIER)
+        setattr(enemy, "xp_reward", max(boosted_xp, elite_xp))
+
     # Elite visual indicator: slightly brighter/more vibrant color
     # We'll use a glow effect in rendering, but also tint the base color
     base_color = getattr(enemy, "color", (200, 80, 80))

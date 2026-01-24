@@ -1,7 +1,44 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 import pygame
+
+
+def _calculate_hp_color(hp_fraction: float) -> tuple[int, int, int]:
+    """
+    Calculate HP bar color based on HP percentage.
+    
+    Args:
+        hp_fraction: HP percentage (0.0 to 1.0)
+    
+    Returns:
+        RGB color tuple (red, green, blue)
+        - Green (100, 255, 100) at 100% HP
+        - Yellow (255, 255, 100) at 50% HP
+        - Red (255, 100, 100) at 0% HP
+    """
+    hp_fraction = max(0.0, min(1.0, hp_fraction))
+    
+    if hp_fraction > 0.5:
+        # Green to Yellow (100% to 50%)
+        # At 100%: green (100, 255, 100)
+        # At 50%: yellow (255, 255, 100)
+        # Interpolate between these
+        t = (hp_fraction - 0.5) * 2.0  # Maps 0.5-1.0 to 0.0-1.0
+        r = int(100 + (255 - 100) * (1 - t))
+        g = 255
+        b = int(100 + (100 - 100) * (1 - t))
+    else:
+        # Yellow to Red (50% to 0%)
+        # At 50%: yellow (255, 255, 100)
+        # At 0%: red (255, 100, 100)
+        # Interpolate between these
+        t = hp_fraction * 2.0  # Maps 0.0-0.5 to 0.0-1.0
+        r = 255
+        g = int(255 + (100 - 255) * (1 - t))
+        b = int(100 + (100 - 100) * (1 - t))
+    
+    return (r, g, b)
 
 
 def _draw_bar(
@@ -159,7 +196,10 @@ def _draw_compact_unit_card(
     bar_w = width - 8
     bar_h = 7  # Smaller bar
     hp_ratio = hp / max_hp if max_hp > 0 else 0.0
-    hp_color = (200, 80, 80) if is_alive else (100, 50, 50)
+    if is_alive:
+        hp_color = _calculate_hp_color(hp_ratio)
+    else:
+        hp_color = (100, 50, 50)  # Gray when dead
     _draw_bar(surface, bar_x, bar_y, bar_w, bar_h, hp_ratio, (60, 30, 30), hp_color, (255, 255, 255))
     
     # HP text

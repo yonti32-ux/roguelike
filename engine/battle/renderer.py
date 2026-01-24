@@ -5,7 +5,7 @@ Handles all rendering/drawing logic for the battle scene.
 Extracted from battle_scene.py for better code organization.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import math
 import pygame
 
@@ -15,7 +15,8 @@ from settings import (
     BASE_CRIT_CHANCE,
 )
 from engine.battle.types import BattleUnit
-from ui.hud_utils import _draw_status_indicators
+from ui.hud_utils import _draw_status_indicators, _calculate_hp_color
+from ui.status_display import draw_enhanced_status_indicators
 
 
 class BattleRenderer:
@@ -361,7 +362,8 @@ class BattleRenderer:
             return
 
         fg_width = max(1, int(bar_width * ratio))
-        color = COLOR_PLAYER if is_player else COLOR_ENEMY
+        # Use dynamic HP color (green→yellow→red) instead of fixed colors
+        color = _calculate_hp_color(ratio)
         fg_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height)
         pygame.draw.rect(surface, color, fg_rect)
 
@@ -568,20 +570,22 @@ class BattleRenderer:
             # HP bar
             self.draw_hp_bar(surface, rect, unit, is_player=False)
 
-            # Status icons (horizontal layout, going upward)
-            icon_y = rect.y - 18
-            _draw_status_indicators(
-                surface,
-                self.font,
-                rect.x + 4,  # Start x position
-                icon_y,
-                has_guard=self.scene._has_status(unit, "guard"),
-                has_weakened=self.scene._has_status(unit, "weakened"),
-                has_stunned=self.scene._is_stunned(unit),
-                has_dot=self.scene._has_dot(unit),
-                icon_spacing=-18,  # Negative for upward
-                vertical=True,
-            )
+            # Status icons (enhanced display with timers and stacks)
+            # Draw from bottom up (negative spacing)
+            icon_y = rect.y + rect.height - 2
+            if unit.statuses:
+                draw_enhanced_status_indicators(
+                    surface,
+                    self.font,
+                    rect.x + 4,
+                    icon_y,
+                    unit.statuses,
+                    icon_spacing=-18,  # Negative for upward stacking
+                    vertical=True,
+                    show_timers=True,
+                    show_stacks=True,
+                    max_statuses=None,  # Show all statuses
+                )
 
             # Name label
             name_surf = self.font.render(unit.name, True, (230, 210, 210))
@@ -622,63 +626,89 @@ class BattleRenderer:
         self.draw_hit_sparks(surface)
 
     def draw_floating_damage(self, surface: pygame.Surface) -> None:
-        """Draw floating damage numbers that rise and fade."""
+        """Draw floating damage numbers that rise and fade, stacking vertically for same target."""
+        # Group damage numbers by target for stacking
+        # Use (gx, gy) tuple as key since BattleUnit objects aren't hashable
+        damage_by_target: Dict[Tuple[int, int], List[Dict]] = {}
         for damage_info in self.scene._floating_damage:
             target = damage_info["target"]
-            damage = damage_info["damage"]
-            y_offset = damage_info["y_offset"]
-            timer = damage_info["timer"]
-            is_crit = damage_info.get("is_crit", False)
-            is_kill = damage_info.get("is_kill", False)
+            target_key = (target.gx, target.gy)
+            if target_key not in damage_by_target:
+                damage_by_target[target_key] = []
+            damage_by_target[target_key].append(damage_info)
+        
+        # Draw each group, stacking numbers vertically when multiple exist
+        for target_key, damage_list in damage_by_target.items():
+            # Get target from first damage_info (all should have same target at same position)
+            target = damage_list[0]["target"]
+            gx, gy = target_key
             
-            if not target.is_alive and not is_kill:
-                continue
+            # Sort by timer (lower timer = older = should be higher up)
+            damage_list_sorted = sorted(damage_list, key=lambda d: d.get("timer", 0))
             
-            # Calculate position above the target unit
-            x = self.scene.grid_origin_x + target.gx * self.scene.cell_size + self.scene.cell_size // 2
-            y = self.scene.grid_origin_y + target.gy * self.scene.cell_size - y_offset
+            # Stack spacing: 25 pixels between stacked numbers
+            stack_spacing = 25
             
-            # Calculate alpha based on remaining time (fade out)
-            # Use longer max time for more visibility
-            max_time = 2.0 if is_crit else 1.8
-            alpha = min(255, int(255 * (timer / max_time)))
-            
-            # Color based on crit status and damage
-            if is_crit:
-                color = (255, 255, 100)  # Bright yellow for crits
-                damage_text = f"CRIT! -{damage}"
-            elif is_kill:
-                color = (255, 200, 0)  # Orange for kills
-                damage_text = f"-{damage}!"
-            elif damage >= 20:
-                color = (255, 100, 100)  # Bright red for big hits
-                damage_text = f"-{damage}"
-            elif damage >= 10:
-                color = (255, 150, 150)  # Medium red
-                damage_text = f"-{damage}"
-            else:
-                color = (255, 200, 200)  # Light red for small hits
-                damage_text = f"-{damage}"
-            
-            # Use larger font for damage numbers
-            damage_font = getattr(self, "damage_font", self.font)
-            
-            # Render damage text with shadow for visibility (larger shadow for bigger text)
-            # Shadow
-            shadow_surf = damage_font.render(damage_text, True, (0, 0, 0))
-            surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 2, y + 2))
-            # Main text
-            text_surf = damage_font.render(damage_text, True, color)
-            text_x = x - text_surf.get_width() // 2
-            text_y = y
-            surface.blit(text_surf, (text_x, text_y))
-            
-            # Draw additional crit indicator (star or sparkle) - bigger for larger font
-            if is_crit:
-                crit_size = 12  # Increased from 8
-                pygame.draw.circle(surface, (255, 255, 200), (x, y - 20), crit_size, 2)
-                pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 20), (x + crit_size, y - 20), 2)
-                pygame.draw.line(surface, (255, 255, 200), (x, y - 20 - crit_size), (x, y - 20 + crit_size), 2)
+            for idx, damage_info in enumerate(damage_list_sorted):
+                damage = damage_info["damage"]
+                base_y_offset = damage_info["y_offset"]
+                timer = damage_info["timer"]
+                is_crit = damage_info.get("is_crit", False)
+                is_kill = damage_info.get("is_kill", False)
+                
+                if not target.is_alive and not is_kill:
+                    continue
+                
+                # Stack multiple numbers vertically: older ones (higher index) go higher
+                # Subtract stack offset so older numbers appear above newer ones
+                stack_offset = idx * stack_spacing if len(damage_list) > 1 else 0
+                y_offset = base_y_offset + stack_offset
+                
+                # Calculate position above the target unit
+                x = self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2
+                y = self.scene.grid_origin_y + gy * self.scene.cell_size - y_offset
+                
+                # Calculate alpha based on remaining time (fade out)
+                # Use longer max time for more visibility
+                max_time = 2.0 if is_crit else 1.8
+                alpha = min(255, int(255 * (timer / max_time)))
+                
+                # Color based on crit status and damage
+                if is_crit:
+                    color = (255, 255, 100)  # Bright yellow for crits
+                    damage_text = f"CRIT! -{damage}"
+                elif is_kill:
+                    color = (255, 200, 0)  # Orange for kills
+                    damage_text = f"-{damage}!"
+                elif damage >= 20:
+                    color = (255, 100, 100)  # Bright red for big hits
+                    damage_text = f"-{damage}"
+                elif damage >= 10:
+                    color = (255, 150, 150)  # Medium red
+                    damage_text = f"-{damage}"
+                else:
+                    color = (255, 200, 200)  # Light red for small hits
+                    damage_text = f"-{damage}"
+                
+                # Use larger font for damage numbers
+                damage_font = getattr(self, "damage_font", self.font)
+                
+                # Render damage text with shadow for visibility (larger shadow for bigger text)
+                # Shadow
+                shadow_surf = damage_font.render(damage_text, True, (0, 0, 0))
+                surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 2, y + 2))
+                # Main text
+                text_surf = damage_font.render(damage_text, True, color)
+                text_x = x - text_surf.get_width() // 2
+                text_y = y
+                surface.blit(text_surf, (text_x, text_y))
+                
+                # Draw additional crit indicator (star or sparkle) - bigger for larger font
+                if is_crit:
+                    crit_size = 12  # Increased from 8
+                    pygame.draw.circle(surface, (255, 255, 200), (x, y - 20), crit_size, 2)
+                    pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 20), (x + crit_size, y - 20), 2)
+                    pygame.draw.line(surface, (255, 255, 200), (x, y - 20 - crit_size), (x, y - 20 + crit_size), 2)
 
     def draw_hit_sparks(self, surface: pygame.Surface) -> None:
         """Draw hit spark effects at impact locations."""

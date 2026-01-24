@@ -202,7 +202,7 @@ class BattleAI:
             next_gx, next_gy = path[1]
             dx = next_gx - unit.gx
             dy = next_gy - unit.gy
-            # Normalise to a single-tile step (path is 4‑way so this should already be 1 tile)
+            # Normalise to a single-tile step (path is 8-way so this should already be 1 tile)
             if dx > 1:
                 dx = 1
             elif dx < -1:

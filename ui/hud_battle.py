@@ -4,7 +4,8 @@ from typing import List
 import pygame
 
 from systems.input import InputAction
-from ui.hud_utils import _draw_bar, _draw_status_indicators
+from ui.hud_utils import _draw_bar, _draw_status_indicators, _calculate_hp_color
+from ui.status_display import draw_enhanced_status_indicators
 from ui.ui_scaling import scale_value
 
 
@@ -76,7 +77,10 @@ def _draw_battle_unit_card(
 
     # HP label + bar
     hp_ratio = hp / max_hp if max_hp > 0 else 0.0
-    hp_color = (210, 90, 90) if hp > 0 else (110, 60, 60)
+    if hp > 0:
+        hp_color = _calculate_hp_color(hp_ratio)
+    else:
+        hp_color = (110, 60, 60)  # Dark red when dead
     hp_label = font.render(f"HP {hp}/{max_hp}", True, (225, 225, 225))
     surface.blit(hp_label, (text_x, text_y))
     text_y += scale_value(14, scale)
@@ -103,18 +107,22 @@ def _draw_battle_unit_card(
         res_text = font.render(" | ".join(res_parts), True, (180, 210, 235))
         surface.blit(res_text, (text_x, text_y))
 
-    # Status indicators (right side, vertically stacked)
+    # Status indicators (right side, vertically stacked) - enhanced display
     icon_x = x + width - padding_x - scale_value(14, scale)
     icon_y = y + padding_y
-    _draw_status_indicators(
-        surface,
-        font,
-        icon_x,
-        icon_y,
-        statuses=statuses,
-        icon_spacing=scale_value(14, scale),
-        vertical=True,
-    )
+    if statuses:
+        draw_enhanced_status_indicators(
+            surface,
+            font,
+            icon_x,
+            icon_y,
+            statuses,
+            icon_spacing=scale_value(14, scale),
+            vertical=True,
+            show_timers=True,
+            show_stacks=True,
+            max_statuses=None,  # Show all statuses
+        )
 
 
 def _draw_battle_skill_hotbar(

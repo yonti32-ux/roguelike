@@ -7,7 +7,7 @@ from settings import TILE_SIZE
 from systems.events import get_event_def
 from systems.party import CompanionState, get_companion, ensure_companion_stats
 from world.entities import Enemy
-from ui.hud_utils import _draw_bar, _draw_resource_bar_with_label, _draw_compact_unit_card
+from ui.hud_utils import _draw_bar, _draw_resource_bar_with_label, _draw_compact_unit_card, _calculate_hp_color
 from ui.ui_scaling import scale_value
 
 if TYPE_CHECKING:
@@ -110,10 +110,13 @@ def _draw_hero_panel(
     bar_w = width - scale_value(20, ui_scale)
     bar_h = scale_value(10, ui_scale)
 
+    # Calculate dynamic HP color based on HP percentage
+    hp_ratio = player_hp / player_max_hp if player_max_hp > 0 else 0.0
+    hp_color = _calculate_hp_color(hp_ratio) if player_hp > 0 else (100, 50, 50)
     y_pos = _draw_resource_bar_with_label(
         panel_surf, ui_font, bar_x, y_pos, bar_w, bar_h,
         "HP", player_hp, player_max_hp,
-        (230, 90, 90), (60, 30, 30), (200, 80, 80), (255, 255, 255)
+        (230, 90, 90), (60, 30, 30), hp_color, (255, 255, 255)
     )
 
     xp_text = ui_font.render(f"XP {xp_cur}/{xp_needed}", True, (220, 220, 160))
