@@ -421,34 +421,67 @@ def _draw_screen_header(
     screen.blit(title_shadow, (42, 32))
     screen.blit(title_surf, (40, 30))
     
-    # Tab indicators with enhanced styling
-    tab_x = w - 400
+    # Tab indicators with enhanced styling - centered and better spaced
     tab_y = 30
-    tab_spacing = 120
+    tab_spacing = 140  # Increased spacing between tabs
     
+    # Calculate total width needed for all tabs
+    total_tabs_width = 0
+    tab_widths = []
+    for screen_name in available_screens:
+        tab_text = screen_name.capitalize()
+        # Calculate width for both active and inactive styles (use larger)
+        active_surf = ui_font.render(tab_text, True, (255, 255, 200))
+        inactive_surf = ui_font.render(tab_text, True, (140, 150, 160))
+        # Use the larger width + padding for active tabs
+        tab_width = max(active_surf.get_width(), inactive_surf.get_width()) + 16
+        tab_widths.append(tab_width)
+        total_tabs_width += tab_width
+    
+    # Add spacing between tabs (n-1 gaps for n tabs)
+    total_spacing = (len(available_screens) - 1) * tab_spacing
+    total_width = total_tabs_width + total_spacing
+    
+    # Center the tabs horizontally (start from middle, offset by half total width)
+    tab_start_x = (w // 2) - (total_width // 2)
+    
+    # Draw tabs
+    current_x = tab_start_x
     for i, screen_name in enumerate(available_screens):
         is_current = screen_name == current_screen
         tab_text = screen_name.capitalize()
+        
         if is_current:
             # Active tab with background
             tab_surf = ui_font.render(tab_text, True, (255, 255, 200))
-            tab_bg = pygame.Surface((tab_surf.get_width() + 16, 28), pygame.SRCALPHA)
+            tab_bg_width = tab_widths[i]  # Use pre-calculated width
+            tab_bg = pygame.Surface((tab_bg_width, 28), pygame.SRCALPHA)
             tab_bg.fill((60, 80, 100, 220))
-            screen.blit(tab_bg, (tab_x + i * tab_spacing - 8, tab_y - 2))
-            screen.blit(tab_surf, (tab_x + i * tab_spacing, tab_y))
+            screen.blit(tab_bg, (current_x, tab_y - 2))
+            # Center text in the background
+            text_x = current_x + (tab_bg_width - tab_surf.get_width()) // 2
+            screen.blit(tab_surf, (text_x, tab_y))
             # Bottom accent line
             pygame.draw.line(
                 screen,
                 (200, 240, 255),
-                (tab_x + i * tab_spacing - 8, tab_y + 26),
-                (tab_x + i * tab_spacing + tab_surf.get_width() + 8, tab_y + 26),
+                (current_x, tab_y + 26),
+                (current_x + tab_bg_width, tab_y + 26),
                 3,
             )
+            current_x += tab_bg_width
         else:
             # Inactive tab
             tab_color = (140, 150, 160)
             tab_surf = ui_font.render(tab_text, True, tab_color)
-            screen.blit(tab_surf, (tab_x + i * tab_spacing, tab_y))
+            # Center text in the allocated space
+            text_x = current_x + (tab_widths[i] - tab_surf.get_width()) // 2
+            screen.blit(tab_surf, (text_x, tab_y))
+            current_x += tab_widths[i]
+        
+        # Add spacing between tabs (except after last tab)
+        if i < len(available_screens) - 1:
+            current_x += tab_spacing
 
 
 def _draw_screen_footer(
@@ -1725,7 +1758,7 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
 
 
 def draw_shop_fullscreen(game: "Game") -> None:
-    """Full-screen shop view."""
+    """Full-screen shop view with polished visuals."""
     screen = game.screen
     ui_font = game.ui_font
     w, h = screen.get_size()
@@ -1742,10 +1775,59 @@ def draw_shop_fullscreen(game: "Game") -> None:
     mode = getattr(game, "shop_mode", "buy")
     mode_label = "BUY" if mode == "buy" else "SELL"
     
+    # Get gold value
     gold_value = int(getattr(getattr(game, "hero_stats", None), "gold", 0))
-    gold_line = ui_font.render(f"Your gold: {gold_value}", True, (230, 210, 120))
-    screen.blit(gold_line, (40, 70))
     
+    # Starting positions
+    start_y = 90
+    left_x = 40
+    
+    # === TOP INFO BAR ===
+    info_bar_height = 50
+    info_bar_y = start_y
+    _draw_panel(screen, left_x, info_bar_y, w - 2 * left_x, info_bar_height,
+               border_color=(120, 100, 80), bg_color=(30, 25, 20))
+    
+    panel_padding = 20
+    info_y = info_bar_y + panel_padding
+    
+    # Gold display with icon
+    gold_text = f"💰 Gold: {gold_value}"
+    gold_surf = ui_font.render(gold_text, True, (255, 220, 100))
+    screen.blit(gold_surf, (left_x + panel_padding, info_y))
+    
+    # Mode indicator badge
+    mode_color = (100, 200, 150) if mode == "buy" else (200, 150, 100)
+    mode_bg_color = (40, 80, 60) if mode == "buy" else (80, 60, 40)
+    mode_badge_width = 120
+    mode_badge_height = 28
+    mode_badge_x = w - left_x - panel_padding - mode_badge_width
+    mode_badge = pygame.Surface((mode_badge_width, mode_badge_height), pygame.SRCALPHA)
+    mode_badge.fill((*mode_bg_color, 220))
+    screen.blit(mode_badge, (mode_badge_x, info_y - 2))
+    pygame.draw.rect(screen, mode_color, (mode_badge_x, info_y - 2, mode_badge_width, mode_badge_height), 2)
+    mode_text = ui_font.render(f"Mode: {mode_label}", True, mode_color)
+    mode_text_x = mode_badge_x + (mode_badge_width - mode_text.get_width()) // 2
+    screen.blit(mode_text, (mode_text_x, info_y))
+    
+    # === LEFT COLUMN: ITEM LIST ===
+    list_y = start_y + info_bar_height + 20
+    list_panel_width = w // 2 - 60
+    list_panel_height = h - list_y - 100
+    
+    _draw_panel(screen, left_x, list_y, list_panel_width, list_panel_height,
+               border_color=(100, 120, 140), bg_color=(20, 25, 30))
+    
+    panel_padding = 15
+    panel_y = list_y + panel_padding
+    
+    # Title with mode
+    title_text = f"{mode_label} Items"
+    title_surf = ui_font.render(title_text, True, (240, 240, 200))
+    screen.blit(title_surf, (left_x + panel_padding, panel_y))
+    panel_y += 32
+    
+    # Get item lists
     stock_buy: List[str] = list(getattr(game, "shop_stock", []))
     inv: Inventory | None = getattr(game, "inventory", None)
     cursor = int(getattr(game, "shop_cursor", 0))
@@ -1758,105 +1840,255 @@ def draw_shop_fullscreen(game: "Game") -> None:
         else:
             active_list = inv.get_sellable_item_ids()
     
-    # Left column: Buy list
-    left_x = 40
-    y = 110
-    
-    buy_title = ui_font.render(f"{mode_label} Items:", True, (220, 220, 180))
-    screen.blit(buy_title, (left_x, y))
-    y += 28
-    
     if not active_list:
         msg_text = (
             "The merchant has nothing left to sell."
             if mode == "buy"
             else "You have nothing you're willing to sell."
         )
-        msg = ui_font.render(msg_text, True, (190, 190, 190))
-        screen.blit(msg, (left_x, y))
+        msg = ui_font.render(msg_text, True, (180, 180, 180))
+        screen.blit(msg, (left_x + panel_padding, panel_y))
     else:
         max_items = len(active_list)
-        line_height = 26
+        line_height = 50  # Increased for better spacing
         if max_items > 0:
             cursor = max(0, min(cursor, max_items - 1))
+            game.shop_cursor = cursor
         
-        # Show more items in fullscreen
-        visible_start = max(0, cursor - 10)
-        visible_end = min(max_items, cursor + 15)
+        # Calculate visible range
+        max_visible = (list_panel_height - panel_padding - 50) // line_height
+        visible_start = max(0, cursor - max_visible // 2)
+        visible_end = min(max_items, visible_start + max_visible)
         visible_items = active_list[visible_start:visible_end]
         
         # Get floor index for economy calculations
         floor_index = getattr(game, "floor", 1)
         
-        inv = getattr(game, "inventory", None)
+        item_y = panel_y
         for i, item_id in enumerate(visible_items):
             actual_index = visible_start + i
             item_def = _resolve_item_def(item_id, inv)
+            
             if item_def is None:
                 name = item_id
                 price = 0
                 rarity = ""
             else:
                 name = item_def.name
-                rarity = getattr(item_def, "rarity", "")
+                rarity = getattr(item_def, "rarity", "") or ""
                 # Use economy system for dynamic pricing
                 if mode == "buy":
                     price = calculate_shop_buy_price(item_def, floor_index)
                 else:
                     price = calculate_shop_sell_price(item_def, floor_index)
             
-            label = f"{actual_index + 1}) {name}"
-            if rarity:
-                label += f" [{rarity}]"
+            is_selected = (actual_index == cursor)
+            item_rect_x = left_x + panel_padding - 4
+            item_rect_y = item_y - 4
+            item_rect_width = list_panel_width - 2 * panel_padding + 8
+            item_rect_height = line_height - 4
             
-            price_str = f"{price}g" if mode == "buy" else f"{price}g (sell)"
-            
-            if actual_index == cursor:
-                # Highlight selected item
-                bg = pygame.Surface((w // 2 - 80, line_height), pygame.SRCALPHA)
-                bg.fill((60, 60, 90, 210))
-                screen.blit(bg, (left_x, y - 2))
-                label_color = (255, 255, 200)
+            # Enhanced selection highlighting
+            if is_selected:
+                # Outer glow effect
+                glow_surf = pygame.Surface((item_rect_width + 4, item_rect_height + 4), pygame.SRCALPHA)
+                glow_color = (100, 200, 255, 80) if mode == "buy" else (255, 200, 100, 80)
+                glow_surf.fill(glow_color)
+                screen.blit(glow_surf, (item_rect_x - 2, item_rect_y - 2))
+                
+                # Main background with gradient
+                bg = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
+                for j in range(item_rect_height):
+                    alpha = int(220 - (j / item_rect_height) * 40)
+                    color = (70, 100, 130, alpha) if mode == "buy" else (130, 100, 70, alpha)
+                    pygame.draw.line(bg, color, (0, j), (item_rect_width, j))
+                screen.blit(bg, (item_rect_x, item_rect_y))
+                
+                # Border highlight
+                border_color = (150, 220, 255) if mode == "buy" else (255, 220, 150)
+                pygame.draw.rect(screen, border_color, 
+                               (item_rect_x, item_rect_y, item_rect_width, item_rect_height), 2)
             else:
-                label_color = (230, 230, 230)
+                # Subtle background for unselected items
+                bg = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
+                bg.fill((30, 35, 40, 100))
+                screen.blit(bg, (item_rect_x, item_rect_y))
             
-            label_surf = ui_font.render(label, True, label_color)
-            screen.blit(label_surf, (left_x + 20, y))
+            # Item number and name
+            item_x = left_x + panel_padding + 8
+            selection_marker = "▶ " if is_selected else "  "
             
-            price_surf = ui_font.render(price_str, True, (230, 210, 120))
-            screen.blit(price_surf, (left_x + w // 2 - 200, y))
+            # Rarity color
+            rarity_color = _get_rarity_color(rarity)
+            if is_selected:
+                item_color = tuple(min(255, c + 50) for c in rarity_color)
+            else:
+                item_color = rarity_color
             
-            y += line_height
+            # Item name with rarity badge
+            name_line = f"{selection_marker}{name}"
+            if rarity:
+                rarity_badge = f"[{rarity.upper()}]"
+                name_line += f" {rarity_badge}"
+            
+            name_surf = ui_font.render(name_line, True, item_color)
+            screen.blit(name_surf, (item_x, item_y))
+            
+            # Price with affordability indicator (buy mode only)
+            price_x = left_x + list_panel_width - panel_padding - 120
+            if mode == "buy":
+                can_afford = gold_value >= price
+                price_color = (150, 255, 150) if can_afford else (255, 150, 150)
+                price_str = f"{price}g"
+            else:
+                price_color = (230, 210, 120)
+                price_str = f"{price}g"
+            
+            price_surf = ui_font.render(price_str, True, price_color)
+            screen.blit(price_surf, (price_x, item_y))
+            
+            # Item stats preview (one line, dimmed)
+            if item_def and is_selected:
+                stats_line = _build_item_stats_summary(getattr(item_def, "stats", {}) or {})
+                if stats_line:
+                    stats_surf = ui_font.render(f"  • {stats_line}", True, (160, 170, 160))
+                    screen.blit(stats_surf, (item_x + 24, item_y + 24))
+            
+            item_y += line_height
         
-        # Right column: detailed info for currently selected item
-        if 0 <= cursor < max_items:
-            info_x = w // 2 + 40
-            info_y = 110
-
-            selected_id = active_list[cursor]
-            inv = getattr(game, "inventory", None)
-            selected_def = _resolve_item_def(selected_id, inv)
-
-            if selected_def is not None:
-                info_title = ui_font.render("Item Info:", True, (220, 220, 180))
-                screen.blit(info_title, (info_x, info_y))
-                info_y += 26
-
-                # Name + rarity
-                rarity = getattr(selected_def, "rarity", "")
-                if rarity:
-                    name_line = f"{selected_def.name} [{rarity}]"
-                else:
-                    name_line = selected_def.name
-                name_surf = ui_font.render(name_line, True, (235, 235, 220))
-                screen.blit(name_surf, (info_x, info_y))
-                info_y += 24
-
-                # Stats + optional description (shown only for the selected item)
-                info_line = _build_item_info_line(selected_def, include_description=True)
-                if info_line:
-                    info_surf = ui_font.render(info_line, True, (190, 190, 190))
-                    screen.blit(info_surf, (info_x, info_y))
+        # Scroll indicator
+        if max_items > max_visible:
+            scroll_text = f"Showing {visible_start + 1}-{visible_end} of {max_items}"
+            scroll_surf = ui_font.render(scroll_text, True, (180, 200, 220))
+            scroll_bg = pygame.Surface((scroll_surf.get_width() + 16, 24), pygame.SRCALPHA)
+            scroll_bg.fill((40, 50, 60, 180))
+            screen.blit(scroll_bg, (left_x + panel_padding - 8, list_y + list_panel_height - 35))
+            screen.blit(scroll_surf, (left_x + panel_padding, list_y + list_panel_height - 33))
+    
+    # === RIGHT COLUMN: ITEM DETAILS ===
+    info_x = w // 2 + 20
+    info_panel_width = w - info_x - left_x
+    info_panel_height = h - list_y - 100
+    
+    _draw_panel(screen, info_x, list_y, info_panel_width, info_panel_height,
+               border_color=(120, 100, 120), bg_color=(25, 20, 25))
+    
+    panel_padding = 20
+    info_y = list_y + panel_padding
+    
+    # Item details title
+    details_title = ui_font.render("Item Details", True, (240, 220, 240))
+    screen.blit(details_title, (info_x + panel_padding, info_y))
+    info_y += 36
+    
+    # Show selected item details
+    if active_list and 0 <= cursor < len(active_list):
+        selected_id = active_list[cursor]
+        selected_def = _resolve_item_def(selected_id, inv)
+        
+        if selected_def is not None:
+            # Name with rarity
+            rarity = getattr(selected_def, "rarity", "") or ""
+            name_color = _get_rarity_color(rarity)
+            name_text = selected_def.name
+            if rarity:
+                name_text += f" [{rarity.upper()}]"
+            
+            name_surf = ui_font.render(name_text, True, name_color)
+            screen.blit(name_surf, (info_x + panel_padding, info_y))
+            info_y += 32
+            
+            # Price display
+            floor_index = getattr(game, "floor", 1)
+            if mode == "buy":
+                item_price = calculate_shop_buy_price(selected_def, floor_index)
+                can_afford = gold_value >= item_price
+                price_label = f"Price: {item_price}g"
+                price_color = (150, 255, 150) if can_afford else (255, 150, 150)
+                if not can_afford:
+                    price_label += f" (Need {item_price - gold_value}g more)"
+            else:
+                item_price = calculate_shop_sell_price(selected_def, floor_index)
+                price_label = f"Sell Price: {item_price}g"
+                price_color = (230, 210, 120)
+            
+            price_surf = ui_font.render(price_label, True, price_color)
+            screen.blit(price_surf, (info_x + panel_padding, info_y))
+            info_y += 32
+            
+            # Divider
+            pygame.draw.line(screen, (80, 80, 100),
+                           (info_x + panel_padding, info_y),
+                           (info_x + info_panel_width - panel_padding, info_y), 1)
+            info_y += 20
+            
+            # Stats
+            stats = getattr(selected_def, "stats", {}) or {}
+            if stats:
+                stats_title = ui_font.render("Stats:", True, (220, 240, 220))
+                screen.blit(stats_title, (info_x + panel_padding, info_y))
+                info_y += 28
+                
+                stats_line = _build_item_stats_summary(stats)
+                if stats_line:
+                    # Wrap long stats lines
+                    max_width = info_panel_width - 2 * panel_padding - 40
+                    stats_surf = ui_font.render(stats_line, True, (200, 220, 200))
+                    if stats_surf.get_width() <= max_width:
+                        screen.blit(stats_surf, (info_x + panel_padding + 20, info_y))
+                        info_y += 24
+                    else:
+                        # Split into multiple lines if needed
+                        words = stats_line.split("  ")
+                        current_line = ""
+                        for word in words:
+                            test_line = current_line + ("  " if current_line else "") + word
+                            test_surf = ui_font.render(test_line, True, (200, 220, 200))
+                            if test_surf.get_width() > max_width and current_line:
+                                # Render current line and start new one
+                                line_surf = ui_font.render(current_line, True, (200, 220, 200))
+                                screen.blit(line_surf, (info_x + panel_padding + 20, info_y))
+                                info_y += 24
+                                current_line = word
+                            else:
+                                current_line = test_line
+                        if current_line:
+                            line_surf = ui_font.render(current_line, True, (200, 220, 200))
+                            screen.blit(line_surf, (info_x + panel_padding + 20, info_y))
+                            info_y += 24
+                info_y += 12
+            
+            # Description
+            desc = (getattr(selected_def, "description", "") or "").strip()
+            if desc:
+                desc_title = ui_font.render("Description:", True, (220, 220, 240))
+                screen.blit(desc_title, (info_x + panel_padding, info_y))
+                info_y += 28
+                
+                # Word wrap description
+                max_width = info_panel_width - 2 * panel_padding - 40
+                words = desc.split()
+                current_line = ""
+                for word in words:
+                    test_line = current_line + (" " if current_line else "") + word
+                    test_surf = ui_font.render(test_line, True, (190, 200, 210))
+                    if test_surf.get_width() > max_width and current_line:
+                        # Render current line and start new one
+                        line_surf = ui_font.render(current_line, True, (190, 200, 210))
+                        screen.blit(line_surf, (info_x + panel_padding + 20, info_y))
+                        info_y += 24
+                        current_line = word
+                    else:
+                        current_line = test_line
+                if current_line:
+                    line_surf = ui_font.render(current_line, True, (190, 200, 210))
+                    screen.blit(line_surf, (info_x + panel_padding + 20, info_y))
+        else:
+            no_info = ui_font.render("No item selected", True, (150, 150, 150))
+            screen.blit(no_info, (info_x + panel_padding, info_y))
+    else:
+        no_info = ui_font.render("No items available", True, (150, 150, 150))
+        screen.blit(no_info, (info_x + panel_padding, info_y))
     
     # Footer hints
     if mode == "buy":
