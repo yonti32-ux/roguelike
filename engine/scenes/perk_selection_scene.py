@@ -250,39 +250,71 @@ class PerkSelectionScene:
                     pass
 
     def draw(self) -> None:
-        """Draw the full-screen perk selection scene."""
+        """Draw the full-screen perk selection scene with polished visuals."""
         self.screen.fill(COLOR_BG)
         w, h = self.screen.get_size()
         
-        # Title
-        title = self.font_title.render("Level Up - Choose a Perk", True, (240, 240, 200))
-        self.screen.blit(title, (w // 2 - title.get_width() // 2, 40))
+        # === HEADER PANEL ===
+        header_height = 130  # Slightly taller to prevent overlap
+        header_y = 20
+        header_panel = pygame.Surface((w - 40, header_height), pygame.SRCALPHA)
+        header_panel.fill((15, 20, 25, 240))
+        self.screen.blit(header_panel, (20, header_y))
         
-        # Current owner name
+        # Header border
+        pygame.draw.rect(self.screen, (80, 100, 120), (20, header_y, w - 40, header_height), 2)
+        
+        # Title with glow effect
+        title_text = "Level Up - Choose a Perk"
+        title_shadow = self.font_title.render(title_text, True, (0, 0, 0))
+        title_surf = self.font_title.render(title_text, True, (255, 255, 220))
+        title_x = w // 2 - title_surf.get_width() // 2
+        title_y = header_y + 18
+        self.screen.blit(title_shadow, (title_x + 2, title_y + 2))
+        self.screen.blit(title_surf, (title_x, title_y))
+        
+        # Current owner name with icon
         if self.current_owner_name:
-            owner_text = self.font.render(f"Selecting for: {self.current_owner_name}", True, (200, 200, 200))
-            self.screen.blit(owner_text, (w // 2 - owner_text.get_width() // 2, 90))
+            # Use ASCII-safe indicators
+            owner_prefix = "[HERO]" if self.current_entry and self.current_entry.owner == "hero" else "[COMP]"
+            owner_text = f"{owner_prefix} Selecting for: {self.current_owner_name}"
+            owner_surf = self.font.render(owner_text, True, (220, 240, 255))
+            owner_y = title_y + self.font_title.get_height() + 12
+            self.screen.blit(owner_surf, (w // 2 - owner_surf.get_width() // 2, owner_y))
         
-        # Queue status
+        # Queue status badge
         queue_count = len(self.queue)
         if queue_count > 0:
-            queue_text = self.font_small.render(f"{queue_count} more selection{'s' if queue_count != 1 else ''} pending", True, (160, 160, 160))
-            self.screen.blit(queue_text, (w // 2 - queue_text.get_width() // 2, 120))
+            queue_text = f"{queue_count} more selection{'s' if queue_count != 1 else ''} pending"
+            queue_surf = self.font_small.render(queue_text, True, (255, 220, 150))
+            queue_bg = pygame.Surface((queue_surf.get_width() + 16, 24), pygame.SRCALPHA)
+            queue_bg.fill((80, 60, 40, 200))
+            queue_x = w // 2 - queue_surf.get_width() // 2
+            queue_y = (owner_y if self.current_owner_name else title_y + self.font_title.get_height() + 12) + self.font.get_height() + 10
+            self.screen.blit(queue_bg, (queue_x - 8, queue_y - 2))
+            self.screen.blit(queue_surf, (queue_x, queue_y))
         
         # Draw perk choices
         if not self.current_choices:
-            # No choices available
-            no_choices = self.font.render("No perks available", True, (150, 150, 150))
-            self.screen.blit(no_choices, (w // 2 - no_choices.get_width() // 2, h // 2))
+            # No choices available - centered message
+            no_choices_panel = pygame.Surface((500, 150), pygame.SRCALPHA)
+            no_choices_panel.fill((30, 30, 40, 220))
+            no_choices_x = w // 2 - 250
+            no_choices_y = h // 2 - 75
+            self.screen.blit(no_choices_panel, (no_choices_x, no_choices_y))
+            pygame.draw.rect(self.screen, (100, 100, 120), (no_choices_x, no_choices_y, 500, 150), 2)
             
-            hint = self.font_small.render("Press ESC to continue", True, (120, 120, 120))
-            self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 60))
+            no_choices = self.font.render("No perks available", True, (180, 180, 180))
+            self.screen.blit(no_choices, (w // 2 - no_choices.get_width() // 2, h // 2 - 30))
+            
+            hint = self.font_small.render("Press ESC to continue", True, (140, 140, 140))
+            self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h // 2 + 10))
             return
         
-        # Perk choice list
-        start_y = 180
-        item_height = 100
-        item_spacing = 20
+        # === PERK CHOICES SECTION ===
+        start_y = header_y + header_height + 30
+        item_height = 160  # Increased height to prevent text overlap
+        item_spacing = 25
         
         for i, perk in enumerate(self.current_choices):
             is_selected = (i == self.selected_index)
@@ -290,51 +322,169 @@ class PerkSelectionScene:
             
             self._draw_perk_choice(perk, i, y_pos, w, item_height, is_selected)
         
-        # Instructions
-        hint_y = h - 80
-        hint1 = self.font_small.render("Press 1-3 or Enter/Space to select", True, (160, 160, 160))
-        hint2 = self.font_small.render("Arrow keys: navigate | ESC: cancel all", True, (140, 140, 140))
+        # === FOOTER INSTRUCTIONS ===
+        footer_height = 80
+        footer_y = h - footer_height
+        footer_panel = pygame.Surface((w - 40, footer_height), pygame.SRCALPHA)
+        footer_panel.fill((15, 20, 25, 240))
+        self.screen.blit(footer_panel, (20, footer_y))
+        pygame.draw.line(self.screen, (80, 100, 120), (20, footer_y), (w - 20, footer_y), 2)
+        
+        hint_y = footer_y + 15
+        hint1 = self.font_small.render("Press 1-3 or Enter/Space to select", True, (200, 220, 240))
+        hint2 = self.font_small.render("Arrow keys: navigate | ESC: cancel all", True, (180, 200, 220))
         
         self.screen.blit(hint1, (w // 2 - hint1.get_width() // 2, hint_y))
-        self.screen.blit(hint2, (w // 2 - hint2.get_width() // 2, hint_y + 22))
+        self.screen.blit(hint2, (w // 2 - hint2.get_width() // 2, hint_y + 24))
 
     def _draw_perk_choice(self, perk: perk_system.Perk, index: int, y: int, screen_width: int, height: int, is_selected: bool) -> None:
-        """Draw a single perk choice option."""
+        """Draw a single perk choice option with enhanced visuals."""
         center_x = screen_width // 2
-        box_width = min(600, screen_width - 80)
+        box_width = min(700, screen_width - 80)
         box_x = center_x - box_width // 2
         
-        # Background box
-        bg_color = (40, 40, 50) if not is_selected else (60, 60, 75)
-        border_color = (100, 100, 120) if not is_selected else (180, 180, 200)
-        border_width = 2 if not is_selected else 3
+        # Get branch color
+        branch_colors = {
+            "vitality": (200, 100, 100),  # Red
+            "blade": (150, 150, 200),     # Blue
+            "ward": (150, 200, 150),      # Green
+            "focus": (200, 150, 200),     # Purple
+            "mobility": (200, 200, 150),  # Yellow
+            "general": (180, 180, 180),   # Gray
+        }
+        branch = perk.branch or "general"
+        branch_color = branch_colors.get(branch, (180, 180, 180))
         
-        pygame.draw.rect(self.screen, bg_color, (box_x, y, box_width, height))
-        pygame.draw.rect(self.screen, border_color, (box_x, y, box_width, height), border_width)
+        # Enhanced selection highlighting
+        if is_selected:
+            # Outer glow effect
+            glow_surf = pygame.Surface((box_width + 8, height + 8), pygame.SRCALPHA)
+            glow_alpha = 80 if self.cursor_visible else 40
+            glow_color = (*branch_color, glow_alpha)
+            pygame.draw.rect(glow_surf, glow_color, (0, 0, box_width + 8, height + 8), 4)
+            self.screen.blit(glow_surf, (box_x - 4, y - 4))
+            
+            # Main background with gradient
+            bg = pygame.Surface((box_width, height), pygame.SRCALPHA)
+            for i in range(height):
+                alpha = int(240 - (i / height) * 30)
+                # Blend branch color with background
+                r = int(branch_color[0] * 0.15 + 50)
+                g = int(branch_color[1] * 0.15 + 50)
+                b = int(branch_color[2] * 0.15 + 50)
+                color = (r, g, b, alpha)
+                pygame.draw.line(bg, color, (0, i), (box_width, i))
+            self.screen.blit(bg, (box_x, y))
+            
+            # Border with branch color accent
+            pygame.draw.rect(self.screen, branch_color, (box_x, y, box_width, height), 3)
+            # Inner highlight
+            inner_color = tuple(min(255, c + 60) for c in branch_color)
+            pygame.draw.rect(self.screen, inner_color, (box_x + 2, y + 2, box_width - 4, height - 4), 1)
+        else:
+            # Unselected background
+            bg = pygame.Surface((box_width, height), pygame.SRCALPHA)
+            bg.fill((30, 35, 40, 200))
+            self.screen.blit(bg, (box_x, y))
+            
+            # Subtle border
+            pygame.draw.rect(self.screen, (80, 80, 100), (box_x, y, box_width, height), 2)
         
-        # Selection indicator
-        if is_selected and self.cursor_visible:
-            indicator = self.font.render(">", True, (255, 255, 200))
-            self.screen.blit(indicator, (box_x + 10, y + height // 2 - indicator.get_height() // 2))
+        # Selection indicator (number badge)
+        badge_size = 40
+        badge_x = box_x + 15
+        badge_y = y + 15
+        badge_bg = pygame.Surface((badge_size, badge_size), pygame.SRCALPHA)
+        if is_selected:
+            badge_bg.fill((*branch_color, 220))
+        else:
+            badge_bg.fill((60, 60, 70, 200))
+        self.screen.blit(badge_bg, (badge_x, badge_y))
+        pygame.draw.rect(self.screen, branch_color if is_selected else (100, 100, 120), 
+                       (badge_x, badge_y, badge_size, badge_size), 2)
+        
+        # Number in badge
+        number_text = str(index + 1)
+        number_surf = self.font_title.render(number_text, True, (255, 255, 255))
+        number_x = badge_x + (badge_size - number_surf.get_width()) // 2
+        number_y = badge_y + (badge_size - number_surf.get_height()) // 2
+        self.screen.blit(number_surf, (number_x, number_y))
+        
+        # Content area - better spacing to prevent overlap
+        content_x = box_x + badge_size + 30
+        content_y = y + 18
+        content_width = box_width - badge_size - 50  # More margin
+        
+        # Branch badge
+        if perk.branch:
+            branch_label = perk.branch.upper()
+            branch_surf = self.font_small.render(branch_label, True, (255, 255, 255))
+            branch_bg_width = branch_surf.get_width() + 12
+            branch_bg_height = 22
+            branch_bg = pygame.Surface((branch_bg_width, branch_bg_height), pygame.SRCALPHA)
+            branch_bg.fill((*branch_color, 240))
+            branch_bg_x = content_x
+            branch_bg_y = content_y
+            self.screen.blit(branch_bg, (branch_bg_x, branch_bg_y))
+            pygame.draw.rect(self.screen, tuple(min(255, c + 40) for c in branch_color),
+                          (branch_bg_x, branch_bg_y, branch_bg_width, branch_bg_height), 1)
+            self.screen.blit(branch_surf, (branch_bg_x + 6, branch_bg_y + 3))
+            content_y += branch_bg_height + 14  # More spacing after branch badge
         
         # Perk name
-        name_label = f"{index + 1}) {perk.name}"
-        if perk.branch:
-            branch_label = f"[{perk.branch.upper()}]"
-            name_label = f"{index + 1}) {branch_label} {perk.name}"
+        name_color = tuple(min(255, c + 80) for c in branch_color) if is_selected else (240, 240, 240)
+        name_surf = self.font.render(perk.name, True, name_color)
+        self.screen.blit(name_surf, (content_x, content_y))
+        content_y += name_surf.get_height() + 14  # More spacing after name
         
-        name_color = (240, 240, 220) if is_selected else (220, 220, 200)
-        name_surf = self.font.render(name_label, True, name_color)
-        self.screen.blit(name_surf, (box_x + 40, y + 12))
+        # Description (word-wrapped) - ensure it fits
+        desc_lines = self._wrap_text(perk.description, self.font_small, content_width)
+        desc_color = (220, 230, 240) if is_selected else (190, 200, 210)
+        line_height = self.font_small.get_height() + 4
+        max_desc_lines = max(2, (height - (content_y - y) - 30) // line_height)  # Calculate available space
+        for i, line in enumerate(desc_lines[:max_desc_lines]):  # Limit lines to fit
+            desc_surf = self.font_small.render(line, True, desc_color)
+            self.screen.blit(desc_surf, (content_x, content_y))
+            content_y += line_height
         
-        # Description
-        desc_color = (190, 190, 200) if is_selected else (170, 170, 180)
-        desc_surf = self.font_small.render(perk.description, True, desc_color)
-        self.screen.blit(desc_surf, (box_x + 40, y + 40))
+        # Tags (if any) - as small badges, only if there's room
+        if perk.tags and content_y < y + height - 25:
+            content_y += 8
+            tag_x = content_x
+            for tag in perk.tags:
+                tag_surf = self.font_small.render(tag, True, (180, 200, 220))
+                tag_bg_width = tag_surf.get_width() + 8
+                tag_bg_height = 18
+                # Check if tag fits on current line, otherwise wrap
+                if tag_x + tag_bg_width > box_x + box_width - 20:
+                    tag_x = content_x
+                    content_y += tag_bg_height + 4
+                    # Don't draw if it would overflow
+                    if content_y + tag_bg_height > y + height - 5:
+                        break
+                tag_bg = pygame.Surface((tag_bg_width, tag_bg_height), pygame.SRCALPHA)
+                tag_bg.fill((60, 70, 80, 180))
+                self.screen.blit(tag_bg, (tag_x, content_y))
+                self.screen.blit(tag_surf, (tag_x + 4, content_y + 2))
+                tag_x += tag_bg_width + 6
+    
+    def _wrap_text(self, text: str, font: pygame.font.Font, max_width: int) -> List[str]:
+        """Word-wrap text to fit within max_width."""
+        words = text.split()
+        lines: List[str] = []
+        current = ""
         
-        # Tags (if any)
-        if perk.tags:
-            tags_text = ", ".join(perk.tags)
-            tags_surf = self.font_small.render(f"Tags: {tags_text}", True, (140, 140, 150))
-            self.screen.blit(tags_surf, (box_x + 40, y + 60))
+        for word in words:
+            test = word if not current else current + " " + word
+            if font.size(test)[0] <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        
+        if current:
+            lines.append(current)
+        
+        return lines
 
