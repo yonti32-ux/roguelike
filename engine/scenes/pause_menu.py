@@ -204,6 +204,7 @@ class OptionsMenuScene:
             ("Movement & Interaction", [
                 ("WASD / Arrow Keys", "Move"),
                 ("E", "Interact"),
+                ("F", "Use Stairs"),
             ]),
             ("UI Screens", [
                 ("I", "Inventory"),

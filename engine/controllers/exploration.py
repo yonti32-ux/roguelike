@@ -186,13 +186,9 @@ class ExplorationController:
                 self.try_interact()
                 return
 
-        # Stairs: go down / up (still raw for now)
-        if event.key == pygame.K_PERIOD:  # '.'
-            game.try_change_floor(+1)
-            return
-
-        if event.key == pygame.K_COMMA:  # ','
-            game.try_change_floor(-1)
+        # Stairs: use stairs (automatically detects up or down)
+        if event.key == pygame.K_f:
+            game.try_use_stairs()
             return
 
     def update(self, dt: float) -> None:

@@ -156,6 +156,36 @@ class BattleRenderer:
             if unit.side == "player":
                 reachable_cells = self.scene.pathfinding.get_reachable_cells(unit)
         
+        # Draw skill range if in targeting mode with a skill
+        skill_range_cells: set[tuple[int, int]] = set()
+        if self.scene.targeting_mode is not None:
+            action_type = self.scene.targeting_mode.get("action_type")
+            skill = self.scene.targeting_mode.get("skill")
+            if action_type == "skill" and skill is not None:
+                unit = self.scene._active_unit()
+                if unit and unit.side == "player":
+                    # Get skill range (range_tiles doesn't change with rank currently)
+                    max_range = getattr(skill, "range_tiles", 1)
+                    use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+                    
+                    # Calculate valid target cells
+                    unit_gx, unit_gy = unit.gx, unit.gy
+                    for target_gy in range(self.scene.grid_height):
+                        for target_gx in range(self.scene.grid_width):
+                            if use_chebyshev:
+                                # Chebyshev distance (8-directional)
+                                dx = abs(target_gx - unit_gx)
+                                dy = abs(target_gy - unit_gy)
+                                distance = max(dx, dy)
+                            else:
+                                # Manhattan distance (4-directional)
+                                dx = abs(target_gx - unit_gx)
+                                dy = abs(target_gy - unit_gy)
+                                distance = dx + dy
+                            
+                            if distance <= max_range:
+                                skill_range_cells.add((target_gx, target_gy))
+        
         for gy in range(self.scene.grid_height):
             for gx in range(self.scene.grid_width):
                 x = self.scene.grid_origin_x + gx * self.scene.cell_size
@@ -164,6 +194,24 @@ class BattleRenderer:
                 
                 # Draw cell background
                 pygame.draw.rect(surface, (40, 40, 60), rect, width=1)
+                
+                # Draw skill range highlight (targeting mode with skill)
+                if (gx, gy) in skill_range_cells:
+                    range_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    # Check if there's a valid target here
+                    if self.scene.targeting_mode:
+                        targets = self.scene.targeting_mode.get("targets", [])
+                        has_target = any(t.gx == gx and t.gy == gy for t in targets)
+                        if has_target:
+                            # Valid target - brighter green
+                            pygame.draw.rect(range_surf, (100, 255, 100, 120), range_surf.get_rect())
+                        else:
+                            # In range but no target - dimmer yellow
+                            pygame.draw.rect(range_surf, (200, 200, 100, 60), range_surf.get_rect())
+                    else:
+                        # Fallback: just show range
+                        pygame.draw.rect(range_surf, (200, 200, 100, 60), range_surf.get_rect())
+                    surface.blit(range_surf, (x, y))
                 
                 # Draw reachable cells highlight (movement mode)
                 if (gx, gy) in reachable_cells:
@@ -768,16 +816,35 @@ class BattleRenderer:
                 y_offset = base_y_offset + stack_offset
                 
                 # Calculate position above the target unit
+                is_healing = damage_info.get("is_healing", False)
                 x = self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2
-                y = self.scene.grid_origin_y + gy * self.scene.cell_size - y_offset
+                # Healing floats upward (positive offset), damage floats downward (negative offset)
+                if is_healing:
+                    # Healing: start below unit and float upward
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size + y_offset + 20
+                else:
+                    # Damage: start above unit and float upward
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size - y_offset
                 
                 # Calculate alpha based on remaining time (fade out)
                 # Use longer max time for more visibility
                 max_time = 2.0 if is_crit else 1.8
                 alpha = min(255, int(255 * (timer / max_time)))
                 
-                # Color based on crit status and damage
-                if is_crit:
+                # Check if this is healing
+                is_healing = damage_info.get("is_healing", False)
+                
+                # Color and text based on type (healing vs damage)
+                if is_healing:
+                    # Healing numbers - green colors, float upward
+                    if damage >= 20:
+                        color = (100, 255, 100)  # Bright green for big heals
+                    elif damage >= 10:
+                        color = (150, 255, 150)  # Medium green
+                    else:
+                        color = (200, 255, 200)  # Light green for small heals
+                    damage_text = f"+{damage}"
+                elif is_crit:
                     color = (255, 255, 100)  # Bright yellow for crits
                     damage_text = f"CRIT! -{damage}"
                 elif is_kill:

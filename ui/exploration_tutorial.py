@@ -168,7 +168,7 @@ def draw_exploration_tutorial(surface: pygame.Surface, font: pygame.font.Font, g
     arrow_x = content_x + (30 - arrow_text.get_width()) // 2
     arrow_y = y + (30 - arrow_text.get_height()) // 2
     surface.blit(arrow_text, (arrow_x, arrow_y))
-    stairs_up_text = font.render("Stairs Up (Blue with ^): Go to previous floor. Press ',' to ascend.", True, (220, 220, 220))
+    stairs_up_text = font.render("Stairs Up (Blue with ^): Go to previous floor. Press F to use stairs.", True, (220, 220, 220))
     surface.blit(stairs_up_text, (content_x + 40, y + 5))
     y += line_height + 5
     
@@ -180,7 +180,7 @@ def draw_exploration_tutorial(surface: pygame.Surface, font: pygame.font.Font, g
     arrow_x = content_x + (30 - arrow_text.get_width()) // 2
     arrow_y = y + (30 - arrow_text.get_height()) // 2
     surface.blit(arrow_text, (arrow_x, arrow_y))
-    stairs_down_text = font.render("Stairs Down (Orange with v): Go to next floor. Press '.' to descend.", True, (220, 220, 220))
+    stairs_down_text = font.render("Stairs Down (Orange with v): Go to next floor. Press F to use stairs.", True, (220, 220, 220))
     surface.blit(stairs_down_text, (content_x + 40, y + 5))
     y += line_height + 5
     
@@ -228,6 +228,7 @@ def draw_exploration_tutorial(surface: pygame.Surface, font: pygame.font.Font, g
     
     interactions = [
         "• E: Interact with nearby objects (chests, events, merchants)",
+        "• F: Use stairs (automatically detects up or down)",
         "• I: Open/close inventory",
         "• C: Open/close character sheet",
         "• T: Open/close skill/talent screen",

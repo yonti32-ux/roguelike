@@ -63,8 +63,10 @@ class MainMenuScene:
         Main loop for the main menu scene.
         Returns:
             - "new_game": user wants to start a new game
-            - "load_game": user wants to load a game (to be implemented)
-            - None: user wants to quit
+            - "load_game": user wants to load a game
+            - "options": user wants to open options menu
+            - "quit": user wants to quit the game
+            - None: user closed the window (pygame.QUIT event)
         """
         clock = pygame.time.Clock()
         
@@ -111,27 +113,25 @@ class MainMenuScene:
         if key == pygame.K_q or key == pygame.K_ESCAPE:
             # ESC on "Quit" option confirms, otherwise just selects Quit
             if self.selected_index == len(self.options) - 1:  # Quit is last
-                return None
+                return "quit"
             self.selected_index = len(self.options) - 1
-            return  # stay in menu
+            return None  # stay in menu
         
         # Navigation
         if key in (pygame.K_UP, pygame.K_w):
             self.selected_index = (self.selected_index - 1) % len(self.options)
-            return  # stay in menu
+            return None  # stay in menu
         
         if key in (pygame.K_DOWN, pygame.K_s):
             self.selected_index = (self.selected_index + 1) % len(self.options)
-            return  # stay in menu
+            return None  # stay in menu
         
         # Selection
         if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
             option_id, _ = self.options[self.selected_index]
-            if option_id == "quit":
-                return None
-            return option_id  # "new_game", "load_game", or "options"
+            return option_id  # "new_game", "load_game", "options", or "quit"
         
-        return  # no action
+        return None  # no action
     
     def draw(self) -> None:
         """Draw the main menu screen."""
@@ -158,7 +158,7 @@ class MainMenuScene:
         pulse = int(10 * abs(math.sin(self.animation_timer * 2)))
         title_color = tuple(min(255, c + pulse) for c in title_color)
         
-        title_surf = self.font_title.render(TITLE, True, title_color)
+        title_surf = self.font_title.render("Roguelike Dungeon Crawler Demo", True, title_color)
         title_x = w // 2 - title_surf.get_width() // 2
         title_y = 80
         self.screen.blit(title_surf, (title_x, title_y))
@@ -203,7 +203,7 @@ class MainMenuScene:
         self.screen.blit(hint_surf, (hint_x, hint_y))
         
         # Version or additional info (optional)
-        version_text = "v2.0"
+        version_text = "v 0.4 Alpha"
         version_surf = self.font_small.render(version_text, True, (100, 100, 100))
         self.screen.blit(version_surf, (w - version_surf.get_width() - 20, h - 30))
 

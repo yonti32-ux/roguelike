@@ -183,6 +183,19 @@ def apply_consumable_in_battle(
 
         if actual <= 0:
             return f"{user_unit.name} uses {consumable.name}, but it has no effect."
+        
+        # Add floating healing number
+        if hasattr(battle_scene, "_floating_damage"):
+            battle_scene._floating_damage.append({
+                "target": user_unit,
+                "damage": actual,
+                "timer": 1.8,
+                "y_offset": 0,
+                "is_crit": False,
+                "is_kill": False,
+                "is_healing": True,  # Mark as healing
+            })
+        
         return f"{user_unit.name} drinks {consumable.name} and recovers {actual} HP."
 
     if etype == "resource":

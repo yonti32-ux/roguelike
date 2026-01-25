@@ -507,6 +507,9 @@ class Game:
     
     def switch_to_screen(self, screen_name: str) -> None:
         """Switch to a different full-screen UI."""
+        # Track previous screen for fade transition
+        had_screen = getattr(self, "active_screen", None) is not None
+        
         # Close all screen flags
         self.show_inventory = False
         self.show_character_sheet = False
@@ -514,6 +517,12 @@ class Game:
         self.show_battle_log = False
         if hasattr(self, "show_exploration_log"):
             self.show_exploration_log = False
+        
+        # Initialize fade transition if switching screens
+        if had_screen:
+            self._screen_fade_timer = 0.15  # Quick 150ms fade
+        else:
+            self._screen_fade_timer = 0.0
         
         # Open the requested screen
         if screen_name == "inventory":
@@ -993,6 +1002,32 @@ class Game:
         self.floor = new_floor
         self.load_floor(self.floor, from_direction=direction)
         self.last_message = f"You travel to floor {self.floor}."
+
+    def try_use_stairs(self) -> None:
+        """
+        Attempt to use stairs (up or down) based on which stairs the player is standing on.
+        Automatically detects whether player is on up stairs or down stairs.
+        """
+        if self.current_map is None or self.player is None:
+            return
+
+        game_map = self.current_map
+
+        # Get the player's current tile coordinates
+        px, py = self.player.rect.center
+        player_tx, player_ty = game_map.world_to_tile(px, py)
+        player_pos = (player_tx, player_ty)
+
+        # Check which stairs the player is standing on
+        if game_map.up_stairs is not None and player_pos == game_map.up_stairs:
+            # Player is on up stairs - go up (decrease floor)
+            self.try_change_floor(-1)
+        elif game_map.down_stairs is not None and player_pos == game_map.down_stairs:
+            # Player is on down stairs - go down (increase floor)
+            self.try_change_floor(+1)
+        else:
+            # Player is not on any stairs
+            self.last_message = "You need to stand on the stairs to travel."
 
     # ------------------------------------------------------------------
     # Battle handling
@@ -1523,9 +1558,26 @@ class Game:
         elif self.mode == GameMode.BATTLE:
             self.draw_battle()
 
+        # Update screen fade transition timer
+        if hasattr(self, "_screen_fade_timer") and self._screen_fade_timer > 0:
+            from settings import FPS
+            dt = 1.0 / FPS
+            self._screen_fade_timer = max(0.0, self._screen_fade_timer - dt)
+        
         # Draw an active overlay screen on top (inventory, character sheet, skill screen, etc.).
         if getattr(self, "active_screen", None) is not None:
             self.active_screen.draw(self)
+            
+            # Apply fade-in transition if active
+            if hasattr(self, "_screen_fade_timer") and self._screen_fade_timer > 0:
+                # Fade in: start at 0, go to 255
+                fade_progress = 1.0 - (self._screen_fade_timer / 0.15)  # 0.15s fade duration
+                fade_alpha = int(255 * (1.0 - fade_progress))  # Black overlay that fades out
+                if fade_alpha > 0:
+                    fade_surf = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+                    fade_surf.fill((0, 0, 0, fade_alpha))
+                    self.screen.blit(fade_surf, (0, 0))
+            
             # Update skill screen visual state (cursor blink, etc.)
             if self.active_screen is self.skill_screen_wrapper:
                 from settings import FPS

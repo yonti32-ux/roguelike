@@ -718,9 +718,20 @@ class BattleScene:
             current_hp = getattr(unit.entity, "hp", 0)
             max_hp = getattr(unit.entity, "max_hp", 1)
             new_hp = min(max_hp, current_hp + heal_amount)
+            actual_heal = new_hp - current_hp
             setattr(unit.entity, "hp", new_hp)
-            if new_hp > current_hp:
-                self._log(f"{unit.name} regenerates {heal_amount} HP.")
+            if actual_heal > 0:
+                self._log(f"{unit.name} regenerates {actual_heal} HP.")
+                # Add floating healing number
+                self._floating_damage.append({
+                    "target": unit,
+                    "damage": actual_heal,
+                    "timer": 1.8,
+                    "y_offset": 0,
+                    "is_crit": False,
+                    "is_kill": False,
+                    "is_healing": True,  # Mark as healing
+                })
         
         dot = tick_statuses(unit.statuses)
         if dot > 0:
@@ -1373,9 +1384,20 @@ class BattleScene:
                     current_hp = getattr(unit.entity, "hp", 0)
                     max_hp = getattr(unit.entity, "max_hp", 1)
                     new_hp = min(max_hp, current_hp + heal_amount)
+                    actual_heal = new_hp - current_hp
                     setattr(unit.entity, "hp", new_hp)
-                    if new_hp > current_hp:
-                        self._log(f"{unit.name} drains {heal_amount} HP from {affected.name}!")
+                    if actual_heal > 0:
+                        self._log(f"{unit.name} drains {actual_heal} HP from {affected.name}!")
+                        # Add floating healing number
+                        self._floating_damage.append({
+                            "target": unit,
+                            "damage": actual_heal,
+                            "timer": 1.8,
+                            "y_offset": 0,
+                            "is_crit": False,
+                            "is_kill": False,
+                            "is_healing": True,
+                        })
         
         # Apply statuses (using rank-modified status effects)
         if skill.make_self_status is not None:
@@ -1399,6 +1421,18 @@ class BattleScene:
             new_hp = min(max_hp, current_hp + heal_amount)
             setattr(unit.entity, "hp", new_hp)
             actual_heal = new_hp - current_hp
+            
+            # Add floating healing number
+            if actual_heal > 0:
+                self._floating_damage.append({
+                    "target": unit,
+                    "damage": actual_heal,
+                    "timer": 1.8,
+                    "y_offset": 0,
+                    "is_crit": False,
+                    "is_kill": False,
+                    "is_healing": True,
+                })
             
             # Restore 30% stamina
             current_stamina = getattr(unit, "current_stamina", 0)

@@ -171,9 +171,9 @@ def _gather_context_hints(game: "Game", game_map, player) -> List[str]:
 
     # Stairs
     if game_map.up_stairs is not None and (tx, ty) == game_map.up_stairs:
-        hints.append("On stairs up – press ',' to ascend.")
+        hints.append("On stairs up – press F to ascend.")
     elif game_map.down_stairs is not None and (tx, ty) == game_map.down_stairs:
-        hints.append("On stairs down – press '.' to descend.")
+        hints.append("On stairs down – press F to descend.")
 
     # Room tag
     room = game_map.get_room_at(tx, ty)
