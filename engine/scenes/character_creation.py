@@ -3,12 +3,27 @@ import traceback
 import sys
 import copy
 import random
+import math
 from typing import List, Optional
 
 from settings import COLOR_BG, FPS
 from systems.classes import all_classes, get_class
 from systems.character_creation.stat_distribution import StatDistribution
 from systems.character_creation.traits import all_traits, get_trait, traits_by_category
+from ui.screen_constants import (
+    COLOR_GRADIENT_START,
+    COLOR_GRADIENT_END,
+    COLOR_BG_PANEL,
+    COLOR_BORDER_BRIGHT,
+    COLOR_SHADOW,
+    COLOR_SELECTED_BG_BRIGHT,
+    COLOR_TITLE,
+    COLOR_SUBTITLE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
+)
 
 # Lazy import of backgrounds - only import when needed
 _backgrounds_for_class_fn = None
@@ -50,6 +65,80 @@ RANDOM_HERO_NAMES = [
 def _generate_random_name() -> str:
     """Generate a random hero name from the list."""
     return random.choice(RANDOM_HERO_NAMES)
+
+
+class Particle:
+    """A small particle that moves randomly around the screen."""
+    
+    def __init__(self, screen_width: int, screen_height: int):
+        self.x = random.uniform(0, screen_width)
+        self.y = random.uniform(0, screen_height)
+        self.vx = random.uniform(-25, 25)  # Velocity X
+        self.vy = random.uniform(-25, 25)  # Velocity Y
+        self.size = random.uniform(1.5, 3.0)
+        # Subtle colors that fit the character creation theme
+        color_variants = [
+            (150, 170, 200, 180),  # Soft blue
+            (200, 200, 180, 160),  # Soft yellow
+            (180, 200, 220, 170),  # Light blue
+            (220, 220, 200, 150),  # Pale yellow
+            (160, 180, 200, 140),  # Muted blue
+            (200, 180, 220, 160),  # Soft purple
+        ]
+        self.color = random.choice(color_variants)
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        # Random direction change timer
+        self.direction_change_timer = random.uniform(1.5, 4.0)
+        self.direction_timer = 0.0
+    
+    def update(self, dt: float):
+        """Update particle position and velocity."""
+        self.direction_timer += dt
+        
+        # Occasionally change direction randomly
+        if self.direction_timer >= self.direction_change_timer:
+            self.vx += random.uniform(-35, 35) * dt
+            self.vy += random.uniform(-35, 35) * dt
+            # Clamp velocity to reasonable range
+            self.vx = max(-50, min(50, self.vx))
+            self.vy = max(-50, min(50, self.vy))
+            self.direction_timer = 0.0
+            self.direction_change_timer = random.uniform(1.5, 4.0)
+        
+        # Update position
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        
+        # Wrap around screen edges
+        if self.x < 0:
+            self.x = self.screen_width
+        elif self.x > self.screen_width:
+            self.x = 0
+        if self.y < 0:
+            self.y = self.screen_height
+        elif self.y > self.screen_height:
+            self.y = 0
+    
+    def draw(self, surface: pygame.Surface):
+        """Draw the particle."""
+        if len(self.color) == 4:
+            # Create a small surface for the particle with alpha
+            particle_surf = pygame.Surface((int(self.size * 2), int(self.size * 2)), pygame.SRCALPHA)
+            pygame.draw.circle(
+                particle_surf,
+                self.color,
+                (int(self.size), int(self.size)),
+                int(self.size)
+            )
+            surface.blit(particle_surf, (int(self.x - self.size), int(self.y - self.size)))
+        else:
+            pygame.draw.circle(
+                surface,
+                self.color[:3],
+                (int(self.x), int(self.y)),
+                int(self.size)
+            )
 
 
 class CharacterCreationScene:
@@ -101,6 +190,26 @@ class CharacterCreationScene:
         # Simple blink for the name cursor
         self.cursor_visible: bool = True
         self.cursor_timer: float = 0.0
+        
+        # Animation timer for background effects
+        self.animation_timer: float = 0.0
+        
+        # Initialize particles
+        w, h = screen.get_size()
+        self.particles: List["Particle"] = []
+        num_particles = 50  # More particles for richer effect
+        for _ in range(num_particles):
+            self.particles.append(Particle(w, h))
+        
+        # Class card configuration (easily customizable)
+        # Will be updated dynamically based on number of classes
+        self.card_config = {
+            "cards_per_row": 2,  # Default, will adjust
+            "card_width": 600,  # Large cards for few classes
+            "card_height": 450,  # Large cards for few classes
+            "card_spacing": 30,
+            "card_padding": 25,
+        }
 
     def run(self) -> tuple[str, str, StatDistribution, List[str], str] | None:
         """
@@ -111,6 +220,17 @@ class CharacterCreationScene:
 
         while True:
             dt = clock.tick(FPS) / 1000.0
+
+            # Update animation timer
+            self.animation_timer += dt
+
+            # Update particles
+            for particle in self.particles:
+                particle.update(dt)
+                # Update screen dimensions in case of resize
+                w, h = self.screen.get_size()
+                particle.screen_width = w
+                particle.screen_height = h
 
             # Cursor blink for name input
             self.cursor_timer += dt
@@ -497,11 +617,35 @@ class CharacterCreationScene:
     # ------------------------------------------------------------------
 
     def draw(self) -> None:
-        self.screen.fill(COLOR_BG)
         w, h = self.screen.get_size()
+        
+        # Draw enhanced gradient background with animated effect
+        from ui.screen_components import draw_gradient_background
+        # Add subtle animation to gradient colors
+        pulse = math.sin(self.animation_timer * 0.5) * 5
+        start_color = tuple(min(255, max(0, c + int(pulse))) for c in COLOR_GRADIENT_START)
+        end_color = tuple(min(255, max(0, c + int(pulse * 0.7))) for c in COLOR_GRADIENT_END)
+        draw_gradient_background(
+            self.screen, 0, 0, w, h,
+            start_color, end_color, True
+        )
+        
+        # Draw particles (behind UI elements)
+        for particle in self.particles:
+            particle.draw(self.screen)
 
-        title = self.font_title.render("Character Creation", True, (255, 255, 210))
-        self.screen.blit(title, (w // 2 - title.get_width() // 2, 40))
+        # Title with shadow and subtle animation
+        title_color = COLOR_TITLE
+        title_pulse = int(8 * abs(math.sin(self.animation_timer * 1.5)))
+        title_color = tuple(min(255, c + title_pulse) for c in title_color)
+        
+        title_surf = self.font_title.render("Character Creation", True, title_color)
+        title_shadow = self.font_title.render("Character Creation", True, COLOR_SHADOW[:3])
+        title_x = w // 2 - title_surf.get_width() // 2
+        title_y = 40
+        
+        self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+        self.screen.blit(title_surf, (title_x, title_y))
 
         if not self.classes:
             msg = self.font_main.render("No classes defined.", True, (255, 100, 100))
@@ -528,22 +672,311 @@ class CharacterCreationScene:
             self._draw_name_phase(selected_class, w, h)
 
     def _draw_class_phase(self, selected, w: int, h: int) -> None:
-        """Draw the 'choose class' UI."""
-        y = 120
-        name_surf = self.font_main.render(selected.name, True, (255, 255, 230))
-        self.screen.blit(name_surf, (w // 2 - name_surf.get_width() // 2, y))
-        y += 32
+        """Draw the 'choose class' UI with card-based selection."""
+        # Draw class cards in a grid layout (scalable for more classes)
+        self._draw_class_cards(w, h)
+        
+        # Navigation arrows indicator (visual feedback with animation)
+        if len(self.classes) > 1:
+            arrow_y = h // 2
+            # Animate arrows with subtle pulse
+            arrow_pulse = int(10 * abs(math.sin(self.animation_timer * 3)))
+            arrow_color = tuple(min(255, c + arrow_pulse) for c in COLOR_SUBTITLE)
+            
+            # Left arrow
+            if self.selected_class_index > 0:
+                left_arrow = "◄"
+                arrow_surf = self.font_main.render(left_arrow, True, arrow_color)
+                # Add shadow for depth
+                arrow_shadow = self.font_main.render(left_arrow, True, COLOR_SHADOW[:3])
+                self.screen.blit(arrow_shadow, (20 + SHADOW_OFFSET_X, arrow_y - arrow_surf.get_height() // 2 + SHADOW_OFFSET_Y))
+                self.screen.blit(arrow_surf, (20, arrow_y - arrow_surf.get_height() // 2))
+            # Right arrow
+            if self.selected_class_index < len(self.classes) - 1:
+                right_arrow = "►"
+                arrow_surf = self.font_main.render(right_arrow, True, arrow_color)
+                # Add shadow for depth
+                arrow_shadow = self.font_main.render(right_arrow, True, COLOR_SHADOW[:3])
+                self.screen.blit(arrow_shadow, (w - 40 + SHADOW_OFFSET_X, arrow_y - arrow_surf.get_height() // 2 + SHADOW_OFFSET_Y))
+                self.screen.blit(arrow_surf, (w - 40, arrow_y - arrow_surf.get_height() // 2))
+        
+        # Controls hint panel
+        hint_text = "←/→ or W/S: change class   Enter/Space: continue   Esc/Q: quit"
+        hint = self.font_small.render(hint_text, True, (180, 180, 180))
+        hint_panel_width = hint.get_width() + 40
+        hint_panel_height = 35
+        hint_panel_x = w // 2 - hint_panel_width // 2
+        hint_panel_y = h - 50
+        
+        hint_panel = pygame.Surface((hint_panel_width, hint_panel_height), pygame.SRCALPHA)
+        hint_panel.fill((0, 0, 0, 150))
+        pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_panel_width, hint_panel_height), 1)
+        self.screen.blit(hint_panel, (hint_panel_x, hint_panel_y))
+        self.screen.blit(hint, (hint_panel_x + 20, hint_panel_y + 8))
+    
+    def _draw_class_cards(self, w: int, h: int) -> None:
+        """
+        Draw class selection cards in a grid layout.
+        Modular and scalable - automatically adjusts for any number of classes.
+        Uses self.card_config for easy customization.
+        """
+        if not self.classes:
+            return
+        
+        # Auto-adjust card size based on number of classes
+        num_classes = len(self.classes)
+        card_spacing = 20
+        card_padding = 20
+        
+        if num_classes <= 3:
+            # For 3 or fewer classes, use really large cards side by side (like the image)
+            cards_per_row = num_classes
+            # Calculate width to fill screen with spacing
+            total_spacing = (num_classes - 1) * card_spacing
+            card_width = (w - 80 - total_spacing) // num_classes  # 80 for margins
+            card_height = h - 250  # Leave space for title and hint
+        elif num_classes <= 6:
+            # For 4-6 classes, use medium-large cards
+            cards_per_row = 3
+            total_spacing = (cards_per_row - 1) * card_spacing
+            card_width = (w - 80 - total_spacing) // cards_per_row
+            card_height = 380
+        else:
+            # For 7+ classes, use smaller cards
+            cards_per_row = 3
+            total_spacing = (cards_per_row - 1) * card_spacing
+            card_width = (w - 80 - total_spacing) // cards_per_row
+            card_height = 280
+        
+        # Calculate grid layout
+        num_rows = (num_classes + cards_per_row - 1) // cards_per_row
+        
+        # Calculate total width and height needed
+        total_width = cards_per_row * card_width + (cards_per_row - 1) * card_spacing
+        total_height = num_rows * card_height + (num_rows - 1) * card_spacing
+        
+        # Center the grid horizontally
+        total_width = cards_per_row * card_width + (cards_per_row - 1) * card_spacing
+        start_x = (w - total_width) // 2
+        start_y = 120
+        
+        # Draw each class card
+        for idx, class_def in enumerate(self.classes):
+            row = idx // cards_per_row
+            col = idx % cards_per_row
+            
+            card_x = start_x + col * (card_width + card_spacing)
+            card_y = start_y + row * (card_height + card_spacing)
+            
+            is_selected = (idx == self.selected_class_index)
+            self._draw_class_card(class_def, card_x, card_y, card_width, card_height, is_selected, card_padding)
+    
+    def _draw_class_card(
+        self, 
+        class_def, 
+        x: int, 
+        y: int, 
+        width: int, 
+        height: int, 
+        is_selected: bool,
+        padding: int
+    ) -> None:
+        """
+        Draw a single class card. Modular function - easy to customize card appearance.
+        Now includes all details since we removed the lower panel.
+        """
+        # Card background with selection highlight
+        card_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+        
+        if is_selected:
+            # Selected card - brighter background with golden outline and glow effect
+            card_surf.fill(COLOR_SELECTED_BG_BRIGHT)
+            # Golden outline (thicker for larger cards)
+            golden_color = (255, 215, 0)  # Gold color
+            outline_width = 4 if width > 500 else 3
+            pygame.draw.rect(card_surf, golden_color, (0, 0, width, height), outline_width)
+            # Top accent bar in gold
+            pygame.draw.rect(card_surf, golden_color, (0, 0, width, 10))
+            # Very subtle inner glow effect (reduced)
+            inner_glow = (255, 235, 150, 50)  # Reduced from 100 to 50
+            inner_surf = pygame.Surface((width - 8, height - 8), pygame.SRCALPHA)
+            inner_surf.fill(inner_glow)
+            card_surf.blit(inner_surf, (4, 4), special_flags=pygame.BLEND_ALPHA_SDL2)
+        else:
+            # Unselected card - dimmer background
+            card_surf.fill((30, 35, 45, 240))
+            pygame.draw.rect(card_surf, COLOR_BORDER_BRIGHT, (0, 0, width, height), 2)
+        
+        # Add enhanced shadow for selected card (more prominent for larger cards)
+        if is_selected:
+            shadow_size = 6 if width > 500 else 4
+            # Outer shadow (subtle)
+            shadow = pygame.Surface((width + shadow_size, height + shadow_size), pygame.SRCALPHA)
+            shadow.fill((0, 0, 0, 100))
+            self.screen.blit(shadow, (x - shadow_size // 2, y - shadow_size // 2))
+            # Subtle golden glow effect (reduced intensity)
+            glow_size = 6
+            glow = pygame.Surface((width + glow_size * 2, height + glow_size * 2), pygame.SRCALPHA)
+            for i in range(glow_size, 0, -1):
+                alpha = 15 // (i + 1)  # Reduced from 30 to 15
+                golden_glow = (255, 215, 0, alpha)
+                glow_rect = pygame.Rect(glow_size - i, glow_size - i, width + i * 2, height + i * 2)
+                pygame.draw.rect(glow, golden_glow, glow_rect, 1)  # Thinner lines
+            self.screen.blit(glow, (x - glow_size, y - glow_size), special_flags=pygame.BLEND_ALPHA_SDL2)
+        
+        self.screen.blit(card_surf, (x, y))
+        
+        # Card content
+        content_x = x + padding
+        content_y = y + padding
+        current_y = content_y
+        
+        # Class name (bigger for larger cards, with gold color if selected)
+        if is_selected:
+            name_color = (255, 215, 0)  # Gold color for selected
+            # Add shadow to name
+            name_shadow = self.font_title.render(class_def.name, True, COLOR_SHADOW[:3])
+            self.screen.blit(name_shadow, (content_x + SHADOW_OFFSET_X, current_y + SHADOW_OFFSET_Y))
+        else:
+            name_color = COLOR_TEXT
+        name_surf = self.font_title.render(class_def.name, True, name_color)
+        self.screen.blit(name_surf, (content_x, current_y))
+        current_y += 35
+        
+        # Description (full description for large cards)
+        desc_lines = self._wrap_text(class_def.description, self.font_small, width - padding * 2)
+        for line in desc_lines:
+            desc_surf = self.font_small.render(line, True, COLOR_TEXT_DIM if not is_selected else COLOR_TEXT)
+            self.screen.blit(desc_surf, (content_x, current_y))
+            current_y += 20
+        
+        current_y += 15
+        
+        # Stats section (full stats display like in the image)
+        stats_label = self.font_small.render("Base Stats:", True, COLOR_SUBTITLE if is_selected else COLOR_TEXT_DIM)
+        self.screen.blit(stats_label, (content_x, current_y))
+        current_y += 25
+        
+        bs = class_def.base_stats
+        # Two-column layout for stats (like in the image)
+        stats_left = [
+            f"Max HP: {bs.max_hp}",
+            f"Defense: {bs.defense}",
+            f"Skill Power: {bs.skill_power:.1f}x",
+            f"Dodge: {int(bs.dodge_chance * 100)}%",
+            f"Max Mana: {bs.max_mana}",
+        ]
+        stats_right = [
+            f"Attack: {bs.attack}",
+            f"Speed: {bs.speed:.1f}x",
+            f"Crit Chance: {int(bs.crit_chance * 100)}%",
+            f"Status Resist: {int(bs.status_resist * 100)}%",
+            f"Max Stamina: {bs.max_stamina}",
+        ]
+        
+        # Draw stats in two columns
+        stats_y = current_y
+        for i in range(max(len(stats_left), len(stats_right))):
+            if i < len(stats_left):
+                left_surf = self.font_small.render(stats_left[i], True, COLOR_TEXT if is_selected else COLOR_TEXT_DIM)
+                self.screen.blit(left_surf, (content_x + 10, stats_y))
+            if i < len(stats_right):
+                right_surf = self.font_small.render(stats_right[i], True, COLOR_TEXT if is_selected else COLOR_TEXT_DIM)
+                self.screen.blit(right_surf, (content_x + width // 2, stats_y))
+            stats_y += 20
+        
+        current_y = stats_y + 15
+        
+        # Starting perks
+        if class_def.starting_perks:
+            perks_label = self.font_small.render("Starting Perks:", True, COLOR_SUBTITLE if is_selected else COLOR_TEXT_DIM)
+            self.screen.blit(perks_label, (content_x, current_y))
+            current_y += 22
+            for pid in class_def.starting_perks:
+                perk_surf = self.font_small.render(f"• {pid}", True, COLOR_TEXT if is_selected else COLOR_TEXT_DIM)
+                self.screen.blit(perk_surf, (content_x + 10, current_y))
+                current_y += 18
+        
+        # Starting skills
+        if class_def.starting_skills:
+            skills_label = self.font_small.render("Starting Skills:", True, COLOR_SUBTITLE if is_selected else COLOR_TEXT_DIM)
+            self.screen.blit(skills_label, (content_x, current_y))
+            current_y += 22
+            for sid in class_def.starting_skills:
+                skill_surf = self.font_small.render(f"• {sid}", True, COLOR_TEXT if is_selected else COLOR_TEXT_DIM)
+                self.screen.blit(skill_surf, (content_x + 10, current_y))
+                current_y += 18
+        
+        # Starting items
+        if class_def.starting_items:
+            items_label = self.font_small.render("Starting Items:", True, COLOR_SUBTITLE if is_selected else COLOR_TEXT_DIM)
+            self.screen.blit(items_label, (content_x, current_y))
+            current_y += 22
+            for iid in class_def.starting_items:
+                item_surf = self.font_small.render(f"• {iid}", True, COLOR_TEXT if is_selected else COLOR_TEXT_DIM)
+                self.screen.blit(item_surf, (content_x + 10, current_y))
+                current_y += 18
+        
+        # Starting gold
+        from ui.screen_constants import COLOR_GOLD
+        gold_label = self.font_small.render("Starting Gold:", True, COLOR_SUBTITLE if is_selected else COLOR_TEXT_DIM)
+        self.screen.blit(gold_label, (content_x, current_y))
+        gold_surf = self.font_small.render(str(class_def.starting_gold), True, COLOR_GOLD)
+        self.screen.blit(gold_surf, (content_x + 10, current_y + 22))
+    
+    def _draw_class_details(self, selected, w: int, h: int) -> None:
+        """
+        Draw detailed information about the selected class.
+        Modular function - easy to customize what details are shown.
+        """
+        # Details panel (below cards or on the side)
+        panel_width = w - 80
+        panel_height = 280
+        panel_x = 40
+        panel_y = h - panel_height - 80
+        
+        panel_surf = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel_surf.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(panel_surf, COLOR_BORDER_BRIGHT, (0, 0, panel_width, panel_height), 2)
+        self.screen.blit(panel_surf, (panel_x, panel_y))
+        
+        # Content area
+        content_x = panel_x + 30
+        content_y = panel_y + 20
+        y = content_y
+        
+        # Class name with shadow
+        name_surf = self.font_main.render(selected.name, True, COLOR_TITLE)
+        name_shadow = self.font_main.render(selected.name, True, COLOR_SHADOW[:3])
+        name_x = w // 2 - name_surf.get_width() // 2
+        self.screen.blit(name_shadow, (name_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
+        self.screen.blit(name_surf, (name_x, y))
+        y += 35
 
         # Description (wrapped)
-        desc_lines = self._wrap_text(selected.description, self.font_small, w - 80)
+        desc_lines = self._wrap_text(selected.description, self.font_small, w - 160)
         for line in desc_lines:
-            surf = self.font_small.render(line, True, (220, 220, 220))
-            self.screen.blit(surf, (40, y))
-            y += 22
+            surf = self.font_small.render(line, True, COLOR_TEXT)
+            self.screen.blit(surf, (content_x, y))
+            y += 20
 
         y += 10
 
-        # Stats summary from base_stats
+        # Stats section with panel
+        stats_panel_width = 300
+        stats_panel_height = 180
+        stats_panel_x = content_x
+        stats_panel_y = y
+        
+        stats_panel = pygame.Surface((stats_panel_width, stats_panel_height), pygame.SRCALPHA)
+        stats_panel.fill((20, 25, 35, 200))
+        pygame.draw.rect(stats_panel, COLOR_BORDER_BRIGHT, (0, 0, stats_panel_width, stats_panel_height), 1)
+        self.screen.blit(stats_panel, (stats_panel_x, stats_panel_y))
+        
+        stats_label = self.font_small.render("Base Stats:", True, COLOR_SUBTITLE)
+        self.screen.blit(stats_label, (stats_panel_x + 10, stats_panel_y + 10))
+        
+        stats_y = stats_panel_y + 30
         bs = selected.base_stats
         stats_lines = [
             f"Max HP: {bs.max_hp}",
@@ -555,62 +988,45 @@ class CharacterCreationScene:
             f"Status Resist: {int(bs.status_resist * 100)}%",
         ]
         for line in stats_lines:
-            surf = self.font_small.render(line, True, (210, 210, 210))
-            self.screen.blit(surf, (60, y))
-            y += 20
+            surf = self.font_small.render(line, True, COLOR_TEXT)
+            self.screen.blit(surf, (stats_panel_x + 20, stats_y))
+            stats_y += 20
 
-        y += 10
-
-        # Starting perks / skills / items
-        perks_label = self.font_small.render("Starting Perks:", True, (220, 220, 180))
-        self.screen.blit(perks_label, (360, 200))
-        py = 224
+        # Starting perks / skills / items (right side)
+        right_panel_x = w // 2 + 40
+        right_panel_y = y
+        
+        perks_label = self.font_small.render("Starting Perks:", True, COLOR_SUBTITLE)
+        self.screen.blit(perks_label, (right_panel_x, right_panel_y))
+        py = right_panel_y + 22
         for pid in selected.starting_perks:
-            surf = self.font_small.render(f"- {pid}", True, (210, 210, 210))
-            self.screen.blit(surf, (380, py))
+            surf = self.font_small.render(f"• {pid}", True, COLOR_TEXT)
+            self.screen.blit(surf, (right_panel_x + 10, py))
             py += 18
 
-        skills_label = self.font_small.render("Starting Skills:", True, (220, 220, 180))
-        self.screen.blit(skills_label, (360, py + 10))
-        py += 34
+        skills_label = self.font_small.render("Starting Skills:", True, COLOR_SUBTITLE)
+        self.screen.blit(skills_label, (right_panel_x, py + 8))
+        py += 30
         for sid in selected.starting_skills:
-            surf = self.font_small.render(f"- {sid}", True, (210, 210, 210))
-            self.screen.blit(surf, (380, py))
+            surf = self.font_small.render(f"• {sid}", True, COLOR_TEXT)
+            self.screen.blit(surf, (right_panel_x + 10, py))
             py += 18
 
-        items_label = self.font_small.render("Starting Items:", True, (220, 220, 180))
-        self.screen.blit(items_label, (360, py + 10))
-        py += 34
+        items_label = self.font_small.render("Starting Items:", True, COLOR_SUBTITLE)
+        self.screen.blit(items_label, (right_panel_x, py + 8))
+        py += 30
         for iid in selected.starting_items:
-            surf = self.font_small.render(f"- {iid}", True, (210, 210, 210))
-            self.screen.blit(surf, (380, py))
+            surf = self.font_small.render(f"• {iid}", True, COLOR_TEXT)
+            self.screen.blit(surf, (right_panel_x + 10, py))
             py += 18
 
+        from ui.screen_constants import COLOR_GOLD
         gold_surf = self.font_small.render(
             f"Starting Gold: {selected.starting_gold}",
             True,
-            (230, 210, 120),
+            COLOR_GOLD,
         )
-        self.screen.blit(gold_surf, (360, py + 10))
-
-        # Class list at the bottom
-        list_y = h - 120
-        x = 40
-        for idx, c in enumerate(self.classes):
-            is_sel = (idx == self.selected_class_index)
-            label = f"[{c.name}]" if is_sel else c.name
-            color = (255, 255, 210) if is_sel else (200, 200, 200)
-            surf = self.font_main.render(label, True, color)
-            self.screen.blit(surf, (x, list_y))
-            x += surf.get_width() + 40
-
-        # Controls hint
-        hint = self.font_small.render(
-            "←/→ or W/S: change class   Enter/Space: continue   Esc/Q: quit",
-            True,
-            (180, 180, 180),
-        )
-        self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 40))
+        self.screen.blit(gold_surf, (right_panel_x, py + 8))
 
     def _draw_background_phase(self, selected_class, selected_background, w: int, h: int) -> None:
         """Draw the 'choose background' UI."""
@@ -619,29 +1035,46 @@ class CharacterCreationScene:
             self.screen.blit(msg, (w // 2 - msg.get_width() // 2, h // 2))
             return
 
-        y = 100
-        title = self.font_main.render("Choose Your Background", True, (255, 255, 230))
-        self.screen.blit(title, (w // 2 - title.get_width() // 2, y))
-        y += 32
+        # Main content panel
+        panel_width = w - 80
+        panel_height = h - 200
+        panel_x = 40
+        panel_y = 100
+        
+        panel_surf = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel_surf.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(panel_surf, COLOR_BORDER_BRIGHT, (0, 0, panel_width, panel_height), 2)
+        self.screen.blit(panel_surf, (panel_x, panel_y))
+
+        y = panel_y + 30
+        title = self.font_main.render("Choose Your Background", True, COLOR_TITLE)
+        title_shadow = self.font_main.render("Choose Your Background", True, COLOR_SHADOW[:3])
+        title_x = w // 2 - title.get_width() // 2
+        self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
+        self.screen.blit(title, (title_x, y))
+        y += 40
 
         class_label = self.font_small.render(
             f"Class: {selected_class.name}",
             True,
-            (220, 220, 200),
+            COLOR_SUBTITLE,
         )
         self.screen.blit(class_label, (w // 2 - class_label.get_width() // 2, y))
         y += 40
 
         # Background name
-        name_surf = self.font_main.render(selected_background.name, True, (255, 255, 230))
-        self.screen.blit(name_surf, (w // 2 - name_surf.get_width() // 2, y))
-        y += 32
+        name_surf = self.font_main.render(selected_background.name, True, COLOR_TITLE)
+        name_shadow = self.font_main.render(selected_background.name, True, COLOR_SHADOW[:3])
+        name_x = w // 2 - name_surf.get_width() // 2
+        self.screen.blit(name_shadow, (name_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
+        self.screen.blit(name_surf, (name_x, y))
+        y += 40
 
         # Description (wrapped)
-        desc_lines = self._wrap_text(selected_background.description, self.font_small, w - 80)
+        desc_lines = self._wrap_text(selected_background.description, self.font_small, w - 160)
         for line in desc_lines:
-            surf = self.font_small.render(line, True, (220, 220, 220))
-            self.screen.blit(surf, (40, y))
+            surf = self.font_small.render(line, True, COLOR_TEXT)
+            self.screen.blit(surf, (panel_x + 30, y))
             y += 22
 
         y += 15
@@ -718,49 +1151,95 @@ class CharacterCreationScene:
 
         # Background list at the bottom
         list_y = h - 120
-        x = 40
+        list_panel_width = w - 80
+        list_panel_height = 50
+        list_panel_x = 40
+        
+        list_panel = pygame.Surface((list_panel_width, list_panel_height), pygame.SRCALPHA)
+        list_panel.fill((20, 25, 35, 200))
+        pygame.draw.rect(list_panel, COLOR_BORDER_BRIGHT, (0, 0, list_panel_width, list_panel_height), 1)
+        self.screen.blit(list_panel, (list_panel_x, list_y))
+        
+        x = list_panel_x + 20
+        list_text_y = list_y + 15
         for idx, bg in enumerate(self.backgrounds):
             is_sel = (idx == self.selected_background_index)
-            label = f"[{bg.name}]" if is_sel else bg.name
-            color = (255, 255, 210) if is_sel else (200, 200, 200)
+            label = bg.name
+            color = COLOR_TITLE if is_sel else COLOR_TEXT_DIM
+            
+            if is_sel:
+                indicator_width = 4
+                indicator_height = 30
+                pygame.draw.rect(self.screen, COLOR_TITLE, (x - 8, list_text_y - 5, indicator_width, indicator_height))
+            
             surf = self.font_main.render(label, True, color)
-            self.screen.blit(surf, (x, list_y))
+            self.screen.blit(surf, (x, list_text_y))
             x += surf.get_width() + 40
 
         # Controls hint
-        hint = self.font_small.render(
-            "←/→ or W/S: change background   Enter/Space: continue   Esc: back   Q: quit",
-            True,
-            (180, 180, 180),
-        )
-        self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 40))
+        hint_text = "←/→ or W/S: change background   Enter/Space: continue   Esc: back   Q: quit"
+        hint = self.font_small.render(hint_text, True, (180, 180, 180))
+        hint_panel_width = hint.get_width() + 40
+        hint_panel_height = 35
+        hint_panel_x = w // 2 - hint_panel_width // 2
+        hint_panel_y = h - 50
+        
+        hint_panel = pygame.Surface((hint_panel_width, hint_panel_height), pygame.SRCALPHA)
+        hint_panel.fill((0, 0, 0, 150))
+        pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_panel_width, hint_panel_height), 1)
+        self.screen.blit(hint_panel, (hint_panel_x, hint_panel_y))
+        self.screen.blit(hint, (hint_panel_x + 20, hint_panel_y + 8))
 
     def _draw_stat_distribution_phase(self, selected_class, selected_background, w: int, h: int) -> None:
         """Draw the stat distribution UI."""
-        y = 100
-        title = self.font_main.render("Distribute Stat Points", True, (255, 255, 230))
-        self.screen.blit(title, (w // 2 - title.get_width() // 2, y))
-        y += 32
+        # Main content panel
+        panel_width = w - 80
+        panel_height = h - 200
+        panel_x = 40
+        panel_y = 100
+        
+        panel_surf = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel_surf.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(panel_surf, COLOR_BORDER_BRIGHT, (0, 0, panel_width, panel_height), 2)
+        self.screen.blit(panel_surf, (panel_x, panel_y))
+        
+        y = panel_y + 30
+        title = self.font_main.render("Distribute Stat Points", True, COLOR_TITLE)
+        title_shadow = self.font_main.render("Distribute Stat Points", True, COLOR_SHADOW[:3])
+        title_x = w // 2 - title.get_width() // 2
+        self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
+        self.screen.blit(title, (title_x, y))
+        y += 40
 
         # Class and background info
-        class_label = self.font_small.render(f"Class: {selected_class.name}", True, (220, 220, 200))
+        class_label = self.font_small.render(f"Class: {selected_class.name}", True, COLOR_SUBTITLE)
         self.screen.blit(class_label, (w // 2 - class_label.get_width() // 2, y))
         y += 24
-        bg_label = self.font_small.render(f"Background: {selected_background.name}", True, (220, 220, 200))
+        bg_label = self.font_small.render(f"Background: {selected_background.name}", True, COLOR_SUBTITLE)
         self.screen.blit(bg_label, (w // 2 - bg_label.get_width() // 2, y))
         y += 40
 
-        # Points available
+        # Points available panel
         points_spent = self.stat_distribution.total_points_spent()
         points_remaining = self.stat_points_available - points_spent
-        points_color = (255, 255, 210) if points_remaining >= 0 else (255, 150, 150)
+        points_color = COLOR_TITLE if points_remaining >= 0 else (255, 150, 150)
+        
+        points_panel_width = 400
+        points_panel_height = 50
+        points_panel_x = w // 2 - points_panel_width // 2
+        
+        points_panel = pygame.Surface((points_panel_width, points_panel_height), pygame.SRCALPHA)
+        points_panel.fill((20, 25, 35, 220))
+        pygame.draw.rect(points_panel, COLOR_BORDER_BRIGHT, (0, 0, points_panel_width, points_panel_height), 2)
+        self.screen.blit(points_panel, (points_panel_x, y))
+        
         points_label = self.font_main.render(
             f"Points Available: {points_remaining:.1f} / {self.stat_points_available}",
             True,
             points_color,
         )
-        self.screen.blit(points_label, (w // 2 - points_label.get_width() // 2, y))
-        y += 40
+        self.screen.blit(points_label, (w // 2 - points_label.get_width() // 2, y + 15))
+        y += 60
 
         # Calculate preview stats (base class stats + background modifiers)
         from systems.stats import StatBlock
@@ -805,8 +1284,22 @@ class CharacterCreationScene:
                 base_val = selected_class.base_stats.speed
                 preview_val = preview_stats.speed
 
+            # Draw selection background
+            if is_selected:
+                selection_width = 500
+                selection_height = 32
+                selection_x = stat_x - 10
+                selection_y = stat_list_y - 4
+                
+                selection_surf = pygame.Surface((selection_width, selection_height), pygame.SRCALPHA)
+                selection_surf.fill(COLOR_SELECTED_BG_BRIGHT)
+                self.screen.blit(selection_surf, (selection_x, selection_y))
+                
+                # Left accent
+                pygame.draw.rect(self.screen, COLOR_TITLE, (selection_x, selection_y, 4, selection_height))
+            
             # Color for selection
-            text_color = (255, 255, 210) if is_selected else (200, 200, 200)
+            text_color = COLOR_TITLE if is_selected else COLOR_TEXT
             
             # Format display
             if stat_type == float:
@@ -828,49 +1321,74 @@ class CharacterCreationScene:
             
             surf = self.font_main.render(stat_line, True, text_color)
             self.screen.blit(surf, (stat_x, stat_list_y))
-            stat_list_y += 32
+            stat_list_y += 36
 
         # Controls hint
-        hint = self.font_small.render(
-            "↑/↓ or W/S: select stat   ←/→ or A/D: adjust points   Enter/Space: continue   Esc: back   Q: quit",
-            True,
-            (180, 180, 180),
-        )
-        self.screen.blit(hint, (w // 2 - hint.get_width() // 2, h - 40))
+        hint_text = "↑/↓ or W/S: select stat   ←/→ or A/D: adjust points   Enter/Space: continue   Esc: back   Q: quit"
+        hint = self.font_small.render(hint_text, True, (180, 180, 180))
+        hint_panel_width = hint.get_width() + 40
+        hint_panel_height = 35
+        hint_panel_x = w // 2 - hint_panel_width // 2
+        hint_panel_y = h - 50
+        
+        hint_panel = pygame.Surface((hint_panel_width, hint_panel_height), pygame.SRCALPHA)
+        hint_panel.fill((0, 0, 0, 150))
+        pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_panel_width, hint_panel_height), 1)
+        self.screen.blit(hint_panel, (hint_panel_x, hint_panel_y))
+        self.screen.blit(hint, (hint_panel_x + 20, hint_panel_y + 8))
 
     def _draw_name_phase(self, selected_class, w: int, h: int) -> None:
         """Draw the 'enter hero name' UI."""
-        y = 140
-        title = self.font_main.render("Name Your Hero", True, (255, 255, 230))
-        self.screen.blit(title, (w // 2 - title.get_width() // 2, y))
-        y += 32
+        # Main content panel
+        panel_width = w - 80
+        panel_height = h - 200
+        panel_x = 40
+        panel_y = 140
+        
+        panel_surf = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        panel_surf.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(panel_surf, COLOR_BORDER_BRIGHT, (0, 0, panel_width, panel_height), 2)
+        self.screen.blit(panel_surf, (panel_x, panel_y))
+        
+        y = panel_y + 30
+        title = self.font_main.render("Name Your Hero", True, COLOR_TITLE)
+        title_shadow = self.font_main.render("Name Your Hero", True, COLOR_SHADOW[:3])
+        title_x = w // 2 - title.get_width() // 2
+        self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
+        self.screen.blit(title, (title_x, y))
+        y += 40
 
         class_label = self.font_small.render(
             f"Class: {selected_class.name}",
             True,
-            (220, 220, 200),
+            COLOR_SUBTITLE,
         )
         self.screen.blit(class_label, (w // 2 - class_label.get_width() // 2, y))
-        y += 20
+        y += 24
 
         if self.backgrounds:
             selected_background = self.backgrounds[self.selected_background_index]
             bg_label = self.font_small.render(
                 f"Background: {selected_background.name}",
                 True,
-                (220, 220, 200),
+                COLOR_SUBTITLE,
             )
             self.screen.blit(bg_label, (w // 2 - bg_label.get_width() // 2, y))
         y += 40
 
-        # Name box
-        box_width = 360
-        box_height = 44
+        # Name box with better styling
+        box_width = 400
+        box_height = 50
         box_x = w // 2 - box_width // 2
         box_y = y
 
-        pygame.draw.rect(self.screen, (20, 20, 20), (box_x, box_y, box_width, box_height))
-        pygame.draw.rect(self.screen, (200, 200, 200), (box_x, box_y, box_width, box_height), 2)
+        # Box background with shadow
+        box_shadow = pygame.Surface((box_width + 4, box_height + 4), pygame.SRCALPHA)
+        box_shadow.fill((0, 0, 0, 150))
+        self.screen.blit(box_shadow, (box_x - 2, box_y - 2))
+        
+        pygame.draw.rect(self.screen, (25, 25, 35), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, COLOR_BORDER_BRIGHT, (box_x, box_y, box_width, box_height), 2)
 
         name_display = self.name_buffer
         if self.cursor_visible and len(self.name_buffer) < self.max_name_length:
@@ -882,19 +1400,24 @@ class CharacterCreationScene:
             (box_x + 12, box_y + box_height // 2 - name_surf.get_height() // 2),
         )
 
-        # Hint text
-        hint1 = self.font_small.render(
-            "Type to enter your name (A–Z, numbers, etc.) – R: random name – Enter to confirm.",
-            True,
-            (190, 190, 190),
-        )
-        hint2 = self.font_small.render(
-            "Esc: back to traits   Q: quit",
-            True,
-            (170, 170, 170),
-        )
-        self.screen.blit(hint1, (w // 2 - hint1.get_width() // 2, box_y + box_height + 16))
-        self.screen.blit(hint2, (w // 2 - hint2.get_width() // 2, box_y + box_height + 40))
+        # Hint text panel
+        hint1_text = "Type to enter your name (A–Z, numbers, etc.) – R: random name – Enter to confirm."
+        hint2_text = "Esc: back to traits   Q: quit"
+        hint1 = self.font_small.render(hint1_text, True, (190, 190, 190))
+        hint2 = self.font_small.render(hint2_text, True, (170, 170, 170))
+        
+        hint_panel_width = max(hint1.get_width(), hint2.get_width()) + 40
+        hint_panel_height = 70
+        hint_panel_x = w // 2 - hint_panel_width // 2
+        hint_panel_y = box_y + box_height + 20
+        
+        hint_panel = pygame.Surface((hint_panel_width, hint_panel_height), pygame.SRCALPHA)
+        hint_panel.fill((0, 0, 0, 150))
+        pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_panel_width, hint_panel_height), 1)
+        self.screen.blit(hint_panel, (hint_panel_x, hint_panel_y))
+        
+        self.screen.blit(hint1, (hint_panel_x + 20, hint_panel_y + 10))
+        self.screen.blit(hint2, (hint_panel_x + 20, hint_panel_y + 35))
 
     # ------------------------------------------------------------------
     # Text wrapping helper

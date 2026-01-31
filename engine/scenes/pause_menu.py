@@ -2,11 +2,84 @@
 Pause menu screen shown when player presses ESC during gameplay.
 """
 
+import math
+import random
 import pygame
 from typing import Optional
 
-from settings import COLOR_BG, FPS
+from settings import FPS
 from ..core.config import get_config, save_config
+from ui.screen_constants import (
+    COLOR_BG_PANEL,
+    COLOR_BORDER_BRIGHT,
+    COLOR_SHADOW,
+    COLOR_GRADIENT_START,
+    COLOR_GRADIENT_END,
+    COLOR_TITLE,
+    COLOR_SUBTITLE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_SELECTED_BG_BRIGHT,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
+)
+from ui.screen_components import draw_gradient_background
+
+
+class Particle:
+    """A small particle that moves randomly around the screen."""
+    
+    def __init__(self, screen_width: int, screen_height: int):
+        self.x = random.uniform(0, screen_width)
+        self.y = random.uniform(0, screen_height)
+        self.vx = random.uniform(-20, 20)
+        self.vy = random.uniform(-20, 20)
+        self.size = random.uniform(1, 2.5)
+        color_variants = [
+            (150, 170, 200, 180),
+            (200, 200, 180, 160),
+            (180, 200, 220, 170),
+            (220, 220, 200, 150),
+            (160, 180, 200, 140),
+        ]
+        self.color = random.choice(color_variants)
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.direction_change_timer = random.uniform(1.0, 3.0)
+        self.direction_timer = 0.0
+    
+    def update(self, dt: float):
+        """Update particle position and velocity."""
+        self.direction_timer += dt
+        if self.direction_timer >= self.direction_change_timer:
+            self.vx += random.uniform(-30, 30) * dt
+            self.vy += random.uniform(-30, 30) * dt
+            self.vx = max(-40, min(40, self.vx))
+            self.vy = max(-40, min(40, self.vy))
+            self.direction_timer = 0.0
+            self.direction_change_timer = random.uniform(1.0, 3.0)
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        if self.x < 0:
+            self.x = self.screen_width
+        elif self.x > self.screen_width:
+            self.x = 0
+        if self.y < 0:
+            self.y = self.screen_height
+        elif self.y > self.screen_height:
+            self.y = 0
+    
+    def draw(self, surface: pygame.Surface):
+        """Draw the particle."""
+        if len(self.color) == 4:
+            particle_surf = pygame.Surface((int(self.size * 2), int(self.size * 2)), pygame.SRCALPHA)
+            pygame.draw.circle(
+                particle_surf,
+                self.color,
+                (int(self.size), int(self.size)),
+                int(self.size)
+            )
+            surface.blit(particle_surf, (int(self.x - self.size), int(self.y - self.size)))
 
 
 class PauseMenuScene:
@@ -24,7 +97,7 @@ class PauseMenuScene:
     
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
-        self.font_title = pygame.font.SysFont("consolas", 32)
+        self.font_title = pygame.font.SysFont("consolas", 36)
         self.font_main = pygame.font.SysFont("consolas", 24)
         self.font_small = pygame.font.SysFont("consolas", 18)
         
@@ -38,6 +111,11 @@ class PauseMenuScene:
             ("quit", "Quit Game"),
         ]
         self.selected_index = 0
+        
+        # Particles for background effect
+        w, h = screen.get_size()
+        self.particles = [Particle(w, h) for _ in range(40)]
+        self.animation_timer = 0.0
     
     def run(self) -> str | None:
         """
@@ -55,6 +133,11 @@ class PauseMenuScene:
         
         while True:
             dt = clock.tick(FPS) / 1000.0
+            self.animation_timer += dt
+            
+            # Update particles
+            for particle in self.particles:
+                particle.update(dt)
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -93,53 +176,108 @@ class PauseMenuScene:
         return None  # no action
     
     def draw(self) -> None:
-        """Draw the pause menu screen (semi-transparent overlay)."""
+        """Draw the pause menu screen (semi-transparent overlay with gradient background)."""
         w, h = self.screen.get_size()
         
-        # Draw semi-transparent overlay
+        # Draw gradient background
+        draw_gradient_background(
+            self.screen,
+            0, 0, w, h,
+            COLOR_GRADIENT_START,
+            COLOR_GRADIENT_END,
+            vertical=True
+        )
+        
+        # Draw particles behind UI
+        for particle in self.particles:
+            particle.draw(self.screen)
+        
+        # Draw semi-transparent overlay (very light to show gradient and particles)
         overlay = pygame.Surface((w, h))
-        overlay.set_alpha(200)
+        overlay.set_alpha(80)  # Much more transparent to show background clearly
         overlay.fill((0, 0, 0))
         self.screen.blit(overlay, (0, 0))
         
-        # Title
-        title_surf = self.font_title.render("PAUSED", True, (255, 255, 210))
+        # Animated title with shadow
+        title_text = "PAUSED"
+        # Subtle pulse effect
+        pulse = int(5 * abs(math.sin(self.animation_timer * 2)))
+        title_color = tuple(min(255, c + pulse) for c in COLOR_TITLE)
+        title_surf = self.font_title.render(title_text, True, title_color)
+        title_shadow = self.font_title.render(title_text, True, COLOR_SHADOW[:3])
         title_x = w // 2 - title_surf.get_width() // 2
-        title_y = 120
+        title_y = 100
+        
+        # Draw shadow
+        self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+        # Draw title
         self.screen.blit(title_surf, (title_x, title_y))
         
-        # Menu options
-        menu_start_y = h // 2 - 80
-        option_spacing = 50
+        # Menu options panel (larger for less cramped look)
+        menu_start_y = h // 2 - 100
+        option_spacing = 55
+        menu_width = 600
+        menu_height = len(self.options) * option_spacing + 60
+        menu_x = w // 2 - menu_width // 2
+        menu_panel_y = menu_start_y - 30
         
+        # Draw menu panel background with shadow
+        shadow_offset = 4
+        shadow_panel = pygame.Surface((menu_width + shadow_offset, menu_height + shadow_offset), pygame.SRCALPHA)
+        shadow_panel.fill((0, 0, 0, 100))
+        self.screen.blit(shadow_panel, (menu_x + shadow_offset, menu_panel_y + shadow_offset))
+        
+        menu_panel = pygame.Surface((menu_width, menu_height), pygame.SRCALPHA)
+        menu_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(menu_panel, COLOR_BORDER_BRIGHT, (0, 0, menu_width, menu_height), 2)
+        self.screen.blit(menu_panel, (menu_x, menu_panel_y))
+        
+        # Menu options
         for idx, (option_id, option_text) in enumerate(self.options):
             is_selected = (idx == self.selected_index)
+            option_y = menu_start_y + idx * option_spacing
             
-            # Highlight selected option
+            # Draw selection indicator (highlighted background)
             if is_selected:
-                # Draw selection indicator
-                indicator_x = w // 2 - 250
-                indicator_y = menu_start_y + idx * option_spacing
-                pygame.draw.circle(
-                    self.screen,
-                    (255, 255, 200),
-                    (indicator_x, indicator_y + 12),
-                    6
-                )
+                indicator_width = menu_width - 20
+                indicator_x = menu_x + 10
+                indicator_height = 38
+                indicator_y = option_y - 6
+                
+                # Selection background
+                selection_surf = pygame.Surface((indicator_width, indicator_height), pygame.SRCALPHA)
+                selection_surf.fill(COLOR_SELECTED_BG_BRIGHT)
+                self.screen.blit(selection_surf, (indicator_x, indicator_y))
+                
+                # Left accent border (golden)
+                pygame.draw.rect(self.screen, (255, 215, 0), (indicator_x, indicator_y, 4, indicator_height))
             
-            # Option text
-            color = (255, 255, 210) if is_selected else (180, 180, 180)
+            # Option text with shadow
+            color = COLOR_TITLE if is_selected else COLOR_TEXT
             text_surf = self.font_main.render(option_text, True, color)
+            text_shadow = self.font_main.render(option_text, True, COLOR_SHADOW[:3])
             text_x = w // 2 - text_surf.get_width() // 2
-            text_y = menu_start_y + idx * option_spacing
-            self.screen.blit(text_surf, (text_x, text_y))
+            
+            # Draw shadow
+            self.screen.blit(text_shadow, (text_x + SHADOW_OFFSET_X, option_y + SHADOW_OFFSET_Y))
+            # Draw text
+            self.screen.blit(text_surf, (text_x, option_y))
         
-        # Controls hint
-        hint_y = h - 60
+        # Controls hint panel
+        hint_y = h - 80
         hint_text = "↑/↓: Navigate   Enter: Select   Esc: Resume"
-        hint_surf = self.font_small.render(hint_text, True, (150, 150, 150))
-        hint_x = w // 2 - hint_surf.get_width() // 2
-        self.screen.blit(hint_surf, (hint_x, hint_y))
+        hint_width = 550
+        hint_height = 45
+        hint_x = w // 2 - hint_width // 2
+        
+        hint_panel = pygame.Surface((hint_width, hint_height), pygame.SRCALPHA)
+        hint_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_width, hint_height), 2)
+        self.screen.blit(hint_panel, (hint_x, hint_y))
+        
+        hint_surf = self.font_small.render(hint_text, True, COLOR_TEXT)
+        hint_text_x = w // 2 - hint_surf.get_width() // 2
+        self.screen.blit(hint_surf, (hint_text_x, hint_y + 14))
 
 
 class OptionsMenuScene:
@@ -149,13 +287,18 @@ class OptionsMenuScene:
     
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
-        self.font_title = pygame.font.SysFont("consolas", 32)
-        self.font_main = pygame.font.SysFont("consolas", 20)
+        self.font_title = pygame.font.SysFont("consolas", 36)
+        self.font_main = pygame.font.SysFont("consolas", 22)
         self.font_small = pygame.font.SysFont("consolas", 16)
         
         # Menu mode: "main" (shows options) or "controls" (shows hotkeys)
         self.mode = "main"  # "main" or "controls"
         self.selected_index = 0
+        
+        # Particles for background effect
+        w, h = screen.get_size()
+        self.particles = [Particle(w, h) for _ in range(40)]
+        self.animation_timer = 0.0
         
         # Battle speed options (multipliers) - must be defined before use
         self.battle_speed_levels = [0.5, 1.0, 1.5, 2.0]
@@ -271,6 +414,11 @@ class OptionsMenuScene:
         
         while True:
             dt = clock.tick(FPS) / 1000.0
+            self.animation_timer += dt
+            
+            # Update particles
+            for particle in self.particles:
+                particle.update(dt)
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -348,35 +496,74 @@ class OptionsMenuScene:
     
     def draw(self) -> None:
         """Draw the options/controls screen."""
-        self.screen.fill(COLOR_BG)
         w, h = self.screen.get_size()
+        
+        # Draw gradient background
+        draw_gradient_background(
+            self.screen,
+            0, 0, w, h,
+            COLOR_GRADIENT_START,
+            COLOR_GRADIENT_END,
+            vertical=True
+        )
+        
+        # Draw particles behind UI
+        for particle in self.particles:
+            particle.draw(self.screen)
         
         if self.mode == "main":
             # Draw main options menu
-            title_surf = self.font_title.render("Options", True, (255, 255, 210))
+            # Animated title with shadow
+            title_text = "Options"
+            pulse = int(5 * abs(math.sin(self.animation_timer * 2)))
+            title_color = tuple(min(255, c + pulse) for c in COLOR_TITLE)
+            title_surf = self.font_title.render(title_text, True, title_color)
+            title_shadow = self.font_title.render(title_text, True, COLOR_SHADOW[:3])
             title_x = w // 2 - title_surf.get_width() // 2
-            self.screen.blit(title_surf, (title_x, 40))
+            title_y = 60
             
-            # Menu options
+            # Draw shadow
+            self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+            # Draw title
+            self.screen.blit(title_surf, (title_x, title_y))
+            
+            # Menu options panel
             menu_start_y = h // 2 - 60
             option_spacing = 50
+            menu_width = 550
+            menu_height = len(self.main_options) * option_spacing + 40
+            menu_x = w // 2 - menu_width // 2
+            menu_panel_y = menu_start_y - 20
+            
+            # Draw menu panel background with shadow
+            shadow_offset = 4
+            shadow_panel = pygame.Surface((menu_width + shadow_offset, menu_height + shadow_offset), pygame.SRCALPHA)
+            shadow_panel.fill((0, 0, 0, 100))
+            self.screen.blit(shadow_panel, (menu_x + shadow_offset, menu_panel_y + shadow_offset))
+            
+            menu_panel = pygame.Surface((menu_width, menu_height), pygame.SRCALPHA)
+            menu_panel.fill(COLOR_BG_PANEL)
+            pygame.draw.rect(menu_panel, COLOR_BORDER_BRIGHT, (0, 0, menu_width, menu_height), 2)
+            self.screen.blit(menu_panel, (menu_x, menu_panel_y))
             
             for idx, (option_id, option_text) in enumerate(self.main_options):
                 is_selected = (idx == self.selected_index)
+                option_y = menu_start_y + idx * option_spacing
                 
-                # Highlight selected option
+                # Draw selection indicator (highlighted background)
                 if is_selected:
-                    indicator_x = w // 2 - 250
-                    indicator_y = menu_start_y + idx * option_spacing
-                    pygame.draw.circle(
-                        self.screen,
-                        (255, 255, 200),
-                        (indicator_x, indicator_y + 12),
-                        6
-                    )
-                
-                # Option text
-                color = (255, 255, 210) if is_selected else (180, 180, 180)
+                    indicator_width = menu_width - 40
+                    indicator_x = menu_x + 20
+                    indicator_height = 42
+                    indicator_y = option_y - 8
+                    
+                    # Selection background
+                    selection_surf = pygame.Surface((indicator_width, indicator_height), pygame.SRCALPHA)
+                    selection_surf.fill(COLOR_SELECTED_BG_BRIGHT)
+                    self.screen.blit(selection_surf, (indicator_x, indicator_y))
+                    
+                    # Left accent border (golden)
+                    pygame.draw.rect(self.screen, (255, 215, 0), (indicator_x, indicator_y, 4, indicator_height))
                 
                 # Special handling for battle speed and camera speed to show current value
                 if option_id == "battle_speed":
@@ -388,52 +575,85 @@ class OptionsMenuScene:
                 else:
                     display_text = option_text
                 
+                # Option text with shadow
+                color = COLOR_TITLE if is_selected else COLOR_TEXT
                 text_surf = self.font_main.render(display_text, True, color)
+                text_shadow = self.font_main.render(display_text, True, COLOR_SHADOW[:3])
                 text_x = w // 2 - text_surf.get_width() // 2
-                text_y = menu_start_y + idx * option_spacing
-                self.screen.blit(text_surf, (text_x, text_y))
+                
+                # Draw shadow
+                self.screen.blit(text_shadow, (text_x + SHADOW_OFFSET_X, option_y + SHADOW_OFFSET_Y))
+                # Draw text
+                self.screen.blit(text_surf, (text_x, option_y))
             
-            # Hint
+            # Hint panel
             option_id, _ = self.main_options[self.selected_index]
             if option_id in ("battle_speed", "camera_speed"):
                 hint_text = "←/→: Adjust Speed   ↑/↓: Navigate   Esc: Back"
             else:
                 hint_text = "↑/↓: Navigate   Enter: Select   Esc: Back"
-            hint_surf = self.font_small.render(hint_text, True, (150, 150, 150))
-            hint_x = w // 2 - hint_surf.get_width() // 2
-            self.screen.blit(hint_surf, (hint_x, h - 40))
+            
+            hint_y = h - 80
+            hint_width = 600
+            hint_height = 45
+            hint_x = w // 2 - hint_width // 2
+            
+            hint_panel = pygame.Surface((hint_width, hint_height), pygame.SRCALPHA)
+            hint_panel.fill(COLOR_BG_PANEL)
+            pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_width, hint_height), 2)
+            self.screen.blit(hint_panel, (hint_x, hint_y))
+            
+            hint_surf = self.font_small.render(hint_text, True, COLOR_TEXT)
+            hint_text_x = w // 2 - hint_surf.get_width() // 2
+            self.screen.blit(hint_surf, (hint_text_x, hint_y + 14))
         
         else:
             # Draw controls/hotkeys view
-            title_surf = self.font_title.render("Controls & Hotkeys", True, (255, 255, 210))
+            title_text = "Controls & Hotkeys"
+            pulse = int(5 * abs(math.sin(self.animation_timer * 2)))
+            title_color = tuple(min(255, c + pulse) for c in COLOR_TITLE)
+            title_surf = self.font_title.render(title_text, True, title_color)
+            title_shadow = self.font_title.render(title_text, True, COLOR_SHADOW[:3])
             title_x = w // 2 - title_surf.get_width() // 2
-            self.screen.blit(title_surf, (title_x, 40))
+            title_y = 60
             
-            # Draw hotkey sections in columns
-            section_width = w // 2 - 40
-            start_x = 40
-            start_y = 100
-            section_spacing = 20
+            # Draw shadow
+            self.screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+            # Draw title
+            self.screen.blit(title_surf, (title_x, title_y))
+            
+            # Draw hotkey sections in columns with panels
+            section_width = w // 2 - 60
+            start_x = 30
+            start_y = 120
+            section_spacing = 25
             
             current_y = start_y
             col = 0
             
             for section_title, hotkeys in self.hotkey_sections:
+                x = start_x + col * (section_width + 60)
+                
+                # Section panel
+                section_height = 30 + len(hotkeys) * 24 + 10
+                section_panel = pygame.Surface((section_width, section_height), pygame.SRCALPHA)
+                section_panel.fill((*COLOR_BG_PANEL[:3], 200))
+                pygame.draw.rect(section_panel, COLOR_BORDER_BRIGHT, (0, 0, section_width, section_height), 1)
+                self.screen.blit(section_panel, (x, current_y))
+                
                 # Section title
-                title_color = (220, 220, 180)
-                section_surf = self.font_main.render(section_title, True, title_color)
-                x = start_x + col * (section_width + 40)
-                self.screen.blit(section_surf, (x, current_y))
-                current_y += 30
+                section_surf = self.font_main.render(section_title, True, COLOR_SUBTITLE)
+                self.screen.blit(section_surf, (x + 10, current_y + 8))
+                current_y += 35
                 
                 # Hotkeys in this section
                 for key_name, description in hotkeys:
                     # Key name (left-aligned)
-                    key_surf = self.font_small.render(key_name, True, (200, 200, 200))
+                    key_surf = self.font_small.render(key_name, True, COLOR_TEXT)
                     self.screen.blit(key_surf, (x + 20, current_y))
                     
                     # Description (right-aligned in section)
-                    desc_surf = self.font_small.render(description, True, (160, 160, 160))
+                    desc_surf = self.font_small.render(description, True, COLOR_TEXT_DIM)
                     desc_x = x + section_width - desc_surf.get_width() - 20
                     self.screen.blit(desc_surf, (desc_x, current_y))
                     
@@ -442,15 +662,25 @@ class OptionsMenuScene:
                 current_y += section_spacing
                 
                 # Switch to second column if we've gone too far down
-                if current_y > h - 100 and col == 0:
+                if current_y > h - 120 and col == 0:
                     col = 1
                     current_y = start_y
             
-            # Hint at bottom
+            # Hint panel at bottom
             hint_text = "Press Esc, Enter, or Space to return"
-            hint_surf = self.font_small.render(hint_text, True, (120, 120, 120))
-            hint_x = w // 2 - hint_surf.get_width() // 2
-            self.screen.blit(hint_surf, (hint_x, h - 40))
+            hint_y = h - 80
+            hint_width = 500
+            hint_height = 45
+            hint_x = w // 2 - hint_width // 2
+            
+            hint_panel = pygame.Surface((hint_width, hint_height), pygame.SRCALPHA)
+            hint_panel.fill(COLOR_BG_PANEL)
+            pygame.draw.rect(hint_panel, COLOR_BORDER_BRIGHT, (0, 0, hint_width, hint_height), 2)
+            self.screen.blit(hint_panel, (hint_x, hint_y))
+            
+            hint_surf = self.font_small.render(hint_text, True, COLOR_TEXT)
+            hint_text_x = w // 2 - hint_surf.get_width() // 2
+            self.screen.blit(hint_surf, (hint_text_x, hint_y + 14))
     
     def _apply_battle_speed(self) -> None:
         """Apply the selected battle speed to config and save it."""

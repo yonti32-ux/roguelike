@@ -50,12 +50,15 @@ def init_hero_for_class(game: "Game", hero_class_id: str, hero_background_id: Op
         game.inventory.add_item(item_id, randomized=False)
     
     # Add background starting items if background was applied
+    # Skip items that are already in inventory to avoid duplicates
     if hero_background_id:
         from systems.character_creation import get_background
         try:
             background = get_background(hero_background_id)
             for item_id in background.starting_items:
-                game.inventory.add_item(item_id, randomized=False)
+                # Only add if not already in inventory (avoid duplicates from class items)
+                if item_id not in game.inventory.items:
+                    game.inventory.add_item(item_id, randomized=False)
         except KeyError:
             pass  # Background not found, skip items
 

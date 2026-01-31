@@ -26,7 +26,7 @@ BATTLE_AI_SKILL_CHANCE = 0.4
 BATTLE_AI_DEFENSIVE_SKILL_CHANCE = 0.5
 
 # Skill system
-MAX_SKILL_SLOTS = 4  # SKILL_1 to SKILL_4
+MAX_SKILL_SLOTS = 8  # SKILL_1 to SKILL_8 (expanded from 4 for better skill management)
 
 # Companion skill point allocation
 # If True, companions automatically allocate skill points based on their role

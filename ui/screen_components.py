@@ -23,6 +23,16 @@ from ui.screen_constants import (
     COLOR_TAB_ACTIVE,
     COLOR_TAB_INACTIVE,
     COLOR_FOOTER,
+    COLOR_BG_PANEL,
+    COLOR_BG_PANEL_DARK,
+    COLOR_BORDER,
+    COLOR_BORDER_BRIGHT,
+    COLOR_SHADOW,
+    COLOR_SHADOW_LIGHT,
+    COLOR_SELECTED_BG_BRIGHT,
+    COLOR_HOVER_BG,
+    COLOR_GRADIENT_START,
+    COLOR_GRADIENT_END,
     MARGIN_X,
     MARGIN_Y_TOP,
     MARGIN_Y_FOOTER,
@@ -32,6 +42,11 @@ from ui.screen_constants import (
     TAB_SPACING,
     TAB_X_OFFSET,
     MAX_DESC_LENGTH,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
+    BORDER_WIDTH_MEDIUM,
+    PANEL_PADDING,
+    PANEL_SHADOW_SIZE,
 )
 
 if TYPE_CHECKING:
@@ -184,17 +199,40 @@ def render_category_header(
     y: int,
 ) -> int:
     """
-    Render a category header (e.g., "--- Weapon ---").
+    Render a category header with enhanced styling (e.g., "--- Weapon ---").
     
     Returns:
         Y position after the header
     """
+    from ui.screen_constants import COLOR_BG_PANEL_DARK, COLOR_BORDER_DIM
+    
     slot_display = slot.capitalize()
     if slot == "misc":
         slot_display = "Miscellaneous"
-    category_surf = ui_font.render(f"--- {slot_display} ---", True, COLOR_CATEGORY)
+    
+    # Render text first to get dimensions
+    category_text = f"--- {slot_display} ---"
+    category_surf = ui_font.render(category_text, True, COLOR_CATEGORY)
+    text_width = category_surf.get_width()
+    text_height = category_surf.get_height()
+    
+    # Create a subtle background panel for the category header
+    panel_padding = 8
+    panel_height = text_height + panel_padding * 2
+    panel_width = text_width + panel_padding * 2
+    
+    # Draw subtle background panel
+    panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+    panel.fill((*COLOR_BG_PANEL_DARK[:3], 180))
+    pygame.draw.rect(panel, COLOR_BORDER_DIM, (0, 0, panel_width, panel_height), 1)
+    screen.blit(panel, (x - panel_padding, y - panel_padding // 2))
+    
+    # Draw text with shadow
+    text_shadow = ui_font.render(category_text, True, COLOR_SHADOW[:3])
+    screen.blit(text_shadow, (x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
     screen.blit(category_surf, (x, y))
-    return y + LINE_HEIGHT_MEDIUM
+    
+    return y + LINE_HEIGHT_MEDIUM + 4  # Extra spacing after header
 
 
 def draw_equipment_section(
@@ -206,17 +244,19 @@ def draw_equipment_section(
     indent: int = 0,
 ) -> int:
     """
-    Draw equipment section showing weapon, armor, trinket.
+    Draw equipment section showing weapon, armor, trinket with enhanced styling.
     
     Returns:
         Y position after the section
     """
     from systems.inventory import get_item_def
-    from ui.screen_constants import COLOR_SUBTITLE, COLOR_TEXT, LINE_HEIGHT_TITLE, LINE_HEIGHT_MEDIUM
+    from ui.screen_constants import COLOR_SUBTITLE, COLOR_TEXT, COLOR_TEXT_DIMMER, LINE_HEIGHT_TITLE, LINE_HEIGHT_MEDIUM
     
     equipped_title = ui_font.render("Equipped:", True, COLOR_SUBTITLE)
+    equipped_title_shadow = ui_font.render("Equipped:", True, COLOR_SHADOW[:3])
+    screen.blit(equipped_title_shadow, (x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
     screen.blit(equipped_title, (x, y))
-    y += LINE_HEIGHT_TITLE
+    y += LINE_HEIGHT_TITLE + 4
     
     # Use all equipment slots from the inventory (new system has 9 slots)
     # Order them logically: weapon, then armor pieces, then accessories
@@ -226,17 +266,26 @@ def draw_equipment_section(
         slots = [slot for slot in slot_order if slot in equipped_map]
     else:
         slots = slot_order
+    
     for slot in slots:
         item_def = None
         if equipped_map:
             item_id = equipped_map.get(slot)
             if item_id:
                 item_def = get_item_def(item_id)
+        
         if item_def is None:
             line = f"{slot.capitalize()}: (none)"
+            text_color = COLOR_TEXT_DIMMER
         else:
+            # Get rarity color for equipped items
+            rarity = getattr(item_def, "rarity", "") or ""
+            rarity_color = get_rarity_color(rarity)
+            # Slightly brighten the color for equipped items
+            text_color = tuple(min(255, c + 30) for c in rarity_color)
             line = f"{slot.capitalize()}: {item_def.name}"
-        t = ui_font.render(line, True, COLOR_TEXT)
+        
+        t = ui_font.render(line, True, text_color)
         screen.blit(t, (x + indent, y))
         y += LINE_HEIGHT_MEDIUM
     
@@ -418,34 +467,91 @@ def draw_screen_header(
     available_screens: List[str],
     w: int,
 ) -> None:
-    """Draw header with title and tab indicators."""
-    # Title
+    """Draw enhanced header with title and tab indicators (with panel background)."""
+    header_height = 50
+    header_y = 0
+    
+    # Draw header panel background with shadow
+    shadow_offset = 3
+    shadow_panel = pygame.Surface((w, header_height + shadow_offset), pygame.SRCALPHA)
+    shadow_panel.fill((0, 0, 0, 80))
+    screen.blit(shadow_panel, (0, header_y + shadow_offset))
+    
+    header_panel = pygame.Surface((w, header_height), pygame.SRCALPHA)
+    header_panel.fill((*COLOR_BG_PANEL[:3], 240))  # Slightly more opaque
+    pygame.draw.rect(header_panel, COLOR_BORDER_BRIGHT, (0, 0, w, header_height), 2)
+    # Bottom border line for separation
+    pygame.draw.line(header_panel, COLOR_BORDER_BRIGHT, (0, header_height - 1), (w, header_height - 1), 1)
+    screen.blit(header_panel, (0, header_y))
+    
+    # Title with shadow
     title_surf = ui_font.render(title, True, COLOR_TITLE)
-    screen.blit(title_surf, (MARGIN_X, MARGIN_Y_TOP))
+    title_shadow = ui_font.render(title, True, COLOR_SHADOW[:3])
+    title_x = MARGIN_X
+    title_y = header_y + (header_height - title_surf.get_height()) // 2
     
-    # Tab indicators (aligned near the top-right).
-    tab_x = w - TAB_X_OFFSET
-    tab_y = MARGIN_Y_TOP
+    # Draw shadow
+    screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+    # Draw title
+    screen.blit(title_surf, (title_x, title_y))
     
+    # Tab indicators (centered in header) with enhanced styling
+    # Calculate total width of all tabs to center them
+    tab_spacing = 15  # Spacing between tabs
+    tab_padding = 8  # Padding inside each tab
+    tab_texts = []
+    tab_widths = []
+    total_tabs_width = 0
+    
+    for screen_name in available_screens:
+        tab_text = screen_name.capitalize()
+        tab_texts.append(tab_text)
+        tab_surf = ui_font.render(tab_text, True, COLOR_TAB_ACTIVE)
+        tab_width = tab_surf.get_width() + tab_padding * 2
+        tab_widths.append(tab_width)
+        total_tabs_width += tab_width
+    
+    # Add spacing between tabs
+    total_tabs_width += tab_spacing * (len(available_screens) - 1)
+    
+    # Start position to center tabs
+    tab_start_x = (w - total_tabs_width) // 2
+    tab_y = header_y + (header_height - title_surf.get_height()) // 2
+    
+    current_x = tab_start_x
     for i, screen_name in enumerate(available_screens):
         is_current = screen_name == current_screen
-        tab_text = screen_name.capitalize()
+        tab_text = tab_texts[i]
+        tab_width = tab_widths[i]
+        
         if is_current:
             tab_color = COLOR_TAB_ACTIVE
-            # Draw underline
+            # Draw active tab with background highlight
             tab_surf = ui_font.render(tab_text, True, tab_color)
-            screen.blit(tab_surf, (tab_x + i * TAB_SPACING, tab_y))
-            pygame.draw.line(
-                screen,
-                tab_color,
-                (tab_x + i * TAB_SPACING, tab_y + 22),
-                (tab_x + i * TAB_SPACING + tab_surf.get_width(), tab_y + 22),
-                2,
-            )
+            tab_height = tab_surf.get_height() + 6
+            tab_bg_x = current_x
+            tab_bg_y = tab_y - 3
+            
+            # Tab background
+            tab_bg = pygame.Surface((tab_width, tab_height), pygame.SRCALPHA)
+            tab_bg.fill((*COLOR_SELECTED_BG_BRIGHT[:3], 180))
+            pygame.draw.rect(tab_bg, COLOR_BORDER_BRIGHT, (0, 0, tab_width, tab_height), 1)
+            screen.blit(tab_bg, (tab_bg_x, tab_bg_y))
+            
+            # Tab text with shadow (centered in tab)
+            tab_text_x = current_x + (tab_width - tab_surf.get_width()) // 2
+            tab_shadow = ui_font.render(tab_text, True, COLOR_SHADOW[:3])
+            screen.blit(tab_shadow, (tab_text_x + SHADOW_OFFSET_X, tab_y + SHADOW_OFFSET_Y))
+            screen.blit(tab_surf, (tab_text_x, tab_y))
         else:
             tab_color = COLOR_TAB_INACTIVE
             tab_surf = ui_font.render(tab_text, True, tab_color)
-            screen.blit(tab_surf, (tab_x + i * TAB_SPACING, tab_y))
+            # Center text in tab
+            tab_text_x = current_x + (tab_width - tab_surf.get_width()) // 2
+            screen.blit(tab_surf, (tab_text_x, tab_y))
+        
+        # Move to next tab position
+        current_x += tab_width + tab_spacing
 
 
 def draw_screen_footer(
@@ -455,9 +561,169 @@ def draw_screen_footer(
     w: int,
     h: int,
 ) -> None:
-    """Draw footer with navigation hints."""
-    footer_y = h - MARGIN_Y_FOOTER
+    """Draw enhanced footer with navigation hints (with panel background)."""
+    if not hints:
+        return
+    
+    footer_height = len(hints) * LINE_HEIGHT_SMALL + 20
+    footer_y = h - footer_height
+    
+    # Draw footer panel background with shadow
+    shadow_offset = 3
+    shadow_panel = pygame.Surface((w, footer_height + shadow_offset), pygame.SRCALPHA)
+    shadow_panel.fill((0, 0, 0, 80))
+    screen.blit(shadow_panel, (0, footer_y - shadow_offset))
+    
+    footer_panel = pygame.Surface((w, footer_height), pygame.SRCALPHA)
+    footer_panel.fill((*COLOR_BG_PANEL[:3], 240))  # Slightly more opaque
+    pygame.draw.rect(footer_panel, COLOR_BORDER_BRIGHT, (0, 0, w, footer_height), 2)
+    # Top border line for separation
+    pygame.draw.line(footer_panel, COLOR_BORDER_BRIGHT, (0, 0), (w, 0), 1)
+    screen.blit(footer_panel, (0, footer_y))
+    
+    # Draw hints with shadow
+    hint_start_y = footer_y + 10
     for i, hint in enumerate(hints):
         hint_surf = ui_font.render(hint, True, COLOR_FOOTER)
-        screen.blit(hint_surf, (MARGIN_X, footer_y + i * LINE_HEIGHT_SMALL))
+        hint_shadow = ui_font.render(hint, True, COLOR_SHADOW[:3])
+        hint_x = MARGIN_X
+        hint_y = hint_start_y + i * LINE_HEIGHT_SMALL
+        
+        # Draw shadow
+        screen.blit(hint_shadow, (hint_x + SHADOW_OFFSET_X, hint_y + SHADOW_OFFSET_Y))
+        # Draw hint
+        screen.blit(hint_surf, (hint_x, hint_y))
+
+
+# ============================================================================
+# Enhanced Rendering Utilities
+# ============================================================================
+
+def render_text_with_shadow(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    text: str,
+    color: tuple[int, int, int],
+    x: int,
+    y: int,
+    shadow_color: tuple[int, int, int] = COLOR_SHADOW,
+    shadow_offset: tuple[int, int] = (SHADOW_OFFSET_X, SHADOW_OFFSET_Y),
+) -> pygame.Rect:
+    """
+    Render text with a shadow for better readability.
+    
+    Returns:
+        The bounding rect of the text
+    """
+    # Render shadow
+    shadow_surf = font.render(text, True, shadow_color)
+    screen.blit(shadow_surf, (x + shadow_offset[0], y + shadow_offset[1]))
+    
+    # Render main text
+    text_surf = font.render(text, True, color)
+    screen.blit(text_surf, (x, y))
+    
+    return text_surf.get_rect(topleft=(x, y))
+
+
+def draw_panel_with_shadow(
+    screen: pygame.Surface,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    bg_color: tuple[int, int, int, int] = COLOR_BG_PANEL,
+    border_color: tuple[int, int, int] = COLOR_BORDER,
+    border_width: int = BORDER_WIDTH_MEDIUM,
+    shadow_size: int = PANEL_SHADOW_SIZE,
+) -> pygame.Surface:
+    """
+    Draw a panel with shadow and border.
+    
+    Returns:
+        A surface containing the panel (for potential caching)
+    """
+    # Create panel surface
+    panel_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+    
+    # Draw shadow (multiple layers for soft shadow effect)
+    shadow_alpha = COLOR_SHADOW[3] if len(COLOR_SHADOW) > 3 else 180
+    for i in range(shadow_size, 0, -1):
+        shadow_alpha_layer = shadow_alpha // (shadow_size + 1 - i)
+        shadow_surf = pygame.Surface((width + i * 2, height + i * 2), pygame.SRCALPHA)
+        shadow_surf.fill((0, 0, 0, shadow_alpha_layer))
+        screen.blit(shadow_surf, (x - i + SHADOW_OFFSET_X, y - i + SHADOW_OFFSET_Y))
+    
+    # Draw background
+    panel_surf.fill(bg_color)
+    
+    # Draw border
+    if border_width > 0:
+        pygame.draw.rect(panel_surf, border_color, (0, 0, width, height), border_width)
+    
+    # Blit panel to screen
+    screen.blit(panel_surf, (x, y))
+    
+    return panel_surf
+
+
+def draw_selection_indicator(
+    screen: pygame.Surface,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    is_selected: bool = True,
+    is_hovered: bool = False,
+) -> None:
+    """
+    Draw a modern selection indicator (highlighted background with border).
+    """
+    if is_selected:
+        # Draw selection background
+        bg_color = COLOR_SELECTED_BG_BRIGHT if is_selected else COLOR_HOVER_BG
+        selection_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+        selection_surf.fill(bg_color)
+        screen.blit(selection_surf, (x, y))
+        
+        # Draw left border accent
+        accent_width = 4
+        accent_color = COLOR_TAB_ACTIVE
+        pygame.draw.rect(screen, accent_color, (x, y, accent_width, height))
+        
+        # Draw top/bottom borders for emphasis
+        border_color = COLOR_BORDER_BRIGHT
+        pygame.draw.line(screen, border_color, (x + accent_width, y), (x + width, y), 1)
+        pygame.draw.line(screen, border_color, (x + accent_width, y + height - 1), (x + width, y + height - 1), 1)
+    elif is_hovered:
+        # Subtle hover effect
+        hover_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+        hover_surf.fill(COLOR_HOVER_BG)
+        screen.blit(hover_surf, (x, y))
+
+
+def draw_gradient_background(
+    screen: pygame.Surface,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    start_color: tuple[int, int, int],
+    end_color: tuple[int, int, int],
+    vertical: bool = True,
+) -> None:
+    """
+    Draw a gradient background (simulated with multiple rectangles).
+    """
+    steps = max(width, height) if vertical else max(width, height)
+    for i in range(steps):
+        ratio = i / steps if steps > 0 else 0
+        r = int(start_color[0] + (end_color[0] - start_color[0]) * ratio)
+        g = int(start_color[1] + (end_color[1] - start_color[1]) * ratio)
+        b = int(start_color[2] + (end_color[2] - start_color[2]) * ratio)
+        
+        if vertical:
+            pygame.draw.line(screen, (r, g, b), (x, y + i), (x + width, y + i), 1)
+        else:
+            pygame.draw.line(screen, (r, g, b), (x + i, y), (x + i, y + height), 1)
 

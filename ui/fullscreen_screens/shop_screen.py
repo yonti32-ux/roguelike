@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, List
 
 import pygame
 
-from settings import COLOR_BG
 from systems.inventory import get_item_def
 from systems.economy import (
     calculate_shop_buy_price,
@@ -82,8 +81,16 @@ def draw_shop_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs (keep consistent across screens)
     available_screens = ["inventory", "character", "skills", "quests", "shop"]

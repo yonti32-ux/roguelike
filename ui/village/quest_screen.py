@@ -91,23 +91,21 @@ class QuestScreen:
                 game.active_screen = None
             return
         
-        # --- Tab switching with TAB ---
+        # --- Tab switching ---
         if key == pygame.K_TAB:
             mods = pygame.key.get_mods()
             if mods & pygame.KMOD_SHIFT:
-                # Shift+Tab: previous tab
-                tabs = ["available", "active", "completed"]
-                current_index = tabs.index(quest_tab) if quest_tab in tabs else 0
-                new_index = (current_index - 1) % len(tabs)
-                game.quest_tab = tabs[new_index]
-            else:
-                # Tab: next tab
+                # Shift+TAB: switch between inner quest tabs (available, active, completed)
                 tabs = ["available", "active", "completed"]
                 current_index = tabs.index(quest_tab) if quest_tab in tabs else 0
                 new_index = (current_index + 1) % len(tabs)
                 game.quest_tab = tabs[new_index]
-            # Reset cursor when switching tabs
-            game.quest_cursor = 0
+                # Reset cursor when switching tabs
+                game.quest_cursor = 0
+            else:
+                # TAB: switch between main screens (inventory, character, skills, quests, shop, etc.)
+                direction = 1  # Next screen
+                game.cycle_to_next_screen(direction)
             return
         
         # Quick jump to screens

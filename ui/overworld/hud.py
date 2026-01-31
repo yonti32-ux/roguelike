@@ -9,6 +9,15 @@ import math
 from typing import TYPE_CHECKING, Tuple, Optional
 
 from settings import COLOR_BG, TILE_SIZE
+from ui.screen_constants import (
+    COLOR_BG_PANEL,
+    COLOR_BORDER_BRIGHT,
+    COLOR_SHADOW,
+    COLOR_TEXT,
+    COLOR_SUBTITLE,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
+)
 
 if TYPE_CHECKING:
     from engine.core.game import Game
@@ -443,40 +452,71 @@ def _draw_roaming_parties(
 
 
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
-    """Draw UI overlay (time, position, etc.)."""
+    """Draw UI overlay (time, position, etc.) with polished panels."""
     # PERFORMANCE: Cache UI font to avoid creating it every frame
     if not hasattr(game, "_overworld_ui_font"):
         game._overworld_ui_font = pygame.font.Font(None, 24)
     font = game._overworld_ui_font
     
+    # Top-left info panel
+    info_panel_width = 250
+    info_panel_height = 80
+    info_panel_x = 10
+    info_panel_y = 10
+    
+    info_panel = pygame.Surface((info_panel_width, info_panel_height), pygame.SRCALPHA)
+    info_panel.fill(COLOR_BG_PANEL)
+    pygame.draw.rect(info_panel, COLOR_BORDER_BRIGHT, (0, 0, info_panel_width, info_panel_height), 2)
+    screen.blit(info_panel, (info_panel_x, info_panel_y))
+    
     # Time display
     if game.time_system is not None:
         time_text = game.time_system.get_time_string()
-        time_surface = font.render(time_text, True, (255, 255, 255))
-        screen.blit(time_surface, (10, 10))
+        time_surface = font.render(time_text, True, COLOR_TEXT)
+        screen.blit(time_surface, (info_panel_x + 12, info_panel_y + 12))
     
     # Position display
     if game.overworld_map is not None:
         x, y = game.overworld_map.get_player_position()
         pos_text = f"Position: ({x}, {y})"
-        pos_surface = font.render(pos_text, True, (255, 255, 255))
-        screen.blit(pos_surface, (10, 40))
+        pos_surface = font.render(pos_text, True, COLOR_TEXT)
+        screen.blit(pos_surface, (info_panel_x + 12, info_panel_y + 40))
     
-    # Instructions
-    help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character | H: Tutorial"
-    help_surface = font.render(help_text, True, (200, 200, 200))
-    screen.blit(help_surface, (10, screen.get_height() - 30))
-    
-    # Show current zoom level
+    # Top-right zoom panel
     if hasattr(game, "overworld_zoom"):
         zoom_value = game.overworld_zoom  # It's a property, not a method
         zoom_text = f"Zoom: {int(zoom_value * 100)}%"
-        zoom_surface = font.render(zoom_text, True, (150, 200, 255))
-        screen.blit(zoom_surface, (screen.get_width() - zoom_surface.get_width() - 10, 10))
+        zoom_surface = font.render(zoom_text, True, COLOR_SUBTITLE)
+        
+        zoom_panel_width = zoom_surface.get_width() + 24
+        zoom_panel_height = 40
+        zoom_panel_x = screen.get_width() - zoom_panel_width - 10
+        zoom_panel_y = 10
+        
+        zoom_panel = pygame.Surface((zoom_panel_width, zoom_panel_height), pygame.SRCALPHA)
+        zoom_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(zoom_panel, COLOR_BORDER_BRIGHT, (0, 0, zoom_panel_width, zoom_panel_height), 2)
+        screen.blit(zoom_panel, (zoom_panel_x, zoom_panel_y))
+        screen.blit(zoom_surface, (zoom_panel_x + 12, zoom_panel_y + 10))
+    
+    # Bottom instructions panel
+    help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character | H: Tutorial"
+    help_surface = font.render(help_text, True, COLOR_TEXT)
+    
+    help_panel_width = help_surface.get_width() + 24
+    help_panel_height = 40
+    help_panel_x = 10
+    help_panel_y = screen.get_height() - help_panel_height - 10
+    
+    help_panel = pygame.Surface((help_panel_width, help_panel_height), pygame.SRCALPHA)
+    help_panel.fill(COLOR_BG_PANEL)
+    pygame.draw.rect(help_panel, COLOR_BORDER_BRIGHT, (0, 0, help_panel_width, help_panel_height), 2)
+    screen.blit(help_panel, (help_panel_x, help_panel_y))
+    screen.blit(help_surface, (help_panel_x + 12, help_panel_y + 10))
 
 
 def _draw_message(game: "Game", screen: pygame.Surface) -> None:
-    """Draw the last message at the bottom of the screen."""
+    """Draw the last message at the bottom of the screen with polished styling."""
     if not hasattr(game, "last_message") or not game.last_message:
         return
     
@@ -484,17 +524,22 @@ def _draw_message(game: "Game", screen: pygame.Surface) -> None:
     if not hasattr(game, "_overworld_ui_font"):
         game._overworld_ui_font = pygame.font.Font(None, 24)
     font = game._overworld_ui_font
-    text_surface = font.render(game.last_message, True, (255, 255, 255))
+    text_surface = font.render(game.last_message, True, COLOR_TEXT)
     
     # Center at bottom
-    x = (screen.get_width() - text_surface.get_width()) // 2
-    y = screen.get_height() - 60
+    message_panel_width = text_surface.get_width() + 40
+    message_panel_height = 50
+    x = (screen.get_width() - message_panel_width) // 2
+    y = screen.get_height() - 100
     
-    # Draw with background for readability
-    bg_rect = text_surface.get_rect()
-    bg_rect.x = x
-    bg_rect.y = y
-    bg_rect.inflate_ip(10, 5)
-    pygame.draw.rect(screen, (0, 0, 0, 180), bg_rect)
+    # Draw message panel with shadow
+    message_shadow = pygame.Surface((message_panel_width + 4, message_panel_height + 4), pygame.SRCALPHA)
+    message_shadow.fill((0, 0, 0, 100))
+    screen.blit(message_shadow, (x - 2, y - 2))
     
-    screen.blit(text_surface, (x, y))
+    message_panel = pygame.Surface((message_panel_width, message_panel_height), pygame.SRCALPHA)
+    message_panel.fill(COLOR_BG_PANEL)
+    pygame.draw.rect(message_panel, COLOR_BORDER_BRIGHT, (0, 0, message_panel_width, message_panel_height), 2)
+    screen.blit(message_panel, (x, y))
+    
+    screen.blit(text_surface, (x + 20, y + 15))

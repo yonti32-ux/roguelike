@@ -29,6 +29,7 @@ class UIScreenManager:
         self.show_inventory: bool = False
         self.show_character_sheet: bool = False
         self.show_skill_screen: bool = False
+        self.show_skill_management: bool = False
         self.show_quest_screen: bool = False
         self.show_battle_log: bool = False
         self.show_exploration_log: bool = False
@@ -175,6 +176,7 @@ class UIScreenManager:
         self.show_inventory = False
         self.show_character_sheet = False
         self.show_skill_screen = False
+        self.show_skill_management = False
         self.show_quest_screen = False
         self.show_battle_log = False
         self.show_exploration_log = False
@@ -196,6 +198,9 @@ class UIScreenManager:
                 game.skill_screen.focus_index = 0
             if hasattr(game.skill_screen, "reset_selection"):
                 game.skill_screen.reset_selection()
+            # Reset to tree tab when opening
+            if hasattr(game.skill_screen, "current_tab"):
+                game.skill_screen.current_tab = "tree"
             game.active_screen = game.skill_screen_wrapper
         elif screen_name == "shop" and getattr(game, "show_shop", False):
             # Shop is already open (show_shop is True), just set active screen

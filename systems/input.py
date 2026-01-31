@@ -55,6 +55,10 @@ class InputAction(str, Enum):
     SKILL_2 = "skill_2"
     SKILL_3 = "skill_3"
     SKILL_4 = "skill_4"
+    SKILL_5 = "skill_5"
+    SKILL_6 = "skill_6"
+    SKILL_7 = "skill_7"
+    SKILL_8 = "skill_8"
 
     GUARD = "GUARD"
     # Reserved for later (end turn button, etc.)

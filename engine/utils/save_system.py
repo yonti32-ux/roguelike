@@ -231,7 +231,9 @@ def _serialize_hero_stats(hero_stats: HeroStats) -> Dict[str, Any]:
         "hero_name": hero_stats.hero_name,
         "base": _serialize_stat_block(hero_stats.base),
         "perks": list(hero_stats.perks),
-        "skill_slots": hero_stats.skill_slots,
+        "skill_slots": hero_stats.skill_slots,  # For backwards compatibility
+        "skill_loadouts": hero_stats.skill_loadouts,
+        "active_loadout_index": hero_stats.active_loadout_index,
         "skill_points": hero_stats.skill_points,
         "skill_ranks": dict(hero_stats.skill_ranks),
     }
@@ -289,7 +291,9 @@ def _serialize_companion(companion: CompanionState) -> Dict[str, Any]:
         "class_id": companion.class_id,
         "perks": list(companion.perks),
         "equipped": dict(companion.equipped),
-        "skill_slots": companion.skill_slots,
+        "skill_slots": companion.skill_slots,  # For backwards compatibility
+        "skill_loadouts": companion.skill_loadouts,
+        "active_loadout_index": companion.active_loadout_index,
         "skill_points": companion.skill_points,
         "skill_ranks": dict(companion.skill_ranks),
     }
@@ -538,7 +542,18 @@ def _deserialize_hero_stats(hero_stats: HeroStats, data: Dict[str, Any], version
     hero_stats.hero_class_id = data.get("hero_class_id", "warrior")
     hero_stats.hero_name = data.get("hero_name", "Adventurer")
     hero_stats.perks = list(data.get("perks", []))
-    hero_stats.skill_slots = list(data.get("skill_slots", [None, None, None, None]))
+    # Load loadouts if available, otherwise create from skill_slots for backwards compatibility
+    if "skill_loadouts" in data:
+        hero_stats.skill_loadouts = [list(loadout) for loadout in data["skill_loadouts"]]
+        hero_stats.active_loadout_index = data.get("active_loadout_index", 0)
+    else:
+        # Backwards compatibility: create loadout from old skill_slots
+        old_slots = list(data.get("skill_slots", [None, None, None, None]))
+        # Pad to 8 slots
+        while len(old_slots) < 8:
+            old_slots.append(None)
+        hero_stats.skill_loadouts = [old_slots[:8]]
+        hero_stats.active_loadout_index = 0
     hero_stats.skill_points = data.get("skill_points", 0)
     hero_stats.skill_ranks = dict(data.get("skill_ranks", {}))
     
@@ -684,10 +699,24 @@ def _deserialize_companion(data: Dict[str, Any]) -> CompanionState:
         class_id=data.get("class_id"),
         perks=list(data.get("perks", [])),
         equipped=equipped,
-        skill_slots=list(data.get("skill_slots", [None, None, None, None])),
+        skill_slots=list(data.get("skill_slots", [None, None, None, None])),  # Will be set below
         skill_points=data.get("skill_points", 0),
         skill_ranks=dict(data.get("skill_ranks", {})),
     )
+    
+    # Load loadouts if available, otherwise create from skill_slots for backwards compatibility
+    if "skill_loadouts" in data:
+        companion.skill_loadouts = [list(loadout) for loadout in data["skill_loadouts"]]
+        companion.active_loadout_index = data.get("active_loadout_index", 0)
+    else:
+        # Backwards compatibility: create loadout from old skill_slots
+        old_slots = list(data.get("skill_slots", [None, None, None, None]))
+        # Pad to 8 slots
+        while len(old_slots) < 8:
+            old_slots.append(None)
+        companion.skill_loadouts = [old_slots[:8]]
+        companion.active_loadout_index = 0
+    
     return companion
 
 

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from settings import COLOR_BG
 # screen_constants are imported by screen_components
 from ui.screen_components import draw_screen_header, draw_screen_footer
 from ui.screen_utils import safe_getattr
@@ -23,8 +22,16 @@ def draw_skill_screen_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs (keep consistent across screens)
     available_screens = ["inventory", "character", "skills", "quests"]
@@ -45,10 +52,17 @@ def draw_skill_screen_fullscreen(game: "Game") -> None:
     # Draw skill screen content
     skill_screen_core.draw_content(screen, w, h)
     
-    # Footer hints
-    hints = [
-        "Arrow Keys/WASD: pan | +/-: zoom | Click/Enter: select/upgrade | Q/E: switch character",
-        "TAB: switch screen | T/ESC: close"
-    ]
+    # Footer hints (dynamic based on current tab)
+    skill_screen_core = getattr(game, "skill_screen", None)
+    if skill_screen_core and getattr(skill_screen_core, "current_tab", "tree") == "management":
+        hints = [
+            "Click skill to select, then click slot to assign | Q/E: switch character | X on slot: clear",
+            "1/2: switch tab | TAB: switch screen | T/ESC: close"
+        ]
+    else:
+        hints = [
+            "Arrow Keys/WASD: pan | +/-: zoom | Click/Enter: select/upgrade | Q/E: switch character",
+            "1/2: switch tab | TAB: switch screen | T/ESC: close"
+        ]
     draw_screen_footer(screen, ui_font, hints, w, h)
 

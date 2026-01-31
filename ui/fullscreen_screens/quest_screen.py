@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, List
 
 import pygame
 
-from settings import COLOR_BG
 from ui.screen_components import draw_screen_header, draw_screen_footer
 from ui.screen_utils import safe_getattr
 
@@ -47,8 +46,16 @@ def draw_quest_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs (keep consistent across screens)
     available_screens = ["inventory", "character", "skills", "quests"]
@@ -244,7 +251,7 @@ def draw_quest_fullscreen(game: "Game") -> None:
     # Footer hints
     hints = [
         f"Up/Down: move • Enter/Space: {action_text.lower()} • 1–9: quick select",
-        "TAB: switch tab • I/C/T/J: jump to screen • J: toggle quests • ESC: close"
+        "TAB: switch screen (Inventory/Character/Skills/etc.) • Shift+TAB: switch quest tab (Available/Active/Completed) • I/C/T/J: jump to screen • ESC: close"
     ]
     draw_screen_footer(screen, ui_font, hints, w, h)
 

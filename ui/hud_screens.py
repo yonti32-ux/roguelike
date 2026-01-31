@@ -23,10 +23,18 @@ from ui.screen_constants import (
     COLOR_CATEGORY,
     COLOR_STATUS,
     COLOR_SELECTED_BG,
+    COLOR_SELECTED_BG_BRIGHT,
     COLOR_SELECTED_TEXT,
     COLOR_TAB_ACTIVE,
     COLOR_TAB_INACTIVE,
     COLOR_FOOTER,
+    COLOR_BG_PANEL,
+    COLOR_BORDER_BRIGHT,
+    COLOR_BORDER_DIM,
+    COLOR_HOVER_BG,
+    COLOR_SHADOW,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
     MARGIN_X,
     MARGIN_Y_TOP,
     MARGIN_Y_START,
@@ -45,6 +53,9 @@ from ui.screen_constants import (
     ITEM_NAME_HEIGHT,
     ITEM_INFO_HEIGHT,
     ITEM_MIN_SPACING,
+    ITEM_SPACING_BETWEEN,
+    ITEM_PADDING_VERTICAL,
+    ITEM_PADDING_HORIZONTAL,
 )
 from ui.screen_components import (
     CharacterHeaderInfo,
@@ -294,6 +305,7 @@ def _render_inventory_item_list(
     right_x: int,
     y: int,
     w: int,
+    game: Optional["Game"] = None,
 ) -> Tuple[int, Dict[str, Tuple[int, int, int, int]]]:
     """
     Render the inventory item list with scrolling and selection.
@@ -377,59 +389,123 @@ def _render_inventory_item_list(
                     if markers:
                         equipped_marker = " [" + ",".join(markers) + "]"
                 
-                # Calculate item height for hover detection
+                # Calculate item height with proper padding
                 item_start_y = y
-                item_height = ITEM_NAME_HEIGHT  # Name line
+                item_content_height = ITEM_NAME_HEIGHT  # Name line
                 
                 # One-line stats/description, slightly dimmer and indented.
                 # Show extra info (description) for the currently selected item.
                 info_line = build_item_info_line(item_def, include_description=is_selected)
                 if info_line:
-                    item_height += ITEM_INFO_HEIGHT
+                    item_content_height += ITEM_INFO_HEIGHT
                 else:
-                    item_height += ITEM_MIN_SPACING
+                    item_content_height += ITEM_MIN_SPACING
                 
-                # Store item position for hover detection
-                item_rect_x = right_x - 10
-                item_rect_y = item_start_y - 2
-                item_rect_width = w - right_x - 80
-                item_rect_height = item_height + 4
-                item_positions[item_id] = (item_rect_x, item_rect_y, item_rect_width, item_rect_height)
+                # Calculate item card dimensions with padding
+                item_rect_x = right_x - 10 - ITEM_PADDING_HORIZONTAL
+                item_rect_y = item_start_y - ITEM_PADDING_VERTICAL
+                item_rect_width = w - right_x - 80 + ITEM_PADDING_HORIZONTAL * 2
+                item_rect_height = item_content_height + ITEM_PADDING_VERTICAL * 2
+                # Use flat_idx as unique key to handle duplicate items correctly
+                # Format: (item_id, flat_idx) -> position
+                item_positions[(item_id, flat_idx)] = (item_rect_x, item_rect_y, item_rect_width, item_rect_height)
                 
-                # Highlight selected item with background
+                # Get rarity for visual styling
+                rarity = getattr(item_def, "rarity", "") or ""
+                base_color = get_rarity_color(rarity)
+                
+                # Check for hover (check mouse position if tooltip system is available)
+                is_hovered = False
+                if game:
+                    tooltip = _safe_getattr(game, "tooltip")
+                    if tooltip and hasattr(tooltip, "mouse_pos"):
+                        mx, my = tooltip.mouse_pos
+                        item_rect = pygame.Rect(item_rect_x, item_rect_y, item_rect_width, item_rect_height)
+                        is_hovered = item_rect.collidepoint(mx, my) and not is_selected
+                
+                # Draw item card background with enhanced styling
+                # Always draw a subtle background for better visual separation
+                card_bg_alpha = 40  # Very subtle default background
+                card_bg_color = COLOR_BG_PANEL
+                
                 if is_selected:
-                    bg = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
-                    bg.fill(COLOR_SELECTED_BG)
-                    screen.blit(bg, (item_rect_x, item_rect_y))
+                    card_bg_alpha = 240
+                    card_bg_color = COLOR_SELECTED_BG_BRIGHT
+                elif is_hovered:
+                    card_bg_alpha = 120
+                    card_bg_color = COLOR_HOVER_BG
+                elif equipped_marker:
+                    card_bg_alpha = 80
+                    card_bg_color = (*base_color[:3], card_bg_alpha)
+                
+                # Draw main card background
+                card_bg = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
+                if equipped_marker and not is_selected and not is_hovered:
+                    card_bg.fill(card_bg_color)
+                else:
+                    card_bg.fill((*card_bg_color[:3], card_bg_alpha))
+                screen.blit(card_bg, (item_rect_x, item_rect_y))
+                
+                # Draw subtle border around item card
+                border_alpha = 100 if is_selected else 60
+                border_color = COLOR_BORDER_BRIGHT if is_selected else COLOR_BORDER_DIM
+                border_surf = pygame.Surface((item_rect_width, item_rect_height), pygame.SRCALPHA)
+                pygame.draw.rect(border_surf, (*border_color[:3], border_alpha), (0, 0, item_rect_width, item_rect_height), 1)
+                screen.blit(border_surf, (item_rect_x, item_rect_y))
+                
+                # Draw rarity-colored left border accent (4px wide for better visibility)
+                if rarity:
+                    border_color = base_color
+                    # Add subtle glow effect for higher rarities
+                    if rarity.lower() in ["epic", "legendary"]:
+                        # Draw a subtle glow behind the border
+                        glow_width = 6
+                        glow_rect = pygame.Rect(item_rect_x, item_rect_y, glow_width, item_rect_height)
+                        glow_surf = pygame.Surface((glow_width, item_rect_height), pygame.SRCALPHA)
+                        glow_surf.fill((*border_color[:3], 60))
+                        screen.blit(glow_surf, (item_rect_x, item_rect_y))
+                    border_rect = pygame.Rect(item_rect_x, item_rect_y, 4, item_rect_height)
+                    pygame.draw.rect(screen, border_color, border_rect)
+                
+                # Adjust text position to account for padding
+                text_x = right_x - ITEM_PADDING_HORIZONTAL
+                text_y = y + ITEM_PADDING_VERTICAL
                 
                 # Item name with selection indicator + rarity tag
-                selection_marker = "> " if is_selected else "  "
-                rarity = getattr(item_def, "rarity", "") or ""
+                selection_marker = "▶ " if is_selected else "  "
                 rarity_label = f" [{rarity.capitalize()}]" if rarity else ""
                 line = f"{selection_marker}{item_def.name}{rarity_label}{equipped_marker}"
 
                 # Base color from rarity, then brighten for equipped/selected
-                base_color = get_rarity_color(rarity)
                 if is_selected:
-                    item_color = tuple(min(255, c + 40) for c in base_color)
+                    item_color = tuple(min(255, c + 50) for c in base_color)
                 elif equipped_marker:
-                    item_color = tuple(min(255, c + 20) for c in base_color)
+                    item_color = tuple(min(255, c + 25) for c in base_color)
+                elif is_hovered:
+                    item_color = tuple(min(255, c + 15) for c in base_color)
                 else:
                     item_color = base_color
+                
+                # Render with shadow for better readability
+                text_shadow = ui_font.render(line, True, COLOR_SHADOW[:3])
+                screen.blit(text_shadow, (text_x + SHADOW_OFFSET_X, text_y + SHADOW_OFFSET_Y))
                 t = ui_font.render(line, True, item_color)
-                screen.blit(t, (right_x, y))
-                y += ITEM_NAME_HEIGHT
+                screen.blit(t, (text_x, text_y))
+                text_y += ITEM_NAME_HEIGHT
 
                 # One-line stats/description, slightly dimmer and indented.
                 # Show extra info (description) for the currently selected item.
                 if info_line:
-                    info_color = (200, 200, 180) if is_selected else COLOR_TEXT_DIMMEST
+                    info_color = (200, 200, 180) if is_selected else (160, 160, 150) if is_hovered else COLOR_TEXT_DIMMEST
                     info_surf = ui_font.render(info_line, True, info_color)
-                    screen.blit(info_surf, (right_x + INDENT_INFO, y))
-                    y += ITEM_INFO_HEIGHT
+                    screen.blit(info_surf, (text_x + INDENT_INFO, text_y))
+                    text_y += ITEM_INFO_HEIGHT
                 else:
                     # Small extra spacing if no info line, to keep rows readable
-                    y += ITEM_MIN_SPACING
+                    text_y += ITEM_MIN_SPACING
+                
+                # Move y position forward with proper spacing
+                y = item_rect_y + item_rect_height + ITEM_SPACING_BETWEEN
     
     return y, item_positions
 
@@ -701,13 +777,24 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs (keep consistent across screens)
+    # Always include core screens, conditionally add shop
     available_screens = ["inventory", "character", "skills", "quests"]
     if _safe_getattr(game, "show_shop", False):
         available_screens.append("shop")
+    if _safe_getattr(game, "show_recruitment", False):
+        available_screens.append("recruitment")
     
     # Draw header with tabs
     draw_screen_header(screen, ui_font, "Inventory", "inventory", available_screens, w)
@@ -727,12 +814,24 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     # Build stats line
     stats_line_text = _build_stats_line(game, focused_is_hero, focused_comp, include_resources=True)
     
-    # Left column: Character info and equipment
+    # Left column: Character info and equipment (with panel background)
     left_x = MARGIN_X
+    left_panel_width = w // 2 - MARGIN_X * 2
+    left_panel_start_y = MARGIN_Y_START - 10
+    left_panel_height = h - left_panel_start_y - MARGIN_Y_FOOTER - 20
+    
+    # Draw left panel background
+    left_panel = pygame.Surface((left_panel_width, left_panel_height), pygame.SRCALPHA)
+    left_panel.fill((*COLOR_BG_PANEL[:3], 200))
+    pygame.draw.rect(left_panel, COLOR_BORDER_BRIGHT, (0, 0, left_panel_width, left_panel_height), 2)
+    screen.blit(left_panel, (left_x - 10, left_panel_start_y))
+    
     y = MARGIN_Y_START
     
-    # Character name
+    # Character name with shadow
     char_title = ui_font.render(title_text, True, COLOR_TITLE)
+    char_title_shadow = ui_font.render(title_text, True, COLOR_SHADOW[:3])
+    screen.blit(char_title_shadow, (left_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
     screen.blit(char_title, (left_x, y))
     y += SPACING_SECTION
     
@@ -745,15 +844,28 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     # Equipped section
     y = draw_equipment_section(screen, ui_font, left_x, y, equipped_map, indent=INDENT_DEFAULT)
     
-    # Right column: Backpack items
+    # Right column: Backpack items (with panel background)
     right_x = w // 2 + MARGIN_X
+    right_panel_width = w - right_x - MARGIN_X
+    right_panel_start_y = MARGIN_Y_START - 10
+    right_panel_height = h - right_panel_start_y - MARGIN_Y_FOOTER - 20
+    
+    # Draw right panel background
+    right_panel = pygame.Surface((right_panel_width, right_panel_height), pygame.SRCALPHA)
+    right_panel.fill((*COLOR_BG_PANEL[:3], 200))
+    pygame.draw.rect(right_panel, COLOR_BORDER_BRIGHT, (0, 0, right_panel_width, right_panel_height), 2)
+    screen.blit(right_panel, (right_x - 10, right_panel_start_y))
+    
     y = MARGIN_Y_START
     
+    # Backpack title with shadow
     backpack_title = ui_font.render("Backpack:", True, COLOR_SUBTITLE)
+    backpack_title_shadow = ui_font.render("Backpack:", True, COLOR_SHADOW[:3])
+    screen.blit(backpack_title_shadow, (right_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
     screen.blit(backpack_title, (right_x, y))
     y += LINE_HEIGHT_TITLE
     
-    # Show filter/sort/search status
+    # Show filter/sort/search status with enhanced styling
     from ui.inventory_enhancements import FilterMode, SortMode
     filter_mode = _safe_getattr(game, "inventory_filter", FilterMode.ALL)
     sort_mode = _safe_getattr(game, "inventory_sort", SortMode.DEFAULT)
@@ -768,10 +880,26 @@ def draw_inventory_fullscreen(game: "Game") -> None:
         status_lines.append(f"Search: {search_query}")
     
     if status_lines:
+        # Create a subtle background panel for status indicators
         status_text = " | ".join(status_lines)
         status_surf = ui_font.render(status_text, True, COLOR_STATUS)
+        status_width = status_surf.get_width()
+        status_height = status_surf.get_height()
+        
+        # Draw background panel
+        panel_padding = 6
+        panel_width = status_width + panel_padding * 2
+        panel_height = status_height + panel_padding * 2
+        status_panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        status_panel.fill((*COLOR_BG_PANEL[:3], 200))
+        pygame.draw.rect(status_panel, COLOR_BORDER_DIM, (0, 0, panel_width, panel_height), 1)
+        screen.blit(status_panel, (right_x - panel_padding, y - panel_padding))
+        
+        # Draw text with shadow
+        status_shadow = ui_font.render(status_text, True, COLOR_SHADOW[:3])
+        screen.blit(status_shadow, (right_x + SHADOW_OFFSET_X, y + SHADOW_OFFSET_Y))
         screen.blit(status_surf, (right_x, y))
-        y += LINE_HEIGHT_MEDIUM
+        y += LINE_HEIGHT_MEDIUM + 4
     
     if not inv or not getattr(inv, "items", None):
         none = ui_font.render("You are not carrying anything yet.", True, COLOR_TEXT_DIMMER)
@@ -800,7 +928,8 @@ def draw_inventory_fullscreen(game: "Game") -> None:
             # Calculate scroll offset to keep cursor visible
             page_size = int(_safe_getattr(game, "inventory_page_size", 20))
             start_y = y
-            line_height = LINE_HEIGHT_ITEM  # Approximate height per item (including stats line)
+            # Updated line height to account for new spacing (name + info + padding + spacing)
+            line_height = ITEM_NAME_HEIGHT + ITEM_INFO_HEIGHT + ITEM_PADDING_VERTICAL * 2 + ITEM_SPACING_BETWEEN
             max_visible_lines = (h - start_y - 100) // line_height  # Leave space for footer
             
             # Calculate which items to show (scroll to keep cursor visible)
@@ -811,10 +940,31 @@ def draw_inventory_fullscreen(game: "Game") -> None:
             y, item_positions = _render_inventory_item_list(
                 screen, ui_font, flat_list, item_indices, flat_to_global,
                 visible_start, visible_end, cursor, all_equipped,
-                right_x, y, w
+                right_x, y, w, game
             )
-                        
             
+            # Store item positions and mapping in game object for mouse interaction
+            # Create a mapping from (item_id, flat_idx) to its global index for quick lookup
+            # Also create a reverse mapping from item_id to all instances
+            item_key_to_global_idx = {}
+            item_id_to_instances = {}  # item_id -> list of (flat_idx, global_idx)
+            
+            for global_idx, flat_idx in enumerate(item_indices):
+                item_id = flat_list[flat_idx][0]
+                if item_id:
+                    item_key = (item_id, flat_idx)
+                    item_key_to_global_idx[item_key] = global_idx
+                    if item_id not in item_id_to_instances:
+                        item_id_to_instances[item_id] = []
+                    item_id_to_instances[item_id].append((flat_idx, global_idx))
+            
+            # Store in game object for event handling
+            game.inventory_item_positions = item_positions
+            game.inventory_item_key_to_index = item_key_to_global_idx
+            game.inventory_item_id_to_instances = item_id_to_instances
+            game.inventory_flat_list = flat_list
+            game.inventory_item_indices = item_indices
+                        
             # Scroll info
             if len(item_indices) > max_visible_lines:
                 first_index = visible_start + 1
@@ -823,21 +973,30 @@ def draw_inventory_fullscreen(game: "Game") -> None:
                 scroll_surf = ui_font.render(scroll_text, True, (150, 150, 150))
                 screen.blit(scroll_surf, (right_x, y + 10))
             
-            # Check for mouse hover on items for tooltips using tracked positions
+            # Check for mouse hover on items for tooltips and cursor update
             tooltip = _safe_getattr(game, "tooltip")
             if tooltip:
                 mx, my = tooltip.mouse_pos
                 hover_item_id = None
                 hover_item_def = None
+                hover_global_idx = None
                 
                 # Check each item's actual position for hover
-                for item_id, (rect_x, rect_y, rect_width, rect_height) in item_positions.items():
+                # item_positions now uses (item_id, flat_idx) as keys
+                for item_key, (rect_x, rect_y, rect_width, rect_height) in item_positions.items():
                     item_rect = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
                     if item_rect.collidepoint(mx, my):
+                        item_id, flat_idx = item_key
                         hover_item_def = get_item_def(item_id)
                         if hover_item_def:
                             hover_item_id = item_id
+                            # Get the global index for this specific item instance
+                            hover_global_idx = item_key_to_global_idx.get(item_key)
                             break
+                
+                # Update cursor position when hovering over an item
+                if hover_global_idx is not None and hover_global_idx != cursor:
+                    game.inventory_cursor = hover_global_idx
                 
                 # Update tooltip if hovering over an item
                 if hover_item_def:
@@ -858,7 +1017,7 @@ def draw_inventory_fullscreen(game: "Game") -> None:
     
     # Footer hints
     hints = [
-        "Up/Down: select item | Enter/Space: equip | Q/E: switch character | PgUp/PgDn: page",
+        "Up/Down: select item | Enter/Space/Click: equip | Q/E: switch character | PgUp/PgDn: page",
         "F1-F7: filter | Ctrl+S: sort | Ctrl+F: search | Ctrl+R: reset | TAB: switch screen | I/ESC: close"
     ]
     draw_screen_footer(screen, ui_font, hints, w, h)
@@ -870,13 +1029,23 @@ def draw_character_sheet_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs
-    available_screens = ["inventory", "character", "skills"]
+    available_screens = ["inventory", "character", "skills", "quests"]
     if _safe_getattr(game, "show_shop", False):
         available_screens.append("shop")
+    if _safe_getattr(game, "show_recruitment", False):
+        available_screens.append("recruitment")
     
     # Draw header with tabs
     draw_screen_header(screen, ui_font, "Character Sheet", "character", available_screens, w)
@@ -1099,11 +1268,19 @@ def draw_shop_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs
-    available_screens = ["inventory", "character", "skills", "shop"]
+    available_screens = ["inventory", "character", "skills", "quests", "shop"]
     
     # Draw header with tabs
     draw_screen_header(screen, ui_font, "Dungeon Merchant", "shop", available_screens, w)
@@ -1273,13 +1450,23 @@ def draw_skill_screen_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs
-    available_screens = ["inventory", "character", "skills"]
+    available_screens = ["inventory", "character", "skills", "quests"]
     if _safe_getattr(game, "show_shop", False):
         available_screens.append("shop")
+    if _safe_getattr(game, "show_recruitment", False):
+        available_screens.append("recruitment")
     
     # Draw header with tabs
     draw_screen_header(screen, ui_font, "Skill Allocation", "skills", available_screens, w)
@@ -1309,13 +1496,23 @@ def draw_recruitment_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs
-    available_screens = ["inventory", "character", "skills"]
+    available_screens = ["inventory", "character", "skills", "quests"]
     if _safe_getattr(game, "show_shop", False):
         available_screens.append("shop")
+    if _safe_getattr(game, "show_recruitment", False):
+        available_screens.append("recruitment")
     if _safe_getattr(game, "show_recruitment", False):
         available_screens.append("recruitment")
     
@@ -1513,8 +1710,16 @@ def draw_quest_fullscreen(game: "Game") -> None:
     ui_font = game.ui_font
     w, h = screen.get_size()
     
-    # Fill background
-    screen.fill(COLOR_BG)
+    # Draw gradient background
+    from ui.screen_components import draw_gradient_background
+    from ui.screen_constants import COLOR_GRADIENT_START, COLOR_GRADIENT_END
+    draw_gradient_background(
+        screen,
+        0, 0, w, h,
+        COLOR_GRADIENT_START,
+        COLOR_GRADIENT_END,
+        vertical=True
+    )
     
     # Get available screens for tabs
     available_screens = ["inventory", "character", "skills", "quests"]

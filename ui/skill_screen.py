@@ -213,6 +213,9 @@ class SkillScreenCore:
         # Cached unlocked skills (refresh when focus changes)
         self._cached_unlocked_skills: Optional[List[str]] = None
         self._cached_focus_index: int = -1
+        
+        # Tab system: "tree" or "management"
+        self.current_tab: str = "tree"
     
     def get_focused_entity(self) -> Tuple[bool, Optional[CompanionState], Optional[str]]:
         """
@@ -391,16 +394,56 @@ class SkillScreenCore:
     
     def draw_content(self, screen: pygame.Surface, w: int, h: int) -> None:
         """Draw the skill allocation interface content (without header/footer)."""
+        # Draw tab selector
+        self._draw_tabs(screen, w)
+        
+        # Draw content based on current tab
+        if self.current_tab == "management":
+            # Draw skill management view
+            self._draw_skill_management(screen, w, h)
+        else:
+            # Draw skill tree view (default)
+            self._draw_skill_tree_view(screen, w, h)
+    
+    def _draw_tabs(self, screen: pygame.Surface, w: int) -> None:
+        """Draw tab selector for switching between tree and management views."""
+        tab_y = 80
+        tab_x = 50
+        tab_width = 200
+        tab_height = 35
+        
+        # Tree tab
+        tree_active = (self.current_tab == "tree")
+        tree_bg = (60, 80, 100) if tree_active else (40, 40, 50)
+        tree_border = (150, 200, 255) if tree_active else (80, 80, 100)
+        tree_rect = pygame.Rect(tab_x, tab_y, tab_width, tab_height)
+        pygame.draw.rect(screen, tree_bg, tree_rect)
+        pygame.draw.rect(screen, tree_border, tree_rect, 2)
+        tree_text = self.font.render("Skill Tree", True, (240, 240, 240) if tree_active else (180, 180, 180))
+        screen.blit(tree_text, (tab_x + 10, tab_y + 8))
+        
+        # Management tab
+        mgmt_active = (self.current_tab == "management")
+        mgmt_bg = (60, 80, 100) if mgmt_active else (40, 40, 50)
+        mgmt_border = (150, 200, 255) if mgmt_active else (80, 80, 100)
+        mgmt_rect = pygame.Rect(tab_x + tab_width + 10, tab_y, tab_width, tab_height)
+        pygame.draw.rect(screen, mgmt_bg, mgmt_rect)
+        pygame.draw.rect(screen, mgmt_border, mgmt_rect, 2)
+        mgmt_text = self.font.render("Hotbar Setup", True, (240, 240, 240) if mgmt_active else (180, 180, 180))
+        screen.blit(mgmt_text, (tab_x + tab_width + 20, tab_y + 8))
+    
+    def _draw_skill_tree_view(self, screen: pygame.Surface, w: int, h: int) -> None:
+        """Draw the skill tree view."""
         # Get focused entity info
         is_hero, comp, display_name = self.get_focused_entity()
         skill_points = self.get_skill_points()
         
         # Character name and skill points
         char_text = self.font.render(f"Character: {display_name}", True, (220, 220, 200))
-        screen.blit(char_text, (40, 80))
+        screen.blit(char_text, (40, 130))
         
         points_text = self.font.render(f"Available Skill Points: {skill_points}", True, (230, 210, 120))
-        screen.blit(points_text, (40, 110))
+        screen.blit(points_text, (40, 160))
         
         # Get unlocked skills and tree layout
         unlocked_skills = self.get_unlocked_skills()
@@ -428,6 +471,22 @@ class SkillScreenCore:
             # Draw skill details panel on the right
             if self.selected_skill_id:
                 self._draw_skill_details(screen, w, h, self.selected_skill_id, skill_points)
+    
+    def _draw_skill_management(self, screen: pygame.Surface, w: int, h: int) -> None:
+        """Draw the skill management view."""
+        # Get or create skill management screen instance
+        from ui.fullscreen_screens.skill_management_screen import SkillManagementScreen
+        skill_mgmt_screen = getattr(self.game, "skill_management_screen", None)
+        if skill_mgmt_screen is None:
+            skill_mgmt_screen = SkillManagementScreen(self.game)
+            self.game.skill_management_screen = skill_mgmt_screen
+        
+        # Sync focus index
+        skill_mgmt_screen.focus_index = self.focus_index
+        
+        # Draw management content (offset for tabs)
+        # We'll draw it starting below the tabs
+        skill_mgmt_screen.draw_content(screen, w, h)
     
     def _draw_skill_tree(self, screen: pygame.Surface, w: int, h: int, skill_points: int) -> None:
         """Draw the visual skill tree."""

@@ -88,9 +88,19 @@ class CompanionState:
 
     # Hotbar-style skill layout; indices 0–3 map to SKILL_1..SKILL_4.
     # Values are skill IDs (strings) or None.
-    skill_slots: List[Optional[str]] = field(
+    # NOTE: This is now a property that returns the active loadout's slots.
+    # Use get_active_loadout_slots() and set_active_loadout_slots() to access.
+    _skill_slots: List[Optional[str]] = field(
         default_factory=lambda: [None, None, None, None]
     )
+    
+    # Skill loadout system: multiple hotbar configurations
+    # Each loadout is a list of skill IDs (up to 8 slots)
+    # Loadout 0 is the default/active loadout
+    skill_loadouts: List[List[Optional[str]]] = field(
+        default_factory=lambda: [[None, None, None, None]]
+    )
+    active_loadout_index: int = 0  # Which loadout is currently active (0-based)
 
     # Skill progression system
     # Available skill points to spend on upgrading skills
@@ -193,6 +203,73 @@ class CompanionState:
         cost = get_skill_rank_cost(next_rank)
         return self.skill_points >= cost
 
+    # --- Skill slot helpers (loadout system) ------------------------------------
+    
+    @property
+    def skill_slots(self) -> List[Optional[str]]:
+        """Get the active loadout's skill slots (for backwards compatibility)."""
+        if not self.skill_loadouts:
+            self.skill_loadouts = [[None, None, None, None]]
+        if self.active_loadout_index >= len(self.skill_loadouts):
+            self.active_loadout_index = 0
+        return self.skill_loadouts[self.active_loadout_index]
+    
+    @skill_slots.setter
+    def skill_slots(self, value: List[Optional[str]]) -> None:
+        """Set the active loadout's skill slots."""
+        if not self.skill_loadouts:
+            self.skill_loadouts = [[None, None, None, None]]
+        if self.active_loadout_index >= len(self.skill_loadouts):
+            self.active_loadout_index = 0
+        # Ensure list is long enough (up to 8 slots)
+        while len(value) < 8:
+            value.append(None)
+        self.skill_loadouts[self.active_loadout_index] = value[:8]
+    
+    def get_active_loadout_slots(self) -> List[Optional[str]]:
+        """Get the active loadout's skill slots."""
+        return self.skill_slots
+    
+    def set_active_loadout_slots(self, slots: List[Optional[str]]) -> None:
+        """Set the active loadout's skill slots."""
+        self.skill_slots = slots
+    
+    def get_loadout(self, index: int) -> List[Optional[str]]:
+        """Get a specific loadout's slots."""
+        if index < 0 or index >= len(self.skill_loadouts):
+            return [None] * 8
+        return list(self.skill_loadouts[index])
+    
+    def set_loadout(self, index: int, slots: List[Optional[str]]) -> None:
+        """Set a specific loadout's slots."""
+        # Ensure we have enough loadouts
+        while len(self.skill_loadouts) <= index:
+            self.skill_loadouts.append([None] * 8)
+        # Ensure slots list is long enough
+        while len(slots) < 8:
+            slots.append(None)
+        self.skill_loadouts[index] = slots[:8]
+    
+    def switch_loadout(self, index: int) -> None:
+        """Switch to a different loadout."""
+        if index < 0:
+            index = 0
+        if index >= len(self.skill_loadouts):
+            # Create new empty loadout
+            while len(self.skill_loadouts) <= index:
+                self.skill_loadouts.append([None] * 8)
+        self.active_loadout_index = index
+    
+    def create_new_loadout(self) -> int:
+        """Create a new empty loadout and return its index."""
+        new_loadout = [None] * 8
+        self.skill_loadouts.append(new_loadout)
+        return len(self.skill_loadouts) - 1
+    
+    def get_loadout_count(self) -> int:
+        """Get the number of available loadouts."""
+        return len(self.skill_loadouts)
+    
     def upgrade_skill(self, skill_id: str) -> bool:
         """
         Upgrade a skill by one rank.
@@ -611,6 +688,10 @@ def init_companion_skill_slots(state: CompanionState, template: CompanionDef) ->
     while len(slots) < 4:
         slots.append(None)
 
+    # Initialize loadouts with default
+    if not state.skill_loadouts:
+        state.skill_loadouts = [[None] * 8]
+    state.active_loadout_index = 0
     state.skill_slots = slots
 
 

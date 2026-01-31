@@ -89,6 +89,7 @@ from .combat import BattleCombat
 from .terrain import BattleTerrainManager
 from .ai import BattleAI
 from .reactions import BattleReactions, ReactionType
+from .visual_effects import VisualEffectsManager
 from ..core.config import get_config
 from ui.ui_scaling import get_ui_scale, get_hud_panel_width, get_hud_spacing
 
@@ -627,6 +628,9 @@ class BattleScene:
         
         # Initialize reaction system
         self.reactions = BattleReactions(self)
+        
+        # Initialize visual effects manager
+        self.visual_effects = VisualEffectsManager()
 
     # ------------ Log helpers ------------
 
@@ -855,6 +859,17 @@ class BattleScene:
         # Move unit to end of path
         final_pos = path[-1]
         final_gx, final_gy = final_pos
+        
+        # Add movement trail effect
+        start_x = self.grid_origin_x + unit.gx * self.cell_size + self.cell_size // 2
+        start_y = self.grid_origin_y + unit.gy * self.cell_size + self.cell_size // 2
+        end_x = self.grid_origin_x + final_gx * self.cell_size + self.cell_size // 2
+        end_y = self.grid_origin_y + final_gy * self.cell_size + self.cell_size // 2
+        
+        # Color based on unit side
+        trail_color = (100, 150, 255) if unit.side == "player" else (255, 150, 100)
+        self.visual_effects.add_movement_trail(start_x, start_y, end_x, end_y, trail_color, 0.4)
+        
         unit.gx, unit.gy = final_gx, final_gy
         unit.current_movement_points -= total_cost
         # Round to int to handle fractional costs (diagonal movement)
@@ -1073,7 +1088,7 @@ class BattleScene:
 
 
     def _skill_for_action(self, unit: BattleUnit, action: InputAction) -> Optional[Skill]:
-        """Resolve InputAction.SKILL_1..4 -> Skill via the unit's skill_slots.
+        """Resolve InputAction.SKILL_1..8 -> Skill via the unit's skill_slots.
 
         If there is no slot mapping yet, returns None and the caller can
         fall back to key-based logic.
@@ -1087,6 +1102,10 @@ class BattleScene:
             InputAction.SKILL_2: 1,
             InputAction.SKILL_3: 2,
             InputAction.SKILL_4: 3,
+            InputAction.SKILL_5: 4,
+            InputAction.SKILL_6: 5,
+            InputAction.SKILL_7: 6,
+            InputAction.SKILL_8: 7,
         }
         idx = index_map.get(action)
         if idx is None or idx >= len(slots):
@@ -1242,6 +1261,25 @@ class BattleScene:
             # Single target skill
             if target_unit is not None and target_unit is not unit:
                 affected_units = [target_unit]
+        
+        # Add skill particle effects at caster and target positions
+        unit_x = self.grid_origin_x + unit.gx * self.cell_size + self.cell_size // 2
+        unit_y = self.grid_origin_y + unit.gy * self.cell_size + self.cell_size // 2
+        self.visual_effects.add_skill_particles(
+            unit_x, unit_y,
+            skill_type=skill.id,
+            count=15,
+        )
+        
+        # Add particles at target location if applicable
+        if target_unit is not None and target_unit is not unit:
+            target_x = self.grid_origin_x + target_unit.gx * self.cell_size + self.cell_size // 2
+            target_y = self.grid_origin_y + target_unit.gy * self.cell_size + self.cell_size // 2
+            self.visual_effects.add_skill_particles(
+                target_x, target_y,
+                skill_type=skill.id,
+                count=10,
+            )
         
         # Apply damage to all affected units (using rank-modified power)
         total_damage = 0
@@ -1940,9 +1978,20 @@ class BattleScene:
         if self.movement_mode:
             # Any non-movement action cancels movement mode
             if input_manager is not None:
+                # Check for skill actions (defensive - only check if they exist)
+                skill_action_matched = False
+                for i in range(1, MAX_SKILL_SLOTS + 1):
+                    try:
+                        skill_action = getattr(InputAction, f"SKILL_{i}", None)
+                        if skill_action and input_manager.event_matches_action(skill_action, event):
+                            skill_action_matched = True
+                            break
+                    except AttributeError:
+                        continue
+                
                 if (input_manager.event_matches_action(InputAction.BASIC_ATTACK, event) or
                     input_manager.event_matches_action(InputAction.GUARD, event) or
-                    any(input_manager.event_matches_action(getattr(InputAction, f"SKILL_{i}"), event) for i in range(1, MAX_SKILL_SLOTS + 1))):
+                    skill_action_matched):
                     self._exit_movement_mode()
             else:
                 if event.key == pygame.K_SPACE or event.key == pygame.K_g:
@@ -2025,14 +2074,15 @@ class BattleScene:
         skill = None
         if input_manager is not None:
             # First try to resolve by logical slot → skill id.
-            if input_manager.event_matches_action(InputAction.SKILL_1, event):
-                skill = self._skill_for_action(unit, InputAction.SKILL_1)
-            elif input_manager.event_matches_action(InputAction.SKILL_2, event):
-                skill = self._skill_for_action(unit, InputAction.SKILL_2)
-            elif input_manager.event_matches_action(InputAction.SKILL_3, event):
-                skill = self._skill_for_action(unit, InputAction.SKILL_3)
-            elif input_manager.event_matches_action(InputAction.SKILL_4, event):
-                skill = self._skill_for_action(unit, InputAction.SKILL_4)
+            # Support SKILL_1 through SKILL_8
+            for i in range(1, MAX_SKILL_SLOTS + 1):
+                try:
+                    skill_action = getattr(InputAction, f"SKILL_{i}")
+                    if input_manager.event_matches_action(skill_action, event):
+                        skill = self._skill_for_action(unit, skill_action)
+                        break
+                except AttributeError:
+                    continue
 
             # If we have an input manager but no slot mapping yet (older saves /
             # future weirdness), fall back to key-based lookup.
@@ -2095,6 +2145,9 @@ class BattleScene:
             spark["timer"] -= dt
             if spark["timer"] <= 0:
                 self._hit_sparks.remove(spark)
+        
+        # Update visual effects
+        self.visual_effects.update(dt)
 
         # Camera movement (Shift + Arrow keys) - continuous movement while keys are held
         if self.targeting_mode is None:
@@ -2163,10 +2216,11 @@ class BattleScene:
         self.camera_x = max(-max_camera_offset, min(max_camera_offset, self.camera_x))
         self.camera_y = max(-max_camera_offset, min(max_camera_offset, self.camera_y))
         
-        # Apply camera offset
-        self.grid_origin_x = base_grid_x + int(self.camera_x)
+        # Apply camera offset and screen shake
+        shake_x, shake_y = self.visual_effects.get_shake_offset()
+        self.grid_origin_x = base_grid_x + int(self.camera_x + shake_x)
         # Center the grid in the middle band, but never above the top_ui area
-        self.grid_origin_y = base_grid_y + int(self.camera_y)
+        self.grid_origin_y = base_grid_y + int(self.camera_y + shake_y)
 
         # ------------------------------------------------------------------
         # 2) Grid + units
@@ -2494,6 +2548,13 @@ class BattleScene:
             win_x = 40
             win_y = max(self.grid_origin_y - 30, 40)
             surface.blit(win_text, (win_x, win_y))
+        
+        # Draw visual effects (particles, movement trails)
+        self.visual_effects.draw_particles(surface)
+        self.visual_effects.draw_movement_trails(surface)
+        
+        # Draw screen flash overlay (on top of everything except UI)
+        self.visual_effects.draw_screen_flash(surface)
         
         # Draw log history viewer if active
         if self.show_log_history:

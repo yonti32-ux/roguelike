@@ -5,12 +5,103 @@ Allows player to customize overworld settings before starting a new game.
 """
 
 import pygame
-from typing import Optional, TYPE_CHECKING
+import random
+import math
+from typing import Optional, TYPE_CHECKING, Dict, Any, List
 
 from settings import COLOR_BG, FPS
+from ui.screen_constants import (
+    COLOR_GRADIENT_START,
+    COLOR_GRADIENT_END,
+    COLOR_BG_PANEL,
+    COLOR_BORDER_BRIGHT,
+    COLOR_SHADOW,
+    COLOR_SELECTED_BG_BRIGHT,
+    COLOR_TITLE,
+    COLOR_SUBTITLE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_ACCENT_SUCCESS,
+    SHADOW_OFFSET_X,
+    SHADOW_OFFSET_Y,
+)
 
 if TYPE_CHECKING:
     from world.overworld.config import OverworldConfig
+
+
+class Particle:
+    """A small particle that moves randomly around the screen."""
+    
+    def __init__(self, screen_width: int, screen_height: int):
+        self.x = random.uniform(0, screen_width)
+        self.y = random.uniform(0, screen_height)
+        self.vx = random.uniform(-25, 25)  # Velocity X
+        self.vy = random.uniform(-25, 25)  # Velocity Y
+        self.size = random.uniform(1.5, 3.0)
+        # Subtle colors that fit the overworld theme
+        color_variants = [
+            (150, 170, 200, 180),  # Soft blue
+            (200, 200, 180, 160),  # Soft yellow
+            (180, 200, 220, 170),  # Light blue
+            (220, 220, 200, 150),  # Pale yellow
+            (160, 180, 200, 140),  # Muted blue
+            (180, 220, 200, 160),  # Soft green
+        ]
+        self.color = random.choice(color_variants)
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        # Random direction change timer
+        self.direction_change_timer = random.uniform(1.5, 4.0)
+        self.direction_timer = 0.0
+    
+    def update(self, dt: float):
+        """Update particle position and velocity."""
+        self.direction_timer += dt
+        
+        # Occasionally change direction randomly
+        if self.direction_timer >= self.direction_change_timer:
+            self.vx += random.uniform(-35, 35) * dt
+            self.vy += random.uniform(-35, 35) * dt
+            # Clamp velocity to reasonable range
+            self.vx = max(-50, min(50, self.vx))
+            self.vy = max(-50, min(50, self.vy))
+            self.direction_timer = 0.0
+            self.direction_change_timer = random.uniform(1.5, 4.0)
+        
+        # Update position
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        
+        # Wrap around screen edges
+        if self.x < 0:
+            self.x = self.screen_width
+        elif self.x > self.screen_width:
+            self.x = 0
+        if self.y < 0:
+            self.y = self.screen_height
+        elif self.y > self.screen_height:
+            self.y = 0
+    
+    def draw(self, surface: pygame.Surface):
+        """Draw the particle."""
+        if len(self.color) == 4:
+            # Create a small surface for the particle with alpha
+            particle_surf = pygame.Surface((int(self.size * 2), int(self.size * 2)), pygame.SRCALPHA)
+            pygame.draw.circle(
+                particle_surf,
+                self.color,
+                (int(self.size), int(self.size)),
+                int(self.size)
+            )
+            surface.blit(particle_surf, (int(self.x - self.size), int(self.y - self.size)))
+        else:
+            pygame.draw.circle(
+                surface,
+                self.color[:3],
+                (int(self.x), int(self.y)),
+                int(self.size)
+            )
 
 
 class OverworldConfigScene:
@@ -136,6 +227,16 @@ class OverworldConfigScene:
         self.zoom_index = self.config.default_zoom_index if hasattr(self.config, "default_zoom_index") else 1
         # Clamp zoom index to valid range
         self.zoom_index = max(0, min(self.zoom_index, len(self.zoom_levels) - 1))
+        
+        # Animation timer for background effects
+        self.animation_timer: float = 0.0
+        
+        # Initialize particles
+        w, h = screen.get_size()
+        self.particles: List[Particle] = []
+        num_particles = 50  # More particles for richer effect
+        for _ in range(num_particles):
+            self.particles.append(Particle(w, h))
     
     def run(self) -> Optional["OverworldConfig"]:
         """
@@ -146,6 +247,17 @@ class OverworldConfigScene:
         
         while True:
             dt = clock.tick(FPS) / 1000.0
+            
+            # Update animation timer
+            self.animation_timer += dt
+            
+            # Update particles
+            for particle in self.particles:
+                particle.update(dt)
+                # Update screen dimensions in case of resize
+                w, h = self.screen.get_size()
+                particle.screen_width = w
+                particle.screen_height = h
             
             # Cursor blink
             self.cursor_timer += dt
@@ -527,45 +639,95 @@ class OverworldConfigScene:
         self.gen_config.room_tags.shop["chance"] = self.shop_chance
     
     def draw(self) -> None:
-        """Draw the configuration screen."""
+        """Draw the configuration screen with polished styling."""
         screen = self.screen
-        screen.fill(COLOR_BG)
-        
         w, h = screen.get_size()
         
-        # Title
+        # Draw enhanced gradient background with animated effect
+        from ui.screen_components import draw_gradient_background
+        # Add subtle animation to gradient colors
+        pulse = math.sin(self.animation_timer * 0.5) * 5
+        start_color = tuple(min(255, max(0, c + int(pulse))) for c in COLOR_GRADIENT_START)
+        end_color = tuple(min(255, max(0, c + int(pulse * 0.7))) for c in COLOR_GRADIENT_END)
+        draw_gradient_background(
+            screen, 0, 0, w, h,
+            start_color, end_color, True
+        )
+        
+        # Draw particles (behind UI elements)
+        for particle in self.particles:
+            particle.draw(screen)
+        
+        # Title with shadow and subtle animation
         mode_text = "World Generation Presets" if self.mode == "preset" else "Advanced Options"
-        title_text = self.font_title.render(mode_text, True, (255, 255, 255))
-        title_rect = title_text.get_rect(center=(w // 2, 40))
-        screen.blit(title_text, title_rect)
+        title_color = COLOR_TITLE
+        title_pulse = int(8 * abs(math.sin(self.animation_timer * 1.5)))
+        title_color = tuple(min(255, c + title_pulse) for c in title_color)
         
-        # Mode indicator
-        mode_indicator = self.font_small.render(
-            f"[Press TAB to switch to {'Advanced Options' if self.mode == 'preset' else 'Presets'}]",
-            True, (150, 150, 255)
-        )
-        mode_rect = mode_indicator.get_rect(center=(w // 2, 70))
-        screen.blit(mode_indicator, mode_rect)
+        title_text = self.font_title.render(mode_text, True, title_color)
+        title_shadow = self.font_title.render(mode_text, True, COLOR_SHADOW[:3])
+        title_x = w // 2 - title_text.get_width() // 2
+        title_y = 40
         
-        # Instructions
-        help_text = self.font_small.render(
-            "Arrow Keys: Navigate | Enter: Edit/Cycle | TAB: Presets/Advanced | F: Finish | Q: Quit",
-            True, (200, 200, 200)
-        )
-        help_rect = help_text.get_rect(center=(w // 2, h - 60))
-        screen.blit(help_text, help_rect)
+        screen.blit(title_shadow, (title_x + SHADOW_OFFSET_X, title_y + SHADOW_OFFSET_Y))
+        screen.blit(title_text, (title_x, title_y))
         
-        # Start button
-        start_text = self.font_main.render(
-            "Press F to Finish and Start Game",
-            True, (100, 255, 100)
-        )
-        start_rect = start_text.get_rect(center=(w // 2, h - 30))
-        screen.blit(start_text, start_rect)
+        # Mode indicator panel
+        mode_text_str = f"Press TAB to switch to {'Advanced Options' if self.mode == 'preset' else 'Presets'}"
+        mode_indicator = self.font_small.render(mode_text_str, True, COLOR_SUBTITLE)
+        mode_panel_width = mode_indicator.get_width() + 40
+        mode_panel_height = 35
+        mode_panel_x = w // 2 - mode_panel_width // 2
+        mode_panel_y = 75
         
-        # Field labels and values
-        start_y = 120
-        line_height = 40
+        mode_panel = pygame.Surface((mode_panel_width, mode_panel_height), pygame.SRCALPHA)
+        mode_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(mode_panel, COLOR_BORDER_BRIGHT, (0, 0, mode_panel_width, mode_panel_height), 1)
+        screen.blit(mode_panel, (mode_panel_x, mode_panel_y))
+        screen.blit(mode_indicator, (mode_panel_x + 20, mode_panel_y + 8))
+        
+        # Instructions panel at bottom
+        help_text = "Arrow Keys: Navigate | Enter: Edit/Cycle | TAB: Presets/Advanced | F: Finish | Q: Quit"
+        help_surface = self.font_small.render(help_text, True, COLOR_TEXT)
+        help_panel_width = help_surface.get_width() + 40
+        help_panel_height = 35
+        help_panel_x = w // 2 - help_panel_width // 2
+        help_panel_y = h - 80
+        
+        help_panel = pygame.Surface((help_panel_width, help_panel_height), pygame.SRCALPHA)
+        help_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(help_panel, COLOR_BORDER_BRIGHT, (0, 0, help_panel_width, help_panel_height), 1)
+        screen.blit(help_panel, (help_panel_x, help_panel_y))
+        screen.blit(help_surface, (help_panel_x + 20, help_panel_y + 8))
+        
+        # Start button panel
+        start_text = "Press F to Finish and Start Game"
+        start_surface = self.font_main.render(start_text, True, COLOR_ACCENT_SUCCESS)
+        start_panel_width = start_surface.get_width() + 40
+        start_panel_height = 45
+        start_panel_x = w // 2 - start_panel_width // 2
+        start_panel_y = h - 35
+        
+        start_panel = pygame.Surface((start_panel_width, start_panel_height), pygame.SRCALPHA)
+        start_panel.fill((20, 50, 20, 220))
+        pygame.draw.rect(start_panel, COLOR_ACCENT_SUCCESS, (0, 0, start_panel_width, start_panel_height), 2)
+        screen.blit(start_panel, (start_panel_x, start_panel_y))
+        screen.blit(start_surface, (start_panel_x + 20, start_panel_y + 12))
+        
+        # Main content panel
+        panel_width = w - 80
+        panel_height = h - 250
+        panel_x = 40
+        panel_y = 120
+        
+        main_panel = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
+        main_panel.fill(COLOR_BG_PANEL)
+        pygame.draw.rect(main_panel, COLOR_BORDER_BRIGHT, (0, 0, panel_width, panel_height), 2)
+        screen.blit(main_panel, (panel_x, panel_y))
+        
+        # Field labels and values (modular dictionary for easy expansion)
+        start_y = panel_y + 20
+        line_height = 42
         field_labels = {
             "world_name": "World Name:",
             "terrain_preset": "Terrain Type:",
@@ -610,107 +772,148 @@ class OverworldConfigScene:
             is_selected = idx == self.selected_index
             is_editing = self.editing_field == field
             
-            # Highlight selected row
+            # Highlight selected row with better styling
             if is_selected:
-                highlight_rect = pygame.Rect(50, y - 5, w - 100, line_height - 5)
-                pygame.draw.rect(screen, (50, 50, 50), highlight_rect)
+                highlight_width = panel_width - 20
+                highlight_x = panel_x + 10
+                highlight_y = y - 3
+                highlight_height = line_height - 6
+                
+                highlight_surf = pygame.Surface((highlight_width, highlight_height), pygame.SRCALPHA)
+                highlight_surf.fill(COLOR_SELECTED_BG_BRIGHT)
+                screen.blit(highlight_surf, (highlight_x, highlight_y))
+                
+                # Left accent border (golden if editing, otherwise normal)
+                accent_color = (255, 215, 0) if is_editing else COLOR_TITLE
+                pygame.draw.rect(screen, accent_color, (highlight_x, highlight_y, 4, highlight_height))
+                
+                # Subtle top/bottom borders for better definition
+                pygame.draw.line(screen, COLOR_BORDER_BRIGHT, (highlight_x + 4, highlight_y), (highlight_x + highlight_width, highlight_y), 1)
+                pygame.draw.line(screen, COLOR_BORDER_BRIGHT, (highlight_x + 4, highlight_y + highlight_height - 1), (highlight_x + highlight_width, highlight_y + highlight_height - 1), 1)
             
-            # Label
-            label_text = self.font_main.render(field_labels[field], True, (255, 255, 255))
-            screen.blit(label_text, (60, y))
+            # Label with better color and icon indicator for editable fields
+            label_color = COLOR_TITLE if is_selected else COLOR_TEXT
+            label_text_str = field_labels[field]
             
-            # Value display
-            value = self._get_field_value(field)
-            if field == "terrain_preset" or field == "world_size" or field == "room_count_preset":
-                # Preset fields - show current preset
-                if is_selected:
-                    if field == "world_size":
-                        display_text = f"{value} ({self.world_width}x{self.world_height}) (Press Enter or 1-4 to cycle)"
-                    else:
-                        display_text = f"{value} (Press Enter to cycle)"
-                    value_color = (100, 255, 100)  # Green when selected
-                else:
-                    if field == "world_size":
-                        display_text = f"{value} ({self.world_width}x{self.world_height})"
-                    else:
-                        display_text = str(value)
-                    value_color = (200, 200, 200)
-            elif field == "default_zoom":
-                # Zoom field - show current zoom level
-                if is_selected:
-                    display_text = f"{int(self.zoom_levels[self.zoom_index] * 100)}% (Press Enter to cycle)"
-                    value_color = (100, 255, 100)  # Green when selected
-                else:
-                    display_text = f"{int(self.zoom_levels[self.zoom_index] * 100)}%"
-                    value_color = (200, 200, 200)
-            elif field == "gen_preset" or field == "room_count_preset":
-                # Preset fields - show current preset
-                if is_selected:
-                    display_text = f"{value} (Press Enter to cycle)"
-                    value_color = (100, 255, 100)  # Green when selected
-                else:
-                    display_text = str(value)
-                    value_color = (200, 200, 200)
-            elif field == "world_name":
-                # World name field - show name and randomize hint
+            # Add visual indicator for editable/cyclable fields
+            if field in ("world_name", "world_width", "world_height", "poi_density", "seed", "sight_radius", "shop_chance"):
                 if is_editing:
-                    display_text = self.text_buffer
-                    if self.cursor_visible:
-                        display_text += "_"
-                    value_color = (100, 255, 100)  # Green when editing
-                elif is_selected:
-                    display_text = f"{value} (Press R to randomize)"
-                    value_color = (100, 255, 100)  # Green when selected
+                    label_text_str = "✎ " + label_text_str  # Pencil icon when editing
                 else:
-                    display_text = str(value)
-                    value_color = (200, 200, 200)
-            elif is_editing:
-                # Show text buffer with cursor
-                display_text = self.text_buffer
-                if self.cursor_visible:
-                    display_text += "_"
-                value_color = (100, 255, 100)  # Green when editing
-            else:
-                if field == "seed" and value == "":
-                    display_text = "(random)"
-                elif field == "poi_density":
-                    display_text = f"{value:.2f}"
-                    if is_selected and not is_editing:
-                        display_text += " (Press Enter to edit)"
-                    value_color = (200, 200, 200) if not is_selected else (255, 255, 255)
-                elif field == "shop_chance":
-                    display_text = f"{value:.2f}"
-                    value_color = (200, 200, 200) if not is_selected else (255, 255, 255)
-                else:
-                    display_text = str(value)
-                    if is_selected and field == "seed" and not is_editing:
-                        display_text += " (Press Enter to edit)"
-                    value_color = (200, 200, 200) if not is_selected else (255, 255, 255)
+                    label_text_str = "→ " + label_text_str  # Arrow when selectable
+            elif field in ("terrain_preset", "world_size", "room_count_preset", "default_zoom", "gen_preset"):
+                label_text_str = "⟲ " + label_text_str  # Cycle icon for preset fields
+            
+            label_text = self.font_main.render(label_text_str, True, label_color)
+            screen.blit(label_text, (panel_x + 30, y))
+            
+            # Value display (modular rendering - easy to extend)
+            value = self._get_field_value(field)
+            display_text, value_color = self._format_field_display(field, value, is_selected, is_editing)
             
             value_text = self.font_main.render(display_text, True, value_color)
-            screen.blit(value_text, (350, y))
+            screen.blit(value_text, (panel_x + 320, y))
             
-            # Description (small, gray)
+            # Description (small, gray) - positioned better
             description = field_descriptions.get(field, "")
             if description:
                 desc_text = self.font_small.render(
                     description,
-                    True, (150, 150, 150)
+                    True, COLOR_TEXT_DIM
                 )
-                screen.blit(desc_text, (550, y + 5))
+                screen.blit(desc_text, (panel_x + 520, y + 5))
         
-        # Additional info
+        # Additional info panel
         info_y = start_y + len(self.fields) * line_height + 20
-        if self.mode == "preset":
-            preset_text = self.font_small.render(
-                "World Size quick keys (when World Size selected): 1=Small 2=Medium 3=Large 4=Huge",
-                True, (150, 150, 150)
-            )
-            screen.blit(preset_text, (60, info_y))
+        if info_y < panel_y + panel_height - 30:
+            if self.mode == "preset":
+                info_text = "World Size quick keys (when World Size selected): 1=Small 2=Medium 3=Large 4=Huge"
+            else:
+                info_text = "Quick presets (when World Width is selected): 1=Small 2=Medium 3=Large 4=Huge"
+            
+            info_surface = self.font_small.render(info_text, True, COLOR_TEXT_DIM)
+            info_panel_width = info_surface.get_width() + 40
+            info_panel_height = 30
+            info_panel_x = panel_x + 10
+            info_panel_y = info_y
+            
+            info_panel = pygame.Surface((info_panel_width, info_panel_height), pygame.SRCALPHA)
+            info_panel.fill((20, 25, 35, 180))
+            pygame.draw.rect(info_panel, COLOR_BORDER_BRIGHT, (0, 0, info_panel_width, info_panel_height), 1)
+            screen.blit(info_panel, (info_panel_x, info_panel_y))
+            screen.blit(info_surface, (info_panel_x + 20, info_panel_y + 6))
+    
+    def _format_field_display(self, field: str, value: Any, is_selected: bool, is_editing: bool) -> tuple[str, tuple[int, int, int]]:
+        """
+        Format field display text and color. 
+        Modular function - easy to extend for new field types.
+        
+        Returns:
+            (display_text, color_tuple)
+        """
+        # Preset fields (cycle through options)
+        if field in ("terrain_preset", "world_size", "room_count_preset", "gen_preset"):
+            if is_selected:
+                if field == "world_size":
+                    display_text = f"{value} ({self.world_width}x{self.world_height}) (Press Enter or 1-4 to cycle)"
+                else:
+                    display_text = f"{value} (Press Enter to cycle)"
+                value_color = COLOR_ACCENT_SUCCESS
+            else:
+                if field == "world_size":
+                    display_text = f"{value} ({self.world_width}x{self.world_height})"
+                else:
+                    display_text = str(value)
+                value_color = COLOR_TEXT if is_selected else COLOR_TEXT_DIM
+        
+        # Zoom field
+        elif field == "default_zoom":
+            if is_selected:
+                display_text = f"{int(self.zoom_levels[self.zoom_index] * 100)}% (Press Enter to cycle)"
+                value_color = COLOR_ACCENT_SUCCESS
+            else:
+                display_text = f"{int(self.zoom_levels[self.zoom_index] * 100)}%"
+                value_color = COLOR_TEXT if is_selected else COLOR_TEXT_DIM
+        
+        # World name field
+        elif field == "world_name":
+            if is_editing:
+                display_text = self.text_buffer
+                if self.cursor_visible:
+                    display_text += "_"
+                value_color = COLOR_ACCENT_SUCCESS
+            elif is_selected:
+                display_text = f"{value} (Press R to randomize)"
+                value_color = COLOR_ACCENT_SUCCESS
+            else:
+                display_text = str(value)
+                value_color = COLOR_TEXT if is_selected else COLOR_TEXT_DIM
+        
+        # Text input fields
+        elif is_editing:
+            display_text = self.text_buffer
+            if self.cursor_visible:
+                # Animated cursor with pulse effect
+                cursor_pulse = int(5 * abs(math.sin(self.animation_timer * 8)))
+                display_text += "_"
+            value_color = COLOR_ACCENT_SUCCESS
+        
+        # Other fields
         else:
-            preset_text = self.font_small.render(
-                "Quick presets (when World Width is selected): 1=Small 2=Medium 3=Large 4=Huge",
-                True, (150, 150, 150)
-            )
-            screen.blit(preset_text, (60, info_y))
+            if field == "seed" and value == "":
+                display_text = "(random)"
+            elif field == "poi_density":
+                display_text = f"{value:.2f}"
+                if is_selected and not is_editing:
+                    display_text += " (Press Enter to edit)"
+            elif field == "shop_chance":
+                display_text = f"{value:.2f}"
+            else:
+                display_text = str(value)
+                if is_selected and field == "seed" and not is_editing:
+                    display_text += " (Press Enter to edit)"
+            
+            value_color = COLOR_TEXT if is_selected else COLOR_TEXT_DIM
+        
+        return display_text, value_color
 

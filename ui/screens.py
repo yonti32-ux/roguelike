@@ -19,6 +19,7 @@ from ui.fullscreen_screens.inventory_screen import draw_inventory_fullscreen
 from ui.fullscreen_screens.character_screen import draw_character_sheet_fullscreen
 from ui.fullscreen_screens.shop_screen import draw_shop_fullscreen
 from ui.fullscreen_screens.skill_screen import draw_skill_screen_fullscreen
+from ui.fullscreen_screens.skill_management_screen import draw_skill_management_screen_fullscreen
 from ui.fullscreen_screens.recruitment_screen import draw_recruitment_fullscreen
 from ui.fullscreen_screens.quest_screen import draw_quest_fullscreen
 from ui.hud_screens import _process_inventory_items
@@ -50,12 +51,63 @@ class InventoryScreen:
     """
 
     def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
-        # Handle mouse events for tooltips
+        # Handle mouse events for tooltips, hover, and clicking
         if event.type == pygame.MOUSEMOTION:
             mx, my = event.pos
             # Check if mouse is over an item (this will be handled in draw_inventory_fullscreen)
-            game.tooltip.mouse_pos = (mx, my)
+            tooltip = getattr(game, "tooltip", None)
+            if tooltip:
+                tooltip.mouse_pos = (mx, my)
             return
+        
+        # Handle mouse clicks for selecting and equipping items
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                mx, my = event.pos
+                item_positions = getattr(game, "inventory_item_positions", None)
+                item_key_to_index = getattr(game, "inventory_item_key_to_index", None)
+                flat_list = getattr(game, "inventory_flat_list", None)
+                item_indices = getattr(game, "inventory_item_indices", None)
+                
+                if item_positions and item_key_to_index and flat_list and item_indices:
+                    # Check if mouse is over an item
+                    # item_positions now uses (item_id, flat_idx) as keys
+                    clicked_item_key = None
+                    for item_key, (rect_x, rect_y, rect_width, rect_height) in item_positions.items():
+                        item_rect = pygame.Rect(rect_x, rect_y, rect_width, rect_height)
+                        if item_rect.collidepoint(mx, my):
+                            clicked_item_key = item_key
+                            break
+                    
+                    if clicked_item_key:
+                        item_id, flat_idx = clicked_item_key
+                        # Get the global index for this specific item instance
+                        clicked_global_idx = item_key_to_index.get(clicked_item_key)
+                        if clicked_global_idx is not None:
+                            # Update cursor to the clicked item
+                            game.inventory_cursor = clicked_global_idx
+                            
+                            # Equip or use the item
+                            # For duplicate items, we need to find the specific instance
+                            # Get the item from the flat_list at the correct position
+                            from systems.inventory import get_item_def
+                            item_def = get_item_def(item_id)
+                            if item_def is not None:
+                                if item_def.slot == "consumable":
+                                    # Use consumable - need to use the specific instance
+                                    # Find which instance this is in the inventory
+                                    if hasattr(game, "use_consumable_from_inventory"):
+                                        # Pass the flat_idx to identify which instance
+                                        # We'll need to modify the function or find the item differently
+                                        # For now, use the item_id and let the system handle it
+                                        game.use_consumable_from_inventory(item_id)
+                                else:
+                                    # Equip the item
+                                    # The inventory system should handle which instance to equip
+                                    # We pass the item_id and let it find the appropriate instance
+                                    if hasattr(game, "equip_item_for_inventory_focus"):
+                                        game.equip_item_for_inventory_focus(item_id)
+                            return
         
         if event.type != pygame.KEYDOWN:
             return
@@ -563,29 +615,79 @@ class SkillScreen(BaseScreen):
     """
 
     def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        skill_screen_core = getattr(game, "skill_screen", None)
+        
         if event.type != pygame.KEYDOWN:
-            # Handle mouse events for skill tree interaction
-            skill_screen_core = getattr(game, "skill_screen", None)
+            # Handle mouse events for skill tree interaction and tab switching
             if skill_screen_core is not None:
                 # Mouse click support
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:  # Left click
                         mx, my = event.pos
+                        w, h = game.screen.get_size()
+                        
+                        # Check if clicking on tabs
+                        tab_y = 80
+                        tab_x = 50
+                        tab_width = 200
+                        tab_height = 35
+                        
+                        # Tree tab
+                        tree_rect = pygame.Rect(tab_x, tab_y, tab_width, tab_height)
+                        if tree_rect.collidepoint(mx, my):
+                            skill_screen_core.current_tab = "tree"
+                            return
+                        
+                        # Management tab
+                        mgmt_rect = pygame.Rect(tab_x + tab_width + 10, tab_y, tab_width, tab_height)
+                        if mgmt_rect.collidepoint(mx, my):
+                            skill_screen_core.current_tab = "management"
+                            return
+                        
+                        # Handle skill management screen clicks
+                        if skill_screen_core.current_tab == "management":
+                            from ui.fullscreen_screens.skill_management_screen import SkillManagementScreen
+                            skill_mgmt_screen = getattr(game, "skill_management_screen", None)
+                            if skill_mgmt_screen:
+                                skill_mgmt_screen.handle_click(mx, my, w, h)
+                            return
+                        
+                        # Handle skill tree clicks
                         clicked_skill_id = skill_screen_core.get_node_at_screen_pos(
-                            mx, my, game.screen.get_width(), game.screen.get_height()
+                            mx, my, w, h
                         )
                         if clicked_skill_id:
                             skill_screen_core.selected_skill_id = clicked_skill_id
                     elif event.button == 4:  # Mouse wheel up
-                        skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
+                        if skill_screen_core.current_tab == "tree":
+                            skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
                     elif event.button == 5:  # Mouse wheel down
-                        skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+                        if skill_screen_core.current_tab == "tree":
+                            skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+                elif event.type == pygame.MOUSEMOTION:
+                    # Handle mouse motion for skill management hover
+                    if skill_screen_core and skill_screen_core.current_tab == "management":
+                        from ui.fullscreen_screens.skill_management_screen import SkillManagementScreen
+                        skill_mgmt_screen = getattr(game, "skill_management_screen", None)
+                        if skill_mgmt_screen:
+                            mx, my = event.pos
+                            w, h = game.screen.get_size()
+                            skill_mgmt_screen.handle_mouse_motion(mx, my, w, h)
             return
 
         input_manager = getattr(game, "input_manager", None)
         key = event.key
         skill_screen_core = getattr(game, "skill_screen", None)
 
+        # Tab switching (1/2 keys)
+        if skill_screen_core:
+            if key == pygame.K_1:
+                skill_screen_core.current_tab = "tree"
+                return
+            if key == pygame.K_2:
+                skill_screen_core.current_tab = "management"
+                return
+        
         # Screen switching with TAB (before close check)
         if key == pygame.K_TAB:
             # Check if shift is held for reverse direction
@@ -701,3 +803,101 @@ class SkillScreen(BaseScreen):
     def draw(self, game: "Game") -> None:
         """Render the full-screen skill allocation view."""
         draw_skill_screen_fullscreen(game)
+
+
+class SkillManagementScreen(BaseScreen):
+    """
+    Screen wrapper for the skill management overlay.
+    
+    Allows players to assign skills to hotbar slots.
+    """
+    
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        skill_mgmt_screen = getattr(game, "skill_management_screen", None)
+        if skill_mgmt_screen is None:
+            return
+        
+        # Handle mouse events
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                mx, my = event.pos
+                w, h = game.screen.get_size()
+                skill_mgmt_screen.handle_click(mx, my, w, h)
+            return
+        
+        if event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            w, h = game.screen.get_size()
+            skill_mgmt_screen.handle_mouse_motion(mx, my, w, h)
+            return
+        
+        if event.type != pygame.KEYDOWN:
+            return
+        
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+        
+        # Screen switching with TAB
+        if key == pygame.K_TAB:
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+        
+        # Close skill management screen (T or ESC)
+        should_close = False
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CANCEL, event):
+                should_close = True
+        else:
+            if key in (pygame.K_ESCAPE, pygame.K_t):
+                should_close = True
+        
+        if should_close:
+            game.ui_screen_manager.show_skill_management = False
+            if getattr(game, "active_screen", None) is self:
+                game.active_screen = None
+            return
+        
+        # Switch character with Q/E
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.FOCUS_PREV, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_mgmt_screen.focus_index = (skill_mgmt_screen.focus_index - 1) % total_slots
+                return
+            if input_manager.event_matches_action(InputAction.FOCUS_NEXT, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_mgmt_screen.focus_index = (skill_mgmt_screen.focus_index + 1) % total_slots
+                return
+        else:
+            if key == pygame.K_q:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_mgmt_screen.focus_index = (skill_mgmt_screen.focus_index - 1) % total_slots
+                return
+            elif key == pygame.K_e:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_mgmt_screen.focus_index = (skill_mgmt_screen.focus_index + 1) % total_slots
+                return
+    
+    def draw(self, game: "Game") -> None:
+        """Render the full-screen skill management view."""
+        draw_skill_management_screen_fullscreen(game)

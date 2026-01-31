@@ -89,6 +89,12 @@ def create_default_input_manager() -> InputManager:
     mgr.bind_key(InputAction.SKILL_2, pygame.K_e)
     mgr.bind_key(InputAction.SKILL_3, pygame.K_f)
     mgr.bind_key(InputAction.SKILL_4, pygame.K_r)
+    
+    # Extended hotbar layout: 5 / 6 / 7 / 8 -> skill slots 5–8
+    mgr.bind_key(InputAction.SKILL_5, pygame.K_5)
+    mgr.bind_key(InputAction.SKILL_6, pygame.K_6)
+    mgr.bind_key(InputAction.SKILL_7, pygame.K_7)
+    mgr.bind_key(InputAction.SKILL_8, pygame.K_8)
 
     # Dedicated Guard key: always uses the 'guard' skill if the unit has it
     mgr.bind_key(InputAction.GUARD, pygame.K_g)

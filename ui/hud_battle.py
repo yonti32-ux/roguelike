@@ -157,16 +157,11 @@ def _draw_battle_skill_hotbar(
     surface.blit(panel_surf, (x - 20, y - 15))
     
     slot_x = x
-    slot_actions = [
-        "SKILL_1",
-        "SKILL_2", 
-        "SKILL_3",
-        "SKILL_4",
-    ]
+    # Support up to 8 skill slots
+    from settings import MAX_SKILL_SLOTS
+    max_slots = min(MAX_SKILL_SLOTS, len(skill_slots))
     
-    for idx, skill_id in enumerate(skill_slots[:4]):
-        if idx >= len(slot_actions):
-            break
+    for idx, skill_id in enumerate(skill_slots[:max_slots]):
         
         # Get skill
         skill = skills.get(skill_id) if skill_id else None
@@ -180,6 +175,10 @@ def _draw_battle_skill_hotbar(
                     1: InputAction.SKILL_2,
                     2: InputAction.SKILL_3,
                     3: InputAction.SKILL_4,
+                    4: InputAction.SKILL_5,
+                    5: InputAction.SKILL_6,
+                    6: InputAction.SKILL_7,
+                    7: InputAction.SKILL_8,
                 }
                 if idx in action_map:
                     bound_keys = input_manager.get_bindings(action_map[idx])
@@ -280,7 +279,6 @@ def _draw_battle_skill_hotbar(
         guard_key_label = ""
         if input_manager is not None:
             try:
-                from systems.input import InputAction
                 guard_keys = input_manager.get_bindings(InputAction.GUARD)
                 if guard_keys:
                     guard_key_label = pygame.key.name(list(guard_keys)[0]).upper()

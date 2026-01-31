@@ -205,10 +205,32 @@ class BattleCombat:
             "is_crit": is_crit,
         })
         
+        # Add visual effects
+        self.scene.visual_effects.add_hit_particles(
+            target_x, target_y,
+            count=10 if is_crit else 6,
+            is_crit=is_crit,
+        )
+        
+        # Screen shake based on damage
+        if damage >= 20:
+            shake_intensity = min(8.0, damage / 5.0)
+            self.scene.visual_effects.add_screen_shake(shake_intensity, 0.3)
+        elif is_crit:
+            self.scene.visual_effects.add_screen_shake(5.0, 0.25)
+        
+        # Screen flash for crits
+        if is_crit:
+            self.scene.visual_effects.add_screen_flash((255, 255, 150), 0.2, 80.0)
+        
         current_hp = getattr(target.entity, "hp", 0)
         was_alive = current_hp > 0
         setattr(target.entity, "hp", max(0, current_hp - damage))
         is_kill = was_alive and getattr(target.entity, "hp", 0) <= 0
+        
+        # Update health bar target for smooth animation
+        new_hp_ratio = getattr(target.entity, "hp", 0) / target.max_hp if target.max_hp > 0 else 0.0
+        self.scene.visual_effects.set_health_bar_target(target, new_hp_ratio)
         
         # Store damage for floating number display
         # Increased duration: crits 2.0s, normal 1.8s (was 1.2s and 1.0s)

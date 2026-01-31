@@ -1758,6 +1758,13 @@ class Game:
                 from settings import FPS
                 dt = 1.0 / FPS  # Approximate dt for cursor blink
                 self.skill_screen.update(dt)
+            # Update skill management screen visual state
+            elif hasattr(self, "skill_management_screen_wrapper") and self.active_screen is self.skill_management_screen_wrapper:
+                from settings import FPS
+                dt = 1.0 / FPS
+                skill_mgmt_screen = getattr(self, "skill_management_screen", None)
+                if skill_mgmt_screen:
+                    skill_mgmt_screen.update(dt)
         
         # Draw pause overlay if paused (pause menu handles its own drawing)
         # The pause menu is drawn by _handle_pause_menu, so we don't need to draw it here

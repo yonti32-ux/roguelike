@@ -339,14 +339,22 @@ class BattleRenderer:
         is_player: bool,
     ) -> None:
         """
-        Draw a small HP bar just above the unit's rectangle.
+        Draw a small HP bar just above the unit's rectangle with smooth animation.
         """
         max_hp = unit.max_hp
         if max_hp <= 0:
             return
 
-        hp = max(0, min(unit.hp, max_hp))
-        ratio = hp / float(max_hp)
+        # Use smooth animated ratio from visual effects manager
+        unit_id = id(unit)
+        animated_ratio = self.scene.visual_effects.get_health_bar_ratio(unit)
+        # Initialize if not in animation system yet
+        if unit_id not in self.scene.visual_effects.health_bar_current:
+            hp = max(0, min(unit.hp, max_hp))
+            actual_ratio = hp / float(max_hp) if max_hp > 0 else 0.0
+            # Initialize in visual effects system
+            self.scene.visual_effects.set_health_bar_target(unit, actual_ratio)
+            animated_ratio = actual_ratio
 
         bar_height = 6
         bar_width = rect.width
@@ -357,13 +365,26 @@ class BattleRenderer:
         bg_rect = pygame.Rect(bar_x, bar_y, bar_width, bar_height)
         pygame.draw.rect(surface, (25, 25, 32), bg_rect)
 
-        if ratio <= 0.0:
+        if animated_ratio <= 0.0:
             return
 
-        fg_width = max(1, int(bar_width * ratio))
+        fg_width = max(1, int(bar_width * animated_ratio))
         color = COLOR_PLAYER if is_player else COLOR_ENEMY
+        
+        # Add gradient effect for health bar
         fg_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height)
+        
+        # Draw main health bar
         pygame.draw.rect(surface, color, fg_rect)
+        
+        # Add highlight on top (lighter shade)
+        if fg_width > 2:
+            highlight_color = tuple(min(255, c + 40) for c in color)
+            highlight_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height // 2)
+            pygame.draw.rect(surface, highlight_color, highlight_rect)
+        
+        # Add border
+        pygame.draw.rect(surface, (255, 255, 255, 50), bg_rect, 1)
 
     def draw_units(self, surface: pygame.Surface, screen_w: int) -> None:
         """Draw all units on the battle grid."""
