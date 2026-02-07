@@ -189,6 +189,7 @@ BANDIT_PARTY = register_party_type(
         spawn_weight=2.5,
         avoids_poi_types=["town"],  # Avoid towns with guards
         faction_id="bandit_confederacy",  # Bandits belong to bandit confederacy
+        battle_unit_template="bandit_cutthroat",
         can_join_battle=True,
     )
 )
@@ -210,6 +211,7 @@ MONSTER_PACK = register_party_type(
         icon="M",
         spawn_weight=2.0,
         avoids_poi_types=["town", "village"],
+        battle_unit_template="orc_raider",
         can_join_battle=True,
     )
 )
@@ -231,6 +233,7 @@ WOLF_PACK = register_party_type(
         icon="W",
         spawn_weight=1.5,
         avoids_poi_types=["town", "village"],
+        battle_unit_template="goblin_skirmisher",  # Fast, agile fighters
     )
 )
 
@@ -318,6 +321,7 @@ CULTIST_GATHERING = register_party_type(
         spawn_weight=1.0,
         avoids_poi_types=["town", "village"],
         faction_id="shadow_cult",  # Cultists belong to shadow cult
+        battle_unit_template="bandit_cutthroat",  # Use bandit template for cultists
         can_join_battle=True,
     )
 )
@@ -340,6 +344,7 @@ ORC_RAIDING_PARTY = register_party_type(
         spawn_weight=1.5,
         avoids_poi_types=["town"],
         faction_id="bandit_confederacy",  # Orcs belong to bandit confederacy
+        battle_unit_template="orc_raider",
         can_join_battle=True,
     )
 )
@@ -402,6 +407,7 @@ GOBLIN_WARBAND = register_party_type(
         spawn_weight=2.0,
         avoids_poi_types=["town"],
         faction_id="bandit_confederacy",  # Goblins belong to bandit confederacy
+        battle_unit_template="goblin_skirmisher",
         can_join_battle=True,
     )
 )
@@ -426,27 +432,627 @@ PILGRIM_GROUP = register_party_type(
     )
 )
 
+# Natural/Wildlife Parties
+BEAR_PACK = register_party_type(
+    PartyType(
+        id="bear",
+        name="Bear Pack",
+        description="A group of bears foraging in the wilderness.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.0,
+        sight_range=6,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(139, 90, 43),  # Brown
+        icon="B",
+        spawn_weight=1.0,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="orc_raider",  # Strong melee fighters
+    )
+)
+
+DEER_HERD = register_party_type(
+    PartyType(
+        id="deer",
+        name="Deer Herd",
+        description="A herd of deer grazing peacefully.",
+        alignment=PartyAlignment.NEUTRAL,
+        behavior=PartyBehavior.WANDER,
+        speed=1.4,
+        sight_range=8,
+        can_attack=False,
+        can_be_attacked=True,
+        combat_strength=1,
+        color=(205, 133, 63),  # Tan
+        icon="D",
+        spawn_weight=1.5,
+        avoids_poi_types=["town", "village"],
+        # No battle_unit_template - they flee rather than fight
+    )
+)
+
+BIRD_FLOCK = register_party_type(
+    PartyType(
+        id="bird",
+        name="Bird Flock",
+        description="A flock of birds flying overhead.",
+        alignment=PartyAlignment.NEUTRAL,
+        behavior=PartyBehavior.WANDER,
+        speed=1.6,
+        sight_range=10,
+        can_attack=False,
+        can_be_attacked=False,  # Too fast to catch
+        combat_strength=1,
+        color=(255, 255, 255),  # White
+        icon="b",
+        spawn_weight=2.0,
+        # No battle_unit_template - they don't fight
+    )
+)
+
+# More Enemy Variations
+BANDIT_ROGUE = register_party_type(
+    PartyType(
+        id="bandit_rogue",
+        name="Bandit Rogue",
+        description="A skilled rogue leading a small bandit group.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.2,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(150, 0, 0),  # Dark red
+        icon="R",
+        spawn_weight=1.5,
+        avoids_poi_types=["town"],
+        faction_id="bandit_confederacy",
+        battle_unit_template="bandit_cutthroat",
+        can_join_battle=True,
+    )
+)
+
+MONSTER_BRUTE = register_party_type(
+    PartyType(
+        id="monster_brute",
+        name="Monster Brute",
+        description="A large, powerful monster leading a pack.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.1,
+        sight_range=9,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(100, 0, 100),  # Dark purple
+        icon="M",
+        spawn_weight=1.0,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="orc_raider",
+        can_join_battle=True,
+    )
+)
+
+SKELETON_WARBAND = register_party_type(
+    PartyType(
+        id="skeleton",
+        name="Skeleton Warband",
+        description="Undead skeletons roaming the land.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.9,
+        sight_range=5,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(200, 200, 200),  # Gray-white
+        icon="S",
+        spawn_weight=1.2,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="skeleton_archer",
+        can_join_battle=True,
+    )
+)
+
+# More Ally Variations
+KNIGHT_PATROL = register_party_type(
+    PartyType(
+        id="knight",
+        name="Knight Patrol",
+        description="Elite knights on patrol.",
+        alignment=PartyAlignment.FRIENDLY,
+        behavior=PartyBehavior.PATROL,
+        speed=1.1,
+        sight_range=8,
+        can_attack=True,
+        can_be_attacked=False,
+        combat_strength=4,
+        color=(192, 192, 192),  # Silver
+        icon="K",
+        spawn_weight=0.8,
+        preferred_poi_types=["town"],
+        faction_id="kingdom_aetheria",
+        battle_unit_template="dread_knight",
+        can_join_battle=True,
+    )
+)
+
+MERCENARY_COMPANY = register_party_type(
+    PartyType(
+        id="mercenary",
+        name="Mercenary Company",
+        description="A company of professional mercenaries.",
+        alignment=PartyAlignment.NEUTRAL,
+        behavior=PartyBehavior.TRAVEL,
+        speed=1.0,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(128, 128, 128),  # Gray
+        icon="M",
+        spawn_weight=0.6,
+        preferred_poi_types=["town"],
+        faction_id="free_cities",
+        battle_unit_template="bandit_cutthroat",
+        can_join_battle=True,
+    )
+)
+
 # Set up relationships
-GUARD_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin"}
-GUARD_PATROL.ally_types = {"merchant", "villager", "adventurer", "ranger", "trader", "scout", "pilgrim"}
+GUARD_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+GUARD_PATROL.ally_types = {"merchant", "villager", "adventurer", "ranger", "trader", "scout", "pilgrim", "knight"}
 
-MERCHANT_PARTY.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin"}
-MERCHANT_PARTY.ally_types = {"guard", "villager", "ranger"}
+MERCHANT_PARTY.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+MERCHANT_PARTY.ally_types = {"guard", "villager", "ranger", "knight"}
 
-VILLAGER_PARTY.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin"}
-VILLAGER_PARTY.ally_types = {"guard", "merchant", "ranger", "trader", "pilgrim"}
+VILLAGER_PARTY.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+VILLAGER_PARTY.ally_types = {"guard", "merchant", "ranger", "trader", "pilgrim", "knight"}
 
-RANGER_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin"}
-RANGER_PATROL.ally_types = {"guard", "merchant", "villager", "adventurer", "scout"}
+RANGER_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+RANGER_PATROL.ally_types = {"guard", "merchant", "villager", "adventurer", "scout", "knight"}
 
-BANDIT_PARTY.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble"}
-MONSTER_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader"}
+KNIGHT_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton"}
+KNIGHT_PATROL.ally_types = {"guard", "merchant", "villager", "ranger", "adventurer", "scout", "pilgrim"}
+
+BANDIT_PARTY.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble", "knight"}
+BANDIT_ROGUE.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble", "knight"}
+
+MONSTER_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+MONSTER_BRUTE.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+
 WOLF_PACK.enemy_types = {"merchant", "villager", "pilgrim"}
-CULTIST_GATHERING.enemy_types = {"guard", "ranger", "adventurer", "scout"}
-ORC_RAIDING_PARTY.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "noble"}
-GOBLIN_WARBAND.enemy_types = {"merchant", "villager", "guard", "ranger"}
-TRADER_CARAVAN.enemy_types = {"bandit", "monster", "orc", "goblin"}
-NOBLE_ENTOURAGE.enemy_types = {"bandit", "orc", "goblin"}
-SCOUT_PARTY.enemy_types = {"cultist", "orc", "goblin"}
-PILGRIM_GROUP.enemy_types = {"bandit", "monster", "wolf", "orc", "goblin"}
+BEAR_PACK.enemy_types = {"merchant", "villager", "pilgrim", "deer"}
 
+CULTIST_GATHERING.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
+ORC_RAIDING_PARTY.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "noble", "knight"}
+GOBLIN_WARBAND.enemy_types = {"merchant", "villager", "guard", "ranger", "knight"}
+SKELETON_WARBAND.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+
+TRADER_CARAVAN.enemy_types = {"bandit", "monster", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+NOBLE_ENTOURAGE.enemy_types = {"bandit", "orc", "goblin", "bandit_rogue"}
+SCOUT_PARTY.enemy_types = {"cultist", "orc", "goblin", "skeleton"}
+PILGRIM_GROUP.enemy_types = {"bandit", "monster", "wolf", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+
+MERCENARY_COMPANY.enemy_types = {"bandit", "orc", "goblin", "bandit_rogue", "skeleton"}
+MERCENARY_COMPANY.ally_types = {"guard", "knight", "ranger"}
+
+# More Enemy Variations - Humanoid Types
+THIEF_GANG = register_party_type(
+    PartyType(
+        id="thief",
+        name="Thief Gang",
+        description="A group of thieves and pickpockets.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.3,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(100, 50, 0),  # Brown
+        icon="T",
+        spawn_weight=1.8,
+        avoids_poi_types=["town"],  # Avoid guards
+        faction_id="bandit_confederacy",
+        battle_unit_template="bandit_cutthroat",
+        can_join_battle=True,
+    )
+)
+
+ASSASSIN_CREW = register_party_type(
+    PartyType(
+        id="assassin",
+        name="Assassin Crew",
+        description="A deadly group of assassins.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.4,
+        sight_range=9,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(50, 0, 0),  # Dark red
+        icon="A",
+        spawn_weight=0.8,
+        avoids_poi_types=["town", "village"],
+        faction_id="bandit_confederacy",
+        battle_unit_template="shadow_stalker",
+        can_join_battle=True,
+    )
+)
+
+RAIDER_BAND = register_party_type(
+    PartyType(
+        id="raider",
+        name="Raider Band",
+        description="A band of ruthless raiders.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.2,
+        sight_range=8,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(139, 0, 0),  # Dark red
+        icon="R",
+        spawn_weight=1.5,
+        avoids_poi_types=["town"],
+        faction_id="bandit_confederacy",
+        battle_unit_template="orc_raider",
+        can_join_battle=True,
+    )
+)
+
+# More Undead Types
+GHOUL_PACK = register_party_type(
+    PartyType(
+        id="ghoul",
+        name="Ghoul Pack",
+        description="A pack of hungry ghouls.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.1,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(100, 100, 100),  # Gray
+        icon="G",
+        spawn_weight=1.2,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="ghoul_ripper",
+        can_join_battle=True,
+    )
+)
+
+ZOMBIE_HORDE = register_party_type(
+    PartyType(
+        id="zombie",
+        name="Zombie Horde",
+        description="A shambling horde of zombies.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.7,
+        sight_range=4,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(50, 100, 50),  # Sickly green
+        icon="Z",
+        spawn_weight=1.5,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="ghoul_ripper",
+        can_join_battle=True,
+    )
+)
+
+WRAITH_PACK = register_party_type(
+    PartyType(
+        id="wraith",
+        name="Wraith Pack",
+        description="Ethereal wraiths haunting the land.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.3,
+        sight_range=8,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(150, 150, 200),  # Pale blue
+        icon="W",
+        spawn_weight=1.0,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="banshee",
+        can_join_battle=True,
+    )
+)
+
+# More Magical/Arcane Enemies
+MAGE_CABAL = register_party_type(
+    PartyType(
+        id="mage",
+        name="Mage Cabal",
+        description="A group of dark mages.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.9,
+        sight_range=8,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(75, 0, 130),  # Indigo
+        icon="M",
+        spawn_weight=1.0,
+        avoids_poi_types=["town", "village"],
+        faction_id="shadow_cult",
+        battle_unit_template="dark_adept",
+        can_join_battle=True,
+    )
+)
+
+WARLOCK_COVEN = register_party_type(
+    PartyType(
+        id="warlock",
+        name="Warlock Coven",
+        description="A coven of powerful warlocks.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.8,
+        sight_range=9,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(50, 0, 50),  # Dark purple
+        icon="W",
+        spawn_weight=0.7,
+        avoids_poi_types=["town", "village"],
+        faction_id="shadow_cult",
+        battle_unit_template="cultist_harbinger",
+        can_join_battle=True,
+    )
+)
+
+NECROMANCER_CULT = register_party_type(
+    PartyType(
+        id="necromancer",
+        name="Necromancer Cult",
+        description="A cult of necromancers raising the dead.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.9,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(0, 50, 0),  # Dark green
+        icon="N",
+        spawn_weight=0.8,
+        avoids_poi_types=["town", "village"],
+        faction_id="shadow_cult",
+        battle_unit_template="necromancer",
+        can_join_battle=True,
+    )
+)
+
+# More Beast Types
+GIANT_SPIDER = register_party_type(
+    PartyType(
+        id="spider",
+        name="Giant Spider",
+        description="A large spider with its brood.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.2,
+        sight_range=6,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(100, 50, 0),  # Brown
+        icon="S",
+        spawn_weight=1.5,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="dire_rat",
+        can_join_battle=True,
+    )
+)
+
+BOAR_HERD = register_party_type(
+    PartyType(
+        id="boar",
+        name="Boar Herd",
+        description="A herd of aggressive wild boars.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.1,
+        sight_range=5,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(139, 69, 19),  # Brown
+        icon="B",
+        spawn_weight=1.8,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="goblin_brute",
+        can_join_battle=True,
+    )
+)
+
+DIRE_WOLF = register_party_type(
+    PartyType(
+        id="dire_wolf",
+        name="Dire Wolf Pack",
+        description="A pack of massive dire wolves.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.6,
+        sight_range=10,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=3,
+        color=(64, 64, 64),  # Dark gray
+        icon="D",
+        spawn_weight=1.2,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="ghoul_ripper",
+        can_join_battle=True,
+    )
+)
+
+# More Monstrous Types
+TROLL_BAND = register_party_type(
+    PartyType(
+        id="troll",
+        name="Troll Band",
+        description="A band of brutish trolls.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=0.9,
+        sight_range=6,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(0, 100, 0),  # Green
+        icon="T",
+        spawn_weight=1.0,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="stone_golem",
+        can_join_battle=True,
+    )
+)
+
+OGRE_WARBAND = register_party_type(
+    PartyType(
+        id="ogre",
+        name="Ogre Warband",
+        description="A warband of massive ogres.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.0,
+        sight_range=7,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=4,
+        color=(139, 90, 43),  # Brown
+        icon="O",
+        spawn_weight=0.9,
+        avoids_poi_types=["town"],
+        battle_unit_template="orc_raider",
+        can_join_battle=True,
+    )
+)
+
+DEMON_PACK = register_party_type(
+    PartyType(
+        id="demon",
+        name="Demon Pack",
+        description="A pack of demons from the void.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.HUNT,
+        speed=1.3,
+        sight_range=9,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=5,
+        color=(150, 0, 150),  # Purple
+        icon="D",
+        spawn_weight=0.5,
+        avoids_poi_types=["town", "village"],
+        faction_id="shadow_cult",
+        battle_unit_template="voidspawn_mauler",
+        can_join_battle=True,
+    )
+)
+
+# More Specialized Enemy Types
+RAT_SWARM = register_party_type(
+    PartyType(
+        id="rat_swarm",
+        name="Rat Swarm",
+        description="A swarm of dire rats.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.0,
+        sight_range=4,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=1,
+        color=(80, 80, 80),  # Gray
+        icon="r",
+        spawn_weight=2.5,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="dire_rat",
+        can_join_battle=True,
+    )
+)
+
+GOBLIN_SHAMAN_CULT = register_party_type(
+    PartyType(
+        id="goblin_shaman",
+        name="Goblin Shaman Cult",
+        description="Goblins led by a shaman.",
+        alignment=PartyAlignment.HOSTILE,
+        behavior=PartyBehavior.WANDER,
+        speed=1.0,
+        sight_range=6,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=2,
+        color=(0, 150, 0),  # Green
+        icon="g",
+        spawn_weight=1.5,
+        avoids_poi_types=["town"],
+        faction_id="bandit_confederacy",
+        battle_unit_template="goblin_shaman",
+        can_join_battle=True,
+    )
+)
+
+# Update relationships for all new enemy types
+THIEF_GANG.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble", "knight"}
+ASSASSIN_CREW.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble", "knight", "adventurer"}
+RAIDER_BAND.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "noble", "knight"}
+
+GHOUL_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+ZOMBIE_HORDE.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+WRAITH_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
+
+MAGE_CABAL.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
+WARLOCK_COVEN.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
+NECROMANCER_CULT.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
+
+GIANT_SPIDER.enemy_types = {"merchant", "villager", "pilgrim"}
+BOAR_HERD.enemy_types = {"merchant", "villager", "pilgrim"}
+DIRE_WOLF.enemy_types = {"merchant", "villager", "pilgrim", "deer"}
+
+TROLL_BAND.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "knight"}
+OGRE_WARBAND.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "noble", "knight"}
+DEMON_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight", "adventurer"}
+
+RAT_SWARM.enemy_types = {"merchant", "villager", "pilgrim"}
+GOBLIN_SHAMAN_CULT.enemy_types = {"merchant", "villager", "guard", "ranger"}
+
+# Update existing party enemy lists to include new types
+GUARD_PATROL.enemy_types.update({
+    "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "mage", "warlock", "necromancer",
+    "spider", "boar", "dire_wolf", "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
+})
+MERCHANT_PARTY.enemy_types.update({
+    "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "spider", "boar", "dire_wolf",
+    "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
+})
+VILLAGER_PARTY.enemy_types.update({
+    "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "spider", "boar", "dire_wolf",
+    "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
+})
+RANGER_PATROL.enemy_types.update({
+    "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "mage", "warlock", "necromancer",
+    "spider", "boar", "dire_wolf", "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
+})
+KNIGHT_PATROL.enemy_types.update({
+    "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "mage", "warlock", "necromancer",
+    "troll", "ogre", "demon", "goblin_shaman"
+})

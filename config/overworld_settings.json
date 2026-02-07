@@ -40,6 +40,26 @@
   },
   "exploration": {
     "memory_timeout_hours": 12.0
+  },
+  "roads": {
+    "enabled": true,
+    "strategy": "pathfinding",
+    "min_poi_distance": 10,
+    "max_road_length": 200,
+    "smooth_roads": true,
+    "connect_villages": false,
+    "avoid_terrain": ["water", "mountain"],
+    "road_types": {
+      "town_to_town": "highway",
+      "town_to_village": "cobblestone",
+      "village_to_village": "dirt",
+      "default": "dirt"
+    },
+    "rendering": {
+      "opacity": 1.0,
+      "show_borders": true,
+      "border_width": 1
+    }
   }
 }
 

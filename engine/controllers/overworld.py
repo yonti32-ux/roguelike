@@ -49,6 +49,7 @@ class OverworldController:
                     game.overworld_tutorial_scroll_offset = 0
             return
         
+        
         # Handle tutorial scrolling and closing (works even when tutorial is open)
         if getattr(game, "show_overworld_tutorial", False):
             if event.key == pygame.K_ESCAPE or event.key == pygame.K_h:
@@ -321,7 +322,7 @@ class OverworldController:
             for poi in nearby_pois:
                 if not poi.discovered:
                     poi.discover()
-                    # Better discovery message with type and level
+                    # Better discovery message with type, level, and faction
                     type_labels = {
                         "dungeon": "Dungeon",
                         "village": "Village",
@@ -329,7 +330,16 @@ class OverworldController:
                         "camp": "Camp",
                     }
                     type_label = type_labels.get(poi.poi_type, "Location")
-                    game.add_message(f"You discover {poi.name} - A {type_label} (Level {poi.level})")
+                    
+                    # Add faction info if available
+                    faction_info = ""
+                    faction_id = getattr(poi, "faction_id", None)
+                    if faction_id and game.overworld_map.faction_manager:
+                        faction = game.overworld_map.faction_manager.get_faction(faction_id)
+                        if faction:
+                            faction_info = f" ({faction.name})"
+                    
+                    game.add_message(f"You discover {poi.name} - A {type_label} (Level {poi.level}){faction_info}")
     
     def try_enter_poi(self) -> None:
         """Attempt to enter a POI at the player's current position."""

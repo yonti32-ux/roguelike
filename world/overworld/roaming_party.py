@@ -60,6 +60,11 @@ class RoamingParty:
     faction_id: Optional[str] = None  # Which faction this party belongs to
     faction_relations: Dict[str, int] = field(default_factory=dict)  # Per-faction relations
     
+    # Party metadata for better battle connection
+    party_name: Optional[str] = None  # Custom name for this party instance
+    party_size: int = 1  # Number of members in this party (for variation)
+    health_state: str = "healthy"  # "healthy", "wounded", "defeated" (for parties that survive battles)
+    
     def __post_init__(self):
         """Initialize party after creation."""
         # Set patrol center to starting position if not set
@@ -120,6 +125,7 @@ def create_roaming_party(
     x: int,
     y: int,
     party_id: Optional[str] = None,
+    party_name: Optional[str] = None,
 ) -> RoamingParty:
     """
     Create a new roaming party.
@@ -129,6 +135,7 @@ def create_roaming_party(
         x: Starting X coordinate
         y: Starting Y coordinate
         party_id: Optional unique ID (generated if not provided)
+        party_name: Optional custom name for this party instance
     
     Returns:
         A new RoamingParty instance
@@ -157,11 +164,89 @@ def create_roaming_party(
     if party_type.faction_id:
         party.faction_id = party_type.faction_id
     
+    # Generate party name if not provided
+    if party_name is None:
+        party_name = _generate_party_name(party_type)
+    party.party_name = party_name
+    
+    # Set party size variation (based on combat strength with some randomness)
+    base_size = max(1, party_type.combat_strength)
+    size_variation = random.randint(-1, 2)  # -1 to +2 variation
+    party.party_size = max(1, base_size + size_variation)
+    
     # Initialize gold for certain party types
     if party_type_id == "merchant":
         party.gold = random.randint(100, 500)
     elif party_type_id == "bandit":
         party.gold = random.randint(10, 100)
+    elif party_type_id == "trader":
+        party.gold = random.randint(200, 800)
+    elif party_type_id == "noble":
+        party.gold = random.randint(500, 1500)
     
     return party
+
+
+def _generate_party_name(party_type: "PartyType") -> str:
+    """
+    Generate a unique name for a party based on its type.
+    
+    This adds variety to parties on the overworld.
+    """
+    import random
+    
+    # Name templates by party type
+    name_templates = {
+        "merchant": ["{}'s Caravan", "{} Trading Company", "{} Merchants", "{}'s Goods"],
+        "bandit": ["{} Gang", "{} Bandits", "{} Raiders", "{} Outlaws"],
+        "bandit_rogue": ["{} Gang", "{} Bandits", "{} Raiders", "{} Outlaws"],
+        "guard": ["{} Patrol", "{} Guards", "{} Watch", "{} Sentinels"],
+        "knight": ["{} Patrol", "{} Knights", "{} Order", "{} Company"],
+        "villager": ["{} Travelers", "{} Group", "{} Villagers", "{} Settlers"],
+        "monster": ["{} Pack", "{} Horde", "{} Swarm", "{} Pack"],
+        "monster_brute": ["{} Pack", "{} Horde", "{} Swarm", "{} Pack"],
+        "wolf": ["{} Pack", "{} Hunters", "{} Pack", "{} Pack"],
+        "bear": ["{} Pack", "{} Bears", "{} Pack", "{} Pack"],
+        "deer": ["{} Herd", "{} Deer", "{} Herd", "{} Herd"],
+        "bird": ["{} Flock", "{} Birds", "{} Flock", "{} Flock"],
+        "ranger": ["{} Patrol", "{} Rangers", "{} Scouts", "{} Trackers"],
+        "cultist": ["{} Gathering", "{} Cult", "{} Sect", "{} Circle"],
+        "orc": ["{} Raiders", "{} Warband", "{} Horde", "{} Tribe"],
+        "goblin": ["{} Warband", "{} Gang", "{} Horde", "{} Tribe"],
+        "skeleton": ["{} Warband", "{} Undead", "{} Horde", "{} Legion"],
+        "trader": ["{} Caravan", "{} Traders", "{} Company", "{} Merchants"],
+        "noble": ["{} Entourage", "{} Party", "{} Retinue", "{} Escort"],
+        "scout": ["{} Scouts", "{} Party", "{} Patrol", "{} Rangers"],
+        "pilgrim": ["{} Pilgrims", "{} Group", "{} Travelers", "{} Faithful"],
+        "adventurer": ["{} Party", "{} Adventurers", "{} Company", "{} Heroes"],
+        "mercenary": ["{} Company", "{} Mercenaries", "{} Band", "{} Company"],
+        "thief": ["{} Gang", "{} Thieves", "{} Band", "{} Crew"],
+        "assassin": ["{} Crew", "{} Assassins", "{} Guild", "{} Order"],
+        "raider": ["{} Band", "{} Raiders", "{} Warband", "{} Horde"],
+        "ghoul": ["{} Pack", "{} Ghouls", "{} Feeders", "{} Pack"],
+        "zombie": ["{} Horde", "{} Zombies", "{} Horde", "{} Horde"],
+        "wraith": ["{} Pack", "{} Wraiths", "{} Spirits", "{} Pack"],
+        "mage": ["{} Cabal", "{} Mages", "{} Circle", "{} Order"],
+        "warlock": ["{} Coven", "{} Warlocks", "{} Circle", "{} Coven"],
+        "necromancer": ["{} Cult", "{} Necromancers", "{} Circle", "{} Cult"],
+        "spider": ["{} Brood", "{} Spiders", "{} Nest", "{} Brood"],
+        "boar": ["{} Herd", "{} Boars", "{} Herd", "{} Herd"],
+        "dire_wolf": ["{} Pack", "{} Dire Wolves", "{} Pack", "{} Pack"],
+        "troll": ["{} Band", "{} Trolls", "{} Tribe", "{} Band"],
+        "ogre": ["{} Warband", "{} Ogres", "{} Tribe", "{} Warband"],
+        "demon": ["{} Pack", "{} Demons", "{} Horde", "{} Pack"],
+        "rat_swarm": ["{} Swarm", "{} Rats", "{} Swarm", "{} Swarm"],
+        "goblin_shaman": ["{} Cult", "{} Goblins", "{} Tribe", "{} Cult"],
+    }
+    
+    # Generic names if type not found
+    generic_names = ["The {}s", "{} Group", "{} Party"]
+    
+    templates = name_templates.get(party_type.id, generic_names)
+    template = random.choice(templates)
+    
+    # Use party type name as base
+    base_name = party_type.name.split()[0] if party_type.name else party_type.id.title()
+    
+    return template.format(base_name)
 

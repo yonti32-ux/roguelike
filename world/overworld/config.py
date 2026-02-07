@@ -69,6 +69,38 @@ class OverworldConfig:
         "evil": 2,
     })
     
+    # Territory control settings (optional, modular system)
+    territory_control: Dict[str, any] = field(default_factory=lambda: {
+        "enabled": True,
+        "chunk_size": 8,
+        "update_interval_hours": 24.0,
+        "show_overlay": False,
+        "overlay_opacity": 0.3,
+        "border_conflict_threshold": -50,
+    })
+    
+    # Road system settings (modular, customizable)
+    roads: Dict[str, any] = field(default_factory=lambda: {
+        "enabled": True,
+        "strategy": "pathfinding",  # "direct", "pathfinding", "hybrid"
+        "min_poi_distance": 10,
+        "max_road_length": 200,
+        "smooth_roads": True,
+        "connect_villages": False,  # Connect villages to each other
+        "avoid_terrain": ["water", "mountain"],
+        "road_types": {
+            "town_to_town": "highway",
+            "town_to_village": "cobblestone",
+            "village_to_village": "dirt",
+            "default": "dirt",
+        },
+        "rendering": {
+            "opacity": 1.0,
+            "show_borders": True,
+            "border_width": 1,
+        },
+    })
+    
     @classmethod
     def load(cls) -> "OverworldConfig":
         """Load configuration from file, using defaults if file doesn't exist."""
@@ -134,6 +166,16 @@ class OverworldConfig:
             faction_data = data.get("factions", {})
             config.faction_counts = faction_data.get("counts", config.faction_counts)
             
+            # Territory control settings
+            territory_data = data.get("territory_control", {})
+            if territory_data:
+                config.territory_control.update(territory_data)
+            
+            # Road system settings
+            roads_data = data.get("roads", {})
+            if roads_data:
+                config.roads.update(roads_data)
+            
         except Exception as e:
             print(f"Error loading overworld config: {e}")
             print("Using default configuration.")
@@ -185,6 +227,8 @@ class OverworldConfig:
                 "factions": {
                     "counts": self.faction_counts,
                 },
+                "territory_control": self.territory_control,
+                "roads": self.roads,
             }
             
             with OVERWORLD_CONFIG_FILE.open("w", encoding="utf-8") as f:

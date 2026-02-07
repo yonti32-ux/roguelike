@@ -10,7 +10,12 @@ from typing import List, Optional, TYPE_CHECKING
 import random
 
 from world.entities import Enemy, Player
-from systems.enemies import get_archetype, EnemyArchetype, compute_scaled_stats
+from systems.enemies import (
+    get_archetype, 
+    EnemyArchetype, 
+    compute_scaled_stats,
+    choose_archetype_for_player_level,
+)
 
 if TYPE_CHECKING:
     from .roaming_party import RoamingParty
@@ -72,10 +77,13 @@ def party_to_battle_enemies(
             # Fall through to default
     
     # Fallback: Create generic enemies based on combat_strength
-    # Use a default archetype or create enemies with scaled stats
+    # Try to use new difficulty system first (player_level-based selection)
     try:
-        default_archetype = _get_default_archetype_for_strength(
-            party_type.combat_strength
+        # Use new system: select archetype based on player level
+        # This allows higher-level enemies to appear in overworld as player progresses
+        default_archetype = choose_archetype_for_player_level(
+            player_level=player_level,
+            preferred_tags=None,  # Could add tag preferences based on party_type
         )
         
         for i in range(num_enemies):
@@ -84,11 +92,24 @@ def party_to_battle_enemies(
             )
             enemies.append(enemy)
     except Exception as e:
-        print(f"Error creating enemies: {e}")
-        import traceback
-        traceback.print_exc()
-        # Return empty list if we can't create enemies
-        return []
+        # Fallback to old strength-based system if new system fails
+        print(f"Warning: choose_archetype_for_player_level failed: {e}, using fallback")
+        try:
+            default_archetype = _get_default_archetype_for_strength(
+                party_type.combat_strength
+            )
+            
+            for i in range(num_enemies):
+                enemy = _create_enemy_from_archetype(
+                    default_archetype, player_level, party, i, num_enemies
+                )
+                enemies.append(enemy)
+        except Exception as e2:
+            print(f"Error creating enemies: {e2}")
+            import traceback
+            traceback.print_exc()
+            # Return empty list if we can't create enemies
+            return []
     
     return enemies
 
@@ -270,8 +291,13 @@ def _create_enemy_from_archetype(
         xp = int(xp / (1.0 + (total_enemies - 1) * 0.3))  # Diminishing returns
         xp = max(1, xp)  # Minimum 1 XP
     
-    # Create enemy name
-    enemy_name = f"{party.party_type_id.title()} {index + 1}"  # e.g., "Bandit 1"
+    # Create enemy name - use party name if available, otherwise use party type
+    if party.party_name:
+        # Use party name for more variety (e.g., "Bandit Gang Member 1")
+        base_name = party.party_name.split()[0] if party.party_name else party.party_type_id.title()
+        enemy_name = f"{base_name} {index + 1}"
+    else:
+        enemy_name = f"{party.party_type_id.title()} {index + 1}"  # e.g., "Bandit 1"
     
     # Create Enemy entity
     enemy = Enemy(
@@ -296,6 +322,12 @@ def _create_enemy_from_archetype(
     
     # Store party reference for post-combat updates
     enemy.party_id = party.party_id
+    # Store party name for better tracking
+    if hasattr(enemy, 'party_name'):
+        enemy.party_name = party.party_name
+    # Store party type for reference
+    if hasattr(enemy, 'party_type_id'):
+        enemy.party_type_id = party.party_type_id
     
     return enemy
 

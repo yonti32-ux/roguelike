@@ -111,6 +111,27 @@ class WorldGenerator:
         print("Calculating POI levels...")
         self._calculate_poi_levels(overworld)
         
+        # Generate roads between POIs (if enabled)
+        roads_config = getattr(self.config, "roads", {})
+        if roads_config.get("enabled", True):
+            print("Generating roads...")
+            try:
+                self._generate_roads(overworld)
+                # Debug: Check if roads were actually created
+                if overworld.road_manager:
+                    all_roads = overworld.road_manager.get_all_roads()
+                    print(f"Road generation complete: {len(all_roads)} roads created")
+                    if len(all_roads) == 0:
+                        all_pois = overworld.get_all_pois()
+                        towns = [p for p in all_pois if p.poi_type == "town"]
+                        villages = [p for p in all_pois if p.poi_type == "village"]
+                        print(f"  Total POIs: {len(all_pois)} (Towns: {len(towns)}, Villages: {len(villages)})")
+            except Exception as e:
+                print(f"Warning: Road generation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # Continue without roads - not critical
+        
         print("Overworld generation complete!")
         return overworld
     
@@ -1612,4 +1633,53 @@ class WorldGenerator:
         
         # Last resort: center of map
         return (overworld.width // 2, overworld.height // 2)
+    
+    def _generate_roads(self, overworld: OverworldMap) -> None:
+        """
+        Generate roads between POIs.
+        
+        Args:
+            overworld: The overworld map
+        """
+        from .road_generator import RoadGenerator
+        from .road_manager import RoadManager
+        
+        # Initialize road manager
+        road_manager = RoadManager(overworld)
+        overworld.road_manager = road_manager
+        
+        # Get road configuration (with fallback defaults)
+        road_config = getattr(self.config, "roads", {})
+        if not road_config:
+            # Use default road config if not set
+            road_config = {
+                "enabled": True,
+                "strategy": "pathfinding",
+                "min_poi_distance": 10,
+                "max_road_length": 200,
+                "smooth_roads": True,
+                "connect_villages": False,
+                "avoid_terrain": ["water", "mountain"],
+                "road_types": {
+                    "town_to_town": "highway",
+                    "town_to_village": "cobblestone",
+                    "village_to_village": "dirt",
+                    "default": "dirt",
+                },
+            }
+        
+        # Create road generator
+        generator = RoadGenerator(overworld, road_config)
+        
+        # Generate roads
+        all_pois = overworld.get_all_pois()
+        roads = generator.generate_roads(
+            all_pois,
+            connect_types=road_config.get("connect_types", ["town", "village"]),
+        )
+        
+        # Add roads to manager
+        road_manager.add_roads(roads)
+        
+        print(f"Generated {len(roads)} roads")
 

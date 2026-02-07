@@ -45,6 +45,20 @@ def create_poi_tooltip_data(poi: "PointOfInterest", game: Optional["Game"] = Non
     # Level/difficulty
     lines.append(f"Level: {poi.level}")
     
+    # Faction information (if available)
+    faction_id = getattr(poi, "faction_id", None)
+    if faction_id and game and game.overworld_map and game.overworld_map.faction_manager:
+        faction = game.overworld_map.faction_manager.get_faction(faction_id)
+        if faction:
+            alignment_colors = {
+                "good": "Light Blue",
+                "neutral": "Gray", 
+                "evil": "Dark Red"
+            }
+            alignment = faction.alignment.value if hasattr(faction.alignment, "value") else str(faction.alignment)
+            color_name = alignment_colors.get(alignment, "Unknown")
+            lines.append(f"Faction: {faction.name} ({color_name})")
+    
     # POI-specific information (uses extensibility method)
     poi_specific_lines = poi.get_tooltip_lines(game)
     lines.extend(poi_specific_lines)

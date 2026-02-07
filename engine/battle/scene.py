@@ -2549,9 +2549,10 @@ class BattleScene:
             win_y = max(self.grid_origin_y - 30, 40)
             surface.blit(win_text, (win_x, win_y))
         
-        # Draw visual effects (particles, movement trails)
+        # Draw visual effects (particles, movement trails, skill effects)
         self.visual_effects.draw_particles(surface)
         self.visual_effects.draw_movement_trails(surface)
+        self.visual_effects.draw_skill_effects(surface)
         
         # Draw screen flash overlay (on top of everything except UI)
         self.visual_effects.draw_screen_flash(surface)

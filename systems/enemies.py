@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import random
 
@@ -11,18 +11,25 @@ class EnemyArchetype:
     - id:          stable internal id (used for lookups)
     - name:        display name (used in UI / battle group labels)
     - role:        loose combat role ("Skirmisher", "Brute", "Invoker", etc.)
-    - tier:        rough difficulty band (1=early, 2=mid, 3=late)
+    - tier:        rough difficulty band (1=early, 2=mid, 3=late) [DEPRECATED: use difficulty_level]
     - ai_profile:  hint for future AI logic ("skirmisher", "brute", "caster"...)
 
     - base_*:      stats at floor 1
     - *_per_floor: per-floor scaling for those stats
 
     - skill_ids:   list of skill ids from systems.skills that this archetype can use
+    
+    New Difficulty System (modular and scalable):
+    - difficulty_level: 1-100+ difficulty rating (replaces tier for spawn selection)
+    - spawn_min_floor:  Earliest floor this enemy can appear
+    - spawn_max_floor:  Latest floor (None = unlimited)
+    - spawn_weight:     Relative spawn chance within valid floors
+    - tags:             Categorization tags (["early_game", "undead", "caster"], etc.)
     """
     id: str
     name: str
     role: str
-    tier: int
+    tier: int  # Kept for backward compatibility, will be deprecated
     ai_profile: str
 
     base_hp: int
@@ -40,6 +47,44 @@ class EnemyArchetype:
     # Defaults keep older content working without specifying values.
     base_initiative: int = 10
     init_per_floor: float = 0.0
+    
+    # New Difficulty System fields (optional, auto-calculated from tier if not provided)
+    difficulty_level: Optional[int] = None
+    spawn_min_floor: Optional[int] = None
+    spawn_max_floor: Optional[int] = None
+    spawn_weight: float = 1.0
+    tags: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """
+        Auto-calculate new difficulty system fields from tier for backward compatibility.
+        This allows existing enemies to work without modification.
+        """
+        # Auto-calculate difficulty_level from tier if not provided
+        if self.difficulty_level is None:
+            # Map tier to difficulty level (1-100 scale)
+            # Tier 1: 10-30, Tier 2: 40-60, Tier 3: 70-90
+            tier_to_level = {1: 20, 2: 50, 3: 80}
+            self.difficulty_level = tier_to_level.get(self.tier, 50)
+        
+        # Auto-calculate spawn_min_floor from tier if not provided
+        if self.spawn_min_floor is None:
+            tier_to_min_floor = {1: 1, 2: 3, 3: 5}
+            self.spawn_min_floor = tier_to_min_floor.get(self.tier, 1)
+        
+        # Auto-calculate spawn_max_floor from tier if not provided
+        if self.spawn_max_floor is None:
+            # Tier 1: floors 1-3, Tier 2: floors 3-6, Tier 3: unlimited
+            tier_to_max_floor = {1: 3, 2: 6, 3: None}
+            self.spawn_max_floor = tier_to_max_floor.get(self.tier, None)
+        
+        # Auto-add tier-based tags if tags are empty
+        if not self.tags:
+            tier_tags = {1: ["early_game"], 2: ["mid_game"], 3: ["late_game"]}
+            base_tags = tier_tags.get(self.tier, [])
+            # Add role-based tag
+            role_tag = self.role.lower().replace(" ", "_")
+            self.tags = base_tags + [role_tag]
 
 
 @dataclass
@@ -89,6 +134,141 @@ def register_pack(pack: EnemyPackTemplate) -> EnemyPackTemplate:
     return pack
 
 
+# ---------------------------------------------------------------------------
+# Helper functions for new difficulty system
+# ---------------------------------------------------------------------------
+
+def get_enemies_by_tag(tag: str) -> List[EnemyArchetype]:
+    """
+    Get all enemies with a specific tag.
+    
+    Args:
+        tag: Tag to search for (e.g., "undead", "early_game", "caster")
+    
+    Returns:
+        List of EnemyArchetype instances with the tag
+    """
+    return [arch for arch in ENEMY_ARCHETYPES.values() if tag in arch.tags]
+
+
+def get_enemies_in_difficulty_range(min_level: int, max_level: int) -> List[EnemyArchetype]:
+    """
+    Get all enemies within a difficulty level range.
+    
+    Args:
+        min_level: Minimum difficulty level (inclusive)
+        max_level: Maximum difficulty level (inclusive)
+    
+    Returns:
+        List of EnemyArchetype instances in the range
+    """
+    return [
+        arch for arch in ENEMY_ARCHETYPES.values()
+        if min_level <= arch.difficulty_level <= max_level
+    ]
+
+
+def get_enemies_for_floor_range(min_floor: int, max_floor: int) -> List[EnemyArchetype]:
+    """
+    Get all enemies that can spawn in a floor range.
+    
+    Args:
+        min_floor: Minimum floor (inclusive)
+        max_floor: Maximum floor (inclusive)
+    
+    Returns:
+        List of EnemyArchetype instances that can spawn in this range
+    """
+    return [
+        arch for arch in ENEMY_ARCHETYPES.values()
+        if arch.spawn_min_floor <= max_floor
+        and (arch.spawn_max_floor is None or arch.spawn_max_floor >= min_floor)
+    ]
+
+
+def floor_to_difficulty_range(floor_index: int, spread: int = 15) -> Tuple[int, int]:
+    """
+    Convert floor index to a difficulty level range.
+    
+    This can be used to find enemies appropriate for a given floor.
+    
+    Args:
+        floor_index: Current floor
+        spread: How wide the difficulty range should be (default 15)
+    
+    Returns:
+        (min_level, max_level) tuple
+    """
+    # Linear scaling: floor 1 = level 10, floor 10 = level 100
+    # Adjust formula as needed for your game's progression
+    base_level = 10 + (floor_index - 1) * 9  # Roughly 10 per floor
+    
+    min_level = max(1, base_level - spread)
+    max_level = min(100, base_level + spread)
+    
+    return (min_level, max_level)
+
+
+def choose_archetype_for_player_level(
+    player_level: int,
+    preferred_tags: Optional[List[str]] = None,
+    excluded_tags: Optional[List[str]] = None,
+) -> EnemyArchetype:
+    """
+    Pick an enemy archetype appropriate for the player's level (for overworld spawning).
+    
+    Uses player_level as the "floor" for spawn range filtering, allowing higher-level
+    enemies to appear in overworld as player progresses.
+    
+    Args:
+        player_level: Current player level
+        preferred_tags: Optional list of tags to prefer (e.g., ["undead", "beast"])
+        excluded_tags: Optional list of tags to exclude
+    
+    Returns:
+        EnemyArchetype appropriate for player level
+    """
+    # Filter by spawn range (treat player_level as floor)
+    candidates = [
+        arch for arch in ENEMY_ARCHETYPES.values()
+        if arch.spawn_min_floor <= player_level
+        and (arch.spawn_max_floor is None or arch.spawn_max_floor >= player_level)
+    ]
+    
+    # Filter by preferred tags if provided
+    if preferred_tags:
+        preferred = [
+            arch for arch in candidates
+            if any(tag in arch.tags for tag in preferred_tags)
+        ]
+        if preferred:
+            candidates = preferred
+    
+    # Filter by excluded tags if provided
+    if excluded_tags:
+        candidates = [
+            arch for arch in candidates
+            if not any(tag in arch.tags for tag in excluded_tags)
+        ]
+    
+    # Fallback to tier system if no candidates
+    if not candidates:
+        tier = _tier_for_floor(player_level)
+        candidates = [a for a in ENEMY_ARCHETYPES.values() if a.tier == tier]
+    
+    # Final fallback: use any archetype
+    if not candidates:
+        candidates = list(ENEMY_ARCHETYPES.values())
+    
+    if not candidates:
+        raise RuntimeError("No enemy archetypes registered.")
+    
+    # Weight by spawn_weight
+    weights = [arch.spawn_weight for arch in candidates]
+    
+    return random.choices(candidates, weights=weights, k=1)[0]
+
+
 def compute_scaled_stats(arch: EnemyArchetype, floor_index: int) -> tuple[int, int, int, int, int]:
     """
     Scale an archetype's stats for the given floor.
@@ -131,15 +311,26 @@ def choose_archetype_for_floor(
 ) -> EnemyArchetype:
     """
     Pick an archetype for the given floor + room tag.
-
-    - Floor controls the *tier*.
-    - room_tag ("lair", "event", etc.) nudges the weights but doesn't hard-lock anything.
+    
+    Uses new difficulty system (spawn_min_floor, spawn_max_floor) with fallback to tier system.
+    - New system: Filters by spawn range (spawn_min_floor <= floor <= spawn_max_floor)
+    - Fallback: Uses tier system if no candidates found
+    - room_tag nudges the weights but doesn't hard-lock anything.
     """
-    tier = _tier_for_floor(floor_index)
-
-    candidates = [a for a in ENEMY_ARCHETYPES.values() if a.tier == tier]
+    # Try new system first: filter by spawn range
+    candidates = [
+        arch for arch in ENEMY_ARCHETYPES.values()
+        if arch.spawn_min_floor <= floor_index
+        and (arch.spawn_max_floor is None or arch.spawn_max_floor >= floor_index)
+    ]
+    
+    # Fallback to tier system if no candidates found
     if not candidates:
-        # Fallback: use *any* archetype if someone deletes a tier by accident.
+        tier = _tier_for_floor(floor_index)
+        candidates = [a for a in ENEMY_ARCHETYPES.values() if a.tier == tier]
+    
+    # Final fallback: use any archetype
+    if not candidates:
         candidates = list(ENEMY_ARCHETYPES.values())
 
     if not candidates:
@@ -147,7 +338,8 @@ def choose_archetype_for_floor(
 
     weights: List[float] = []
     for arch in candidates:
-        w = 1.0
+        # Start with spawn_weight (new system) or default to 1.0
+        w = arch.spawn_weight
 
         # Lair rooms tend to have heavier hitters
         if room_tag == "lair" and arch.role in ("Brute", "Elite Brute"):
@@ -156,6 +348,14 @@ def choose_archetype_for_floor(
         # Event rooms lean a bit towards casters / cultists
         if room_tag == "event" and arch.role in ("Invoker", "Support"):
             w += 0.7
+        
+        # Tag-based bonuses (new system)
+        if room_tag == "graveyard" and "undead" in arch.tags:
+            w += 1.5
+        if room_tag == "sanctum" and "holy" in arch.tags:
+            w += 1.5
+        if room_tag == "lair" and "beast" in arch.tags:
+            w += 1.0
 
         weights.append(w)
 
@@ -169,13 +369,32 @@ def choose_pack_for_floor(
     """
     Pick a *pack template* for the given floor + room tag.
 
-    - Floor controls the pack tier.
+    - Floor controls the pack tier (still uses tier for packs, but checks member spawn ranges).
     - room_tag nudges towards packs that prefer that tag.
     - If no packs are defined, falls back to a single-archetype pseudo-pack.
     """
     tier = _tier_for_floor(floor_index)
 
-    candidates = [p for p in ENEMY_PACKS.values() if p.tier == tier]
+    # Filter packs by tier, but also check if pack members can spawn on this floor
+    candidates = []
+    for pack in ENEMY_PACKS.values():
+        if pack.tier == tier:
+            # Check if at least one member can spawn on this floor
+            can_spawn = False
+            for arch_id in pack.member_arch_ids:
+                try:
+                    arch = get_archetype(arch_id)
+                    if (arch.spawn_min_floor <= floor_index and 
+                        (arch.spawn_max_floor is None or arch.spawn_max_floor >= floor_index)):
+                        can_spawn = True
+                        break
+                except KeyError:
+                    # Archetype not found, skip this pack member
+                    continue
+            if can_spawn:
+                candidates.append(pack)
+    
+    # Fallback to any pack if no candidates
     if not candidates:
         candidates = list(ENEMY_PACKS.values())
 
@@ -214,7 +433,7 @@ def _build_enemy_archetypes() -> None:
             id="goblin_skirmisher",
             name="Goblin Skirmisher",
             role="Skirmisher",
-            tier=1,
+            tier=1,  # Kept for backward compatibility
             ai_profile="skirmisher",
             base_hp=10,
             hp_per_floor=1.0,
@@ -228,6 +447,12 @@ def _build_enemy_archetypes() -> None:
                 "poison_strike",  # new enemy-only skill
                 "nimble_step",    # reuses existing defensive skill
             ],
+            # New difficulty system (explicit values override auto-calculation)
+            difficulty_level=15,  # Early game enemy
+            spawn_min_floor=1,
+            spawn_max_floor=4,  # Can appear floors 1-4
+            spawn_weight=1.5,  # Common enemy
+            tags=["early_game", "goblin", "skirmisher", "common"],
         )
     )
 
@@ -249,6 +474,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "heavy_slam",      # big single-hit
             ],
+            # New difficulty system
+            difficulty_level=18,  # Slightly harder than skirmisher
+            spawn_min_floor=1,
+            spawn_max_floor=4,
+            spawn_weight=1.2,  # Common but slightly less than skirmisher
+            tags=["early_game", "goblin", "brute", "common"],
         )
     )
 
@@ -270,6 +501,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "lunge",           # uses existing hero-style skill
             ],
+            # New difficulty system
+            difficulty_level=17,  # Similar to goblin skirmisher
+            spawn_min_floor=1,
+            spawn_max_floor=5,  # Can appear slightly later
+            spawn_weight=1.0,  # Normal spawn rate
+            tags=["early_game", "bandit", "skirmisher", "common"],
         )
     )
 
@@ -291,6 +528,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "dark_hex",        # curse / debuff
             ],
+            # New difficulty system
+            difficulty_level=20,  # Slightly higher XP reward = slightly harder
+            spawn_min_floor=1,
+            spawn_max_floor=4,
+            spawn_weight=0.8,  # Less common, prefers event rooms
+            tags=["early_game", "cultist", "invoker", "caster", "common"],
         )
     )
 
@@ -314,6 +557,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "feral_claws",     # bleeding DOT
             ],
+            # New difficulty system
+            difficulty_level=48,  # Mid-game enemy
+            spawn_min_floor=3,
+            spawn_max_floor=7,
+            spawn_weight=1.2,
+            tags=["mid_game", "undead", "brute", "common"],
         )
     )
 
@@ -335,6 +584,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "heavy_slam",
             ],
+            # New difficulty system
+            difficulty_level=52,  # Stronger mid-game enemy
+            spawn_min_floor=3,
+            spawn_max_floor=8,
+            spawn_weight=1.0,
+            tags=["mid_game", "orc", "brute", "common"],
         )
     )
 
@@ -357,6 +612,12 @@ def _build_enemy_archetypes() -> None:
                 "dark_hex",
                 "crippling_blow",
             ],
+            # New difficulty system
+            difficulty_level=55,  # Higher XP = harder
+            spawn_min_floor=3,
+            spawn_max_floor=7,
+            spawn_weight=0.9,  # Less common, prefers event rooms
+            tags=["mid_game", "cultist", "invoker", "caster", "common"],
         )
     )
 
@@ -367,7 +628,7 @@ def _build_enemy_archetypes() -> None:
             id="dread_knight",
             name="Dread Knight",
             role="Elite Brute",
-            tier=3,
+            tier=3,  # Kept for backward compatibility
             ai_profile="brute",
             base_hp=40,
             hp_per_floor=3.0,
@@ -381,6 +642,12 @@ def _build_enemy_archetypes() -> None:
                 "heavy_slam",
                 "war_cry",
             ],
+            # New difficulty system
+            difficulty_level=85,  # Late game elite enemy
+            spawn_min_floor=5,
+            spawn_max_floor=None,  # Can appear from floor 5 onwards
+            spawn_weight=1.0,
+            tags=["late_game", "elite", "brute", "undead"],
         )
     )
 
@@ -403,6 +670,12 @@ def _build_enemy_archetypes() -> None:
                 "feral_claws",
                 "poison_strike",
             ],
+            # New difficulty system
+            difficulty_level=82,  # Late game enemy
+            spawn_min_floor=5,
+            spawn_max_floor=None,
+            spawn_weight=1.0,
+            tags=["late_game", "void", "brute", "common"],
         )
     )
 
@@ -425,6 +698,12 @@ def _build_enemy_archetypes() -> None:
                 "dark_hex",
                 "crippling_blow",
             ],
+            # New difficulty system
+            difficulty_level=83,  # Late game support
+            spawn_min_floor=5,
+            spawn_max_floor=None,
+            spawn_weight=0.9,  # Less common, support role
+            tags=["late_game", "cultist", "support", "caster", "common"],
         )
     )
 
@@ -450,6 +729,12 @@ def _build_enemy_archetypes() -> None:
                 "buff_ally",
                 "dark_hex",
             ],
+            # New difficulty system
+            difficulty_level=19,  # Support enemy, slightly higher
+            spawn_min_floor=1,
+            spawn_max_floor=4,
+            spawn_weight=0.9,  # Less common, support role
+            tags=["early_game", "goblin", "support", "caster", "common"],
         )
     )
 
@@ -471,6 +756,12 @@ def _build_enemy_archetypes() -> None:
             skill_ids=[
                 "mark_target",
             ],
+            # New difficulty system
+            difficulty_level=16,  # Similar to goblin skirmisher
+            spawn_min_floor=1,
+            spawn_max_floor=5,  # Can appear slightly later
+            spawn_weight=1.0,
+            tags=["early_game", "undead", "skirmisher", "common"],
         )
     )
 
@@ -493,6 +784,12 @@ def _build_enemy_archetypes() -> None:
                 "disease_strike",
                 "nimble_step",
             ],
+            # New difficulty system
+            difficulty_level=12,  # Weakest Tier 1 enemy
+            spawn_min_floor=1,
+            spawn_max_floor=3,  # Early floors only
+            spawn_weight=1.3,  # Common weak enemy
+            tags=["early_game", "beast", "skirmisher", "common", "weak"],
         )
     )
 
@@ -518,6 +815,12 @@ def _build_enemy_archetypes() -> None:
                 "heal_ally",
                 "life_drain",
             ],
+            # New difficulty system
+            difficulty_level=50,  # Mid-game support
+            spawn_min_floor=3,
+            spawn_max_floor=8,
+            spawn_weight=0.8,  # Less common, support role
+            tags=["mid_game", "undead", "support", "caster", "common"],
         )
     )
 
@@ -541,6 +844,12 @@ def _build_enemy_archetypes() -> None:
                 "poison_strike",
                 "nimble_step",
             ],
+            # New difficulty system
+            difficulty_level=53,  # High damage skirmisher
+            spawn_min_floor=4,
+            spawn_max_floor=8,
+            spawn_weight=1.0,
+            tags=["mid_game", "shadow", "skirmisher", "common"],
         )
     )
 
@@ -563,6 +872,12 @@ def _build_enemy_archetypes() -> None:
                 "heavy_slam",
                 "counter_attack",
             ],
+            # New difficulty system
+            difficulty_level=58,  # Tanky mid-game enemy
+            spawn_min_floor=4,
+            spawn_max_floor=8,
+            spawn_weight=0.9,  # Less common, tanky
+            tags=["mid_game", "construct", "brute", "tank", "common"],
         )
     )
 
@@ -586,6 +901,12 @@ def _build_enemy_archetypes() -> None:
                 "dark_hex",
                 "berserker_rage",  # Enrages when low HP
             ],
+            # New difficulty system
+            difficulty_level=57,  # Strong mid-game caster
+            spawn_min_floor=4,
+            spawn_max_floor=8,
+            spawn_weight=0.8,  # Less common, prefers event rooms
+            tags=["mid_game", "undead", "invoker", "caster", "common"],
         )
     )
 
@@ -612,6 +933,12 @@ def _build_enemy_archetypes() -> None:
                 "heal_ally",
                 "regeneration",
             ],
+            # New difficulty system
+            difficulty_level=88,  # Very strong late game elite
+            spawn_min_floor=6,
+            spawn_max_floor=None,
+            spawn_weight=0.7,  # Rare, elite enemy
+            tags=["late_game", "elite", "undead", "support", "caster", "rare"],
         )
     )
 
@@ -623,7 +950,7 @@ def _build_enemy_archetypes() -> None:
             id="grave_warden",
             name="Grave Warden",
             role="Elite Support",
-            tier=2,
+            tier=2,  # Kept for backward compatibility
             ai_profile="caster",
             base_hp=32,
             hp_per_floor=2.2,
@@ -638,6 +965,12 @@ def _build_enemy_archetypes() -> None:
                 "fear_scream",
                 "regeneration",
             ],
+            # New difficulty system - unique room enemy
+            difficulty_level=60,  # Mid-late game unique
+            spawn_min_floor=3,
+            spawn_max_floor=8,  # Spawns in mid-game range
+            spawn_weight=0.3,  # Rare spawn (unique enemy)
+            tags=["mid_game", "late_game", "elite", "undead", "unique", "graveyard"],
         )
     )
 
@@ -662,6 +995,12 @@ def _build_enemy_archetypes() -> None:
                 "counter_attack",
                 "war_cry",
             ],
+            # New difficulty system - unique room enemy
+            difficulty_level=62,  # Mid-late game unique
+            spawn_min_floor=4,
+            spawn_max_floor=8,
+            spawn_weight=0.3,  # Rare spawn (unique enemy)
+            tags=["mid_game", "late_game", "elite", "holy", "unique", "sanctum"],
         )
     )
 
@@ -686,6 +1025,12 @@ def _build_enemy_archetypes() -> None:
                 "berserker_rage",
                 "war_cry",
             ],
+            # New difficulty system - unique room enemy
+            difficulty_level=90,  # Very strong late game unique
+            spawn_min_floor=6,
+            spawn_max_floor=None,
+            spawn_weight=0.3,  # Rare spawn (unique enemy)
+            tags=["late_game", "elite", "brute", "unique", "lair"],
         )
     )
 
@@ -709,6 +1054,12 @@ def _build_enemy_archetypes() -> None:
                 "heavy_slam",
                 "feral_claws",
             ],
+            # New difficulty system - unique room enemy
+            difficulty_level=65,  # Mid-late game unique
+            spawn_min_floor=4,
+            spawn_max_floor=8,
+            spawn_weight=0.3,  # Rare spawn (unique enemy)
+            tags=["mid_game", "late_game", "brute", "unique", "treasure"],
         )
     )
 
@@ -732,6 +1083,12 @@ def _build_enemy_archetypes() -> None:
                 "berserker_rage",
                 "war_cry",
             ],
+            # New difficulty system
+            difficulty_level=87,  # Very strong late game elite
+            spawn_min_floor=6,
+            spawn_max_floor=None,
+            spawn_weight=0.8,  # Rare, elite enemy
+            tags=["late_game", "elite", "brute", "dragon", "rare"],
         )
     )
 

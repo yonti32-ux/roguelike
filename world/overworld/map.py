@@ -10,6 +10,7 @@ from .terrain import TerrainType, TERRAIN_GRASS
 if TYPE_CHECKING:
     from ..poi.base import PointOfInterest
     from .party_manager import PartyManager
+    from .road_manager import RoadManager
     from world.time.time_system import TimeSystem
 
 
@@ -65,6 +66,9 @@ class OverworldMap:
         # Note: Faction counts will be set when config is available
         from ..factions import FactionManager
         self.faction_manager: Optional["FactionManager"] = None
+        
+        # Road manager (initialized during generation)
+        self.road_manager: Optional["RoadManager"] = None
         
         # Mark starting position as explored (with no timestamp - will be updated when player moves)
         # Using a very old timestamp so it will expire quickly if time system isn't available

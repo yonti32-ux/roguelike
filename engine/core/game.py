@@ -1274,7 +1274,7 @@ class Game:
         """
         Handle post-combat updates for overworld battles.
         
-        - Remove party from map
+        - Remove party from map (or mark as defeated if they can survive)
         - Distribute loot (gold, items)
         - Update faction relations (if applicable)
         """
@@ -1286,10 +1286,28 @@ class Game:
         
         messages: list[str] = []
         
+        # Use party name if available, otherwise use party type name
+        party_display_name = party.party_name if party.party_name else party_type.name
+        
+        # Check if party should be removed or just marked as defeated
+        # Some parties (like wildlife) might respawn, others are permanently removed
+        should_remove = True
+        
+        # Natural/wildlife parties might not be permanently removed
+        # (This is a placeholder for future respawn mechanics)
+        if party_type.id in {"deer", "bird"}:
+            # These flee rather than fight, so they shouldn't be removed
+            should_remove = False
+        
         # Remove party from overworld map
-        if self.overworld_map and self.overworld_map.party_manager:
+        if should_remove and self.overworld_map and self.overworld_map.party_manager:
             self.overworld_map.party_manager.remove_party(party.party_id)
-            messages.append(f"Defeated {party_type.name}!")
+            messages.append(f"Defeated {party_display_name}!")
+        elif not should_remove:
+            # Mark party as defeated but don't remove (for respawn mechanics)
+            party.health_state = "defeated"
+            party.in_combat = False
+            messages.append(f"Defeated {party_display_name}!")
         
         # Distribute loot (gold)
         # Gold is stored in hero_stats, not inventory

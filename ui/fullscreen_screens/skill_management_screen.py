@@ -175,10 +175,37 @@ class SkillManagementScreen:
             return comp.create_new_loadout()
     
     def handle_click(self, mx: int, my: int, w: int, h: int) -> None:
-        """Handle mouse click for skill assignment."""
+        """Handle mouse click for skill assignment and loadout switching."""
+        # Check if clicking on loadout selector
+        loadout_y = 170
+        loadout_x = 50
+        loadout_width = 80
+        loadout_height = 30
+        loadout_spacing = 5
+        
+        loadout_count = self.get_loadout_count()
+        active_loadout = self.get_active_loadout_index()
+        
+        for idx in range(min(loadout_count, 5)):  # Show up to 5 loadouts
+            loadout_rect_x = loadout_x + idx * (loadout_width + loadout_spacing)
+            loadout_rect = pygame.Rect(loadout_rect_x, loadout_y, loadout_width, loadout_height)
+            if loadout_rect.collidepoint(mx, my):
+                # Clicked on a loadout - switch to it
+                self.switch_loadout(idx)
+                return
+        
+        # Check for "New Loadout" button
+        new_loadout_x = loadout_x + min(loadout_count, 5) * (loadout_width + loadout_spacing) + 10
+        new_loadout_rect = pygame.Rect(new_loadout_x, loadout_y, 120, loadout_height)
+        if new_loadout_rect.collidepoint(mx, my):
+            # Create new loadout
+            new_idx = self.create_new_loadout()
+            self.switch_loadout(new_idx)
+            return
+        
         # Check if clicking on a skill in the list
         unlocked_skills = self.get_unlocked_skills()
-        skill_list_y = 200
+        skill_list_y = 290
         skill_list_x = 50
         skill_item_height = 40
         skill_item_width = 300
