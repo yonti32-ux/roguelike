@@ -65,6 +65,18 @@ class RoamingParty:
     party_size: int = 1  # Number of members in this party (for variation)
     health_state: str = "healthy"  # "healthy", "wounded", "defeated" (for parties that survive battles)
     
+    # Enhanced state tracking
+    visited_pois: Set[str] = field(default_factory=set)  # POI IDs this party has visited
+    last_poi_visit_time: Dict[str, float] = field(default_factory=dict)  # When each POI was last visited
+    party_relationships: Dict[str, str] = field(default_factory=dict)  # Relationships with other parties: "ally", "enemy", "neutral", "friendly"
+    temporary_allies: Set[str] = field(default_factory=set)  # Party IDs of temporary allies
+    known_dangers: Dict[Tuple[int, int], str] = field(default_factory=dict)  # Known dangerous locations and their descriptions
+    information_shared: Set[str] = field(default_factory=set)  # Information this party has shared with others
+    rest_cooldown: float = 0.0  # Time until party can rest again
+    resupply_cooldown: float = 0.0  # Time until party can resupply again
+    escort_target_id: Optional[str] = None  # Party ID this party is escorting
+    following_party_id: Optional[str] = None  # Party ID this party is following
+    
     def __post_init__(self):
         """Initialize party after creation."""
         # Set patrol center to starting position if not set
@@ -126,53 +138,60 @@ def create_roaming_party(
     y: int,
     party_id: Optional[str] = None,
     party_name: Optional[str] = None,
+    player_level: Optional[int] = None,
 ) -> RoamingParty:
     """
     Create a new roaming party.
-    
+
     Args:
         party_type_id: ID of the party type
         x: Starting X coordinate
         y: Starting Y coordinate
         party_id: Optional unique ID (generated if not provided)
         party_name: Optional custom name for this party instance
-    
+        player_level: Optional player level; when set, party size can get a small
+            progression bonus (same type spawns slightly larger in higher-level world)
+
     Returns:
         A new RoamingParty instance
     """
     from .party_types import get_party_type
-    
+    from .party_power import get_base_power, get_level_size_bonus
+
     if party_id is None:
         party_id = f"{party_type_id}_{random.randint(1000, 9999)}"
-    
+
     party_type = get_party_type(party_type_id)
     if party_type is None:
         raise ValueError(f"Unknown party type: {party_type_id}")
-    
-    # Initialize party with type-specific properties
+
     party = RoamingParty(
         party_id=party_id,
         party_type_id=party_type_id,
         x=x,
         y=y,
     )
-    
-    # Set move cooldown based on speed
+
     party.move_cooldown = 1.0 / max(0.1, party_type.speed)
-    
-    # Assign faction from party type
+
     if party_type.faction_id:
         party.faction_id = party_type.faction_id
-    
-    # Generate party name if not provided
+
     if party_name is None:
         party_name = _generate_party_name(party_type)
     party.party_name = party_name
-    
-    # Set party size variation (based on combat strength with some randomness)
-    base_size = max(1, party_type.combat_strength)
-    size_variation = random.randint(-1, 2)  # -1 to +2 variation
-    party.party_size = max(1, base_size + size_variation)
+
+    # Base size from type power + random variation
+    base_power = get_base_power(party_type)
+    base_size = max(1, min(6, int(base_power / 12) + 1))
+    size_variation = random.randint(-1, 2)
+    # Progression: at higher player level, same type can spawn with +0 to +2 size
+    if player_level is not None and player_level >= 1:
+        max_bonus = get_level_size_bonus(player_level)
+        size_bonus = random.randint(0, max_bonus) if max_bonus > 0 else 0
+    else:
+        size_bonus = 0
+    party.party_size = max(1, min(8, base_size + size_variation + size_bonus))
     
     # Initialize gold for certain party types
     if party_type_id == "merchant":

@@ -295,7 +295,8 @@ class TownPOI(PointOfInterest):
     """
     Town POI - larger than village, more services.
     
-    For Phase 1, this is a placeholder.
+    Towns have more buildings and services than villages: blacksmiths,
+    libraries, markets, multiple shops, etc.
     """
     
     def __init__(
@@ -307,15 +308,81 @@ class TownPOI(PointOfInterest):
         faction_id: Optional[str] = None,
     ) -> None:
         super().__init__(poi_id, "town", position, level, name, faction_id=faction_id)
-        self.buildings: list[str] = ["shop", "inn", "blacksmith", "library"]
+        self.buildings: list[str] = ["shop", "inn", "blacksmith", "library", "market", "tavern", "town_hall"]
         self.merchants: list[str] = ["general_merchant", "weapon_merchant", "armor_merchant"]
     
     def enter(self, game: "Game") -> None:
-        """Enter the town."""
+        """Enter the town and load town map."""
         game.current_poi = self
+        
+        # Generate town map if not already generated
+        if "town_map" not in self.state:
+            from world.town import generate_town
+            # Use POI position as seed for deterministic generation
+            seed = hash((self.poi_id, self.position[0], self.position[1]))
+            town_map = generate_town(self.level, self.name, seed=seed)
+            self.state["town_map"] = town_map
+            
+            # Generate available companions on first visit
+            # Scale companion level with player level, not town level
+            from systems.village.companion_generation import generate_village_companions
+            player_level = getattr(game.hero_stats, "level", 1) if game.hero_stats else 1
+            companion_count = min(5, max(2, player_level // 2 + 2))  # 2-5 companions based on player level (more than villages)
+            companions = generate_village_companions(
+                village_level=player_level,  # Use player level instead of town level
+                count=companion_count,
+                seed=seed + 10000,  # Different seed for companions
+            )
+            self.state["available_companions"] = companions
+        else:
+            town_map = self.state["town_map"]
+        
+        # Load the town map
+        game.current_map = town_map
+        
+        # Ensure player exists (create if needed, e.g., when entering from overworld)
+        if game.player is None:
+            from world.entities import Player
+            from settings import TILE_SIZE
+            # Create player at a default position (will be moved to entrance)
+            game.player = Player(
+                x=0.0,
+                y=0.0,
+                width=24,
+                height=24,
+            )
+            # Apply hero stats to the newly created player
+            from engine.managers.hero_manager import apply_hero_stats_to_player
+            apply_hero_stats_to_player(game, full_heal=True)
+        
+        # Place player at entrance
+        entrance_pos = getattr(town_map, "town_entrance", None)
+        if entrance_pos is not None:
+            entrance_x, entrance_y = entrance_pos
+            # Use GameMap's center_entity_on_tile to properly position player
+            player_width = game.player.width
+            player_height = game.player.height
+            world_x, world_y = town_map.center_entity_on_tile(
+                entrance_x,
+                entrance_y,
+                player_width,
+                player_height,
+            )
+            game.player.move_to(world_x, world_y)
+        
+        # Update camera to follow player
+        game.camera_x = game.player.x
+        game.camera_y = game.player.y
+        
+        # Initialize FOV for the town
+        if hasattr(game, "update_fov"):
+            game.update_fov()
+        
+        # Switch to exploration mode
         game.enter_exploration_mode()
-        # TODO: Load town map/interior
-        buildings = ", ".join(b.title() for b in self.buildings[:3]) if self.buildings else "many services"
+        
+        # Better entry message with more detail
+        buildings = ", ".join(b.title() for b in self.buildings[:4]) if self.buildings else "many services"
         game.add_message(f"You enter {self.name} (Level {self.level}). A bustling town with {buildings}.")
     
     def exit(self, game: "Game") -> None:
@@ -329,8 +396,8 @@ class TownPOI(PointOfInterest):
         """Get town-specific tooltip lines."""
         lines = []
         if hasattr(self, "buildings") and self.buildings:
-            building_list = ", ".join(b.title() for b in self.buildings[:3])
-            if len(self.buildings) > 3:
+            building_list = ", ".join(b.title() for b in self.buildings[:4])
+            if len(self.buildings) > 4:
                 building_list += "..."
             lines.append(f"Services: {building_list}")
         return lines

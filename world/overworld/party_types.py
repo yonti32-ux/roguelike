@@ -53,7 +53,8 @@ class PartyType:
     # Combat properties (if applicable)
     can_attack: bool = False  # Can this party initiate combat?
     can_be_attacked: bool = False  # Can this party be attacked?
-    combat_strength: int = 1  # Relative strength (1 = weak, 5 = very strong)
+    combat_strength: int = 1  # Legacy: relative strength (1-5). Use power_rating for dynamic scale.
+    power_rating: Optional[float] = None  # Base power (e.g. 10-100). If None, derived from combat_strength.
     
     # Visual representation
     color: Tuple[int, int, int] = (128, 128, 128)  # RGB color for rendering
@@ -125,6 +126,8 @@ MERCHANT_PARTY = register_party_type(
         can_trade=True,
         preferred_poi_types=["town", "village"],
         faction_id="free_cities",  # Merchants belong to free cities
+        battle_unit_template="merchant_guard",  # Use merchant guard archetype
+        can_join_battle=True,
     )
 )
 
@@ -145,6 +148,8 @@ VILLAGER_PARTY = register_party_type(
         spawn_weight=3.0,
         preferred_poi_types=["village", "town"],
         faction_id="kingdom_aetheria",  # Villagers belong to kingdom
+        battle_unit_template="villager",  # Use villager archetype
+        can_join_battle=True,
     )
 )
 
@@ -166,6 +171,7 @@ GUARD_PATROL = register_party_type(
         spawn_weight=1.5,
         preferred_poi_types=["town"],
         faction_id="kingdom_aetheria",  # Guards belong to kingdom
+        battle_unit_template="town_guard",  # Use guard archetype
         can_join_battle=True,
     )
 )
@@ -211,7 +217,7 @@ MONSTER_PACK = register_party_type(
         icon="M",
         spawn_weight=2.0,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="orc_raider",
+        battle_unit_template="troll_berserker",  # Use troll for generic monsters
         can_join_battle=True,
     )
 )
@@ -233,7 +239,8 @@ WOLF_PACK = register_party_type(
         icon="W",
         spawn_weight=1.5,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="goblin_skirmisher",  # Fast, agile fighters
+        battle_unit_template="wolf",  # Use wolf archetype
+        can_join_battle=True,
     )
 )
 
@@ -278,6 +285,8 @@ NOBLE_ENTOURAGE = register_party_type(
         can_trade=True,
         preferred_poi_types=["town"],
         faction_id="kingdom_aetheria",  # Nobles belong to kingdom
+        battle_unit_template="noble_guard",  # Use noble guard archetype
+        can_join_battle=True,
     )
 )
 
@@ -299,6 +308,7 @@ RANGER_PATROL = register_party_type(
         spawn_weight=1.2,
         preferred_poi_types=["village"],
         faction_id="wild_tribes",  # Rangers belong to wild tribes
+        battle_unit_template="ranger",  # Use ranger archetype
         can_join_battle=True,
     )
 )
@@ -321,7 +331,7 @@ CULTIST_GATHERING = register_party_type(
         spawn_weight=1.0,
         avoids_poi_types=["town", "village"],
         faction_id="shadow_cult",  # Cultists belong to shadow cult
-        battle_unit_template="bandit_cutthroat",  # Use bandit template for cultists
+        battle_unit_template="cultist_adept",  # Use cultist archetype
         can_join_battle=True,
     )
 )
@@ -367,6 +377,8 @@ TRADER_CARAVAN = register_party_type(
         can_trade=True,
         preferred_poi_types=["town", "village"],
         faction_id="free_cities",  # Traders belong to free cities
+        battle_unit_template="merchant_guard",  # Use merchant guard archetype
+        can_join_battle=True,
     )
 )
 
@@ -386,6 +398,8 @@ SCOUT_PARTY = register_party_type(
         icon="S",
         spawn_weight=1.0,
         faction_id="wild_tribes",  # Scouts belong to wild tribes
+        battle_unit_template="scout",  # Use scout archetype
+        can_join_battle=True,
     )
 )
 
@@ -405,6 +419,8 @@ GOBLIN_WARBAND = register_party_type(
         color=(0, 128, 0),  # Dark green
         icon="g",
         spawn_weight=2.0,
+        min_level=1,
+        max_level=40,  # Early-game threat; rarer at high level
         avoids_poi_types=["town"],
         faction_id="bandit_confederacy",  # Goblins belong to bandit confederacy
         battle_unit_template="goblin_skirmisher",
@@ -429,6 +445,8 @@ PILGRIM_GROUP = register_party_type(
         spawn_weight=1.2,
         preferred_poi_types=["village", "town"],
         faction_id="kingdom_aetheria",  # Pilgrims belong to kingdom
+        battle_unit_template="pilgrim",  # Use pilgrim archetype
+        can_join_battle=True,
     )
 )
 
@@ -449,7 +467,8 @@ BEAR_PACK = register_party_type(
         icon="B",
         spawn_weight=1.0,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="orc_raider",  # Strong melee fighters
+        battle_unit_template="bear",  # Use bear archetype
+        can_join_battle=True,
     )
 )
 
@@ -468,6 +487,8 @@ DEER_HERD = register_party_type(
         color=(205, 133, 63),  # Tan
         icon="D",
         spawn_weight=1.5,
+        min_level=1,
+        max_level=35,  # Early wilderness; less common later
         avoids_poi_types=["town", "village"],
         # No battle_unit_template - they flee rather than fight
     )
@@ -552,7 +573,7 @@ SKELETON_WARBAND = register_party_type(
         icon="S",
         spawn_weight=1.2,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="skeleton_archer",
+        battle_unit_template="skeleton_warrior",  # Use skeleton_warrior for warband
         can_join_battle=True,
     )
 )
@@ -745,7 +766,7 @@ ZOMBIE_HORDE = register_party_type(
         icon="Z",
         spawn_weight=1.5,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="ghoul_ripper",
+        battle_unit_template="skeleton_warrior",  # Use skeleton_warrior for zombies (similar undead)
         can_join_battle=True,
     )
 )
@@ -766,7 +787,7 @@ WRAITH_PACK = register_party_type(
         icon="W",
         spawn_weight=1.0,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="banshee",
+        battle_unit_template="wraith",  # Use wraith archetype
         can_join_battle=True,
     )
 )
@@ -855,7 +876,7 @@ GIANT_SPIDER = register_party_type(
         icon="S",
         spawn_weight=1.5,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="dire_rat",
+        battle_unit_template="spider_scout",  # Use spider archetype
         can_join_battle=True,
     )
 )
@@ -876,7 +897,7 @@ BOAR_HERD = register_party_type(
         icon="B",
         spawn_weight=1.8,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="goblin_brute",
+        battle_unit_template="wild_boar",  # Use wild_boar archetype
         can_join_battle=True,
     )
 )
@@ -897,7 +918,7 @@ DIRE_WOLF = register_party_type(
         icon="D",
         spawn_weight=1.2,
         avoids_poi_types=["town", "village"],
-        battle_unit_template="ghoul_ripper",
+        battle_unit_template="dire_wolf",  # Use dire_wolf archetype
         can_join_battle=True,
     )
 )
@@ -918,8 +939,9 @@ TROLL_BAND = register_party_type(
         color=(0, 100, 0),  # Green
         icon="T",
         spawn_weight=1.0,
+        min_level=8,  # Mid-game; not seen at very low level
         avoids_poi_types=["town", "village"],
-        battle_unit_template="stone_golem",
+        battle_unit_template="troll_berserker",  # Use troll_berserker archetype
         can_join_battle=True,
     )
 )
@@ -939,8 +961,9 @@ OGRE_WARBAND = register_party_type(
         color=(139, 90, 43),  # Brown
         icon="O",
         spawn_weight=0.9,
+        min_level=10,  # Mid/late; stronger than trolls
         avoids_poi_types=["town"],
-        battle_unit_template="orc_raider",
+        battle_unit_template="cave_troll",  # Use cave_troll for ogres (similar large brutes)
         can_join_battle=True,
     )
 )
@@ -960,6 +983,8 @@ DEMON_PACK = register_party_type(
         color=(150, 0, 150),  # Purple
         icon="D",
         spawn_weight=0.5,
+        min_level=15,  # Late-game threat; only appear as player progresses
+        max_level=100,
         avoids_poi_types=["town", "village"],
         faction_id="shadow_cult",
         battle_unit_template="voidspawn_mauler",
@@ -983,6 +1008,8 @@ RAT_SWARM = register_party_type(
         color=(80, 80, 80),  # Gray
         icon="r",
         spawn_weight=2.5,
+        min_level=1,
+        max_level=25,  # Early swarm; taper off later
         avoids_poi_types=["town", "village"],
         battle_unit_template="dire_rat",
         can_join_battle=True,

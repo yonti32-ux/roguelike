@@ -100,22 +100,68 @@ class TooltipData:
         line_height = 20
         spacing = 4
         
+        mx, my = mouse_pos
+        screen_w, screen_h = screen.get_size()
+        
+        # Maximum tooltip width: screen width minus margins, but cap at reasonable max
+        max_tooltip_width = min(500, screen_w - 40)  # Leave 20px margin on each side
+        
         lines_to_render: List[Tuple[str, Tuple[int, int, int]]] = []
+        
+        # Helper function to wrap text
+        def wrap_text(text: str, max_width: int) -> List[str]:
+            """Wrap text to fit within max_width pixels."""
+            words = text.split()
+            if not words:
+                return [text]
+            
+            wrapped_lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + (" " if current_line else "") + word
+                test_surf = font.render(test_line, True, (255, 255, 255))
+                
+                if test_surf.get_width() <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        wrapped_lines.append(current_line)
+                    # If single word is too long, just add it anyway
+                    word_surf = font.render(word, True, (255, 255, 255))
+                    if word_surf.get_width() > max_width:
+                        # Word is too long, try to break it (though this is rare)
+                        wrapped_lines.append(word)
+                        current_line = ""
+                    else:
+                        current_line = word
+            
+            if current_line:
+                wrapped_lines.append(current_line)
+            
+            return wrapped_lines if wrapped_lines else [text]
         
         # Title
         if self.title:
-            lines_to_render.append((self.title, (255, 255, 200)))
+            wrapped_title = wrap_text(self.title, max_tooltip_width - padding * 2)
+            for title_line in wrapped_title:
+                lines_to_render.append((title_line, (255, 255, 200)))
         
         # Regular lines
         for line in self.lines:
-            lines_to_render.append((line, (220, 220, 220)))
+            wrapped = wrap_text(line, max_tooltip_width - padding * 2)
+            for wrapped_line in wrapped:
+                lines_to_render.append((wrapped_line, (220, 220, 220)))
         
         # Stats
         if self.stats:
             for stat_name, value in self.stats.items():
                 stat_label = _format_stat_name(stat_name)
                 stat_value = _format_stat_value(value)
-                lines_to_render.append((f"{stat_label}: {stat_value}", (200, 220, 255)))
+                stat_line = f"{stat_label}: {stat_value}"
+                wrapped = wrap_text(stat_line, max_tooltip_width - padding * 2)
+                for wrapped_line in wrapped:
+                    lines_to_render.append((wrapped_line, (200, 220, 255)))
         
         # Comparison stats (show differences)
         if self.comparison_stats:
@@ -135,33 +181,39 @@ class TooltipData:
                     # Decrease
                     line = f"{stat_label}: {_format_stat_value(new)} ({_format_stat_value(diff)})"
                     color = (255, 150, 150)
-                lines_to_render.append((line, color))
+                wrapped = wrap_text(line, max_tooltip_width - padding * 2)
+                for wrapped_line in wrapped:
+                    lines_to_render.append((wrapped_line, color))
         
         if not lines_to_render:
             return
         
-        # Calculate dimensions
+        # Calculate dimensions (now with wrapping, recalculate max width)
         max_width = 0
         for line, _ in lines_to_render:
             if line:  # Skip empty separator lines
                 surf = font.render(line, True, (255, 255, 255))
                 max_width = max(max_width, surf.get_width())
         
-        tooltip_width = max_width + padding * 2
+        # Ensure tooltip doesn't exceed max width
+        tooltip_width = min(max_width + padding * 2, max_tooltip_width)
         tooltip_height = len(lines_to_render) * line_height + padding * 2
         
         # Position tooltip (prefer top-right of cursor, adjust if off-screen)
-        mx, my = mouse_pos
-        screen_w, screen_h = screen.get_size()
-        
         tooltip_x = mx + 15
         tooltip_y = my - tooltip_height - 5
         
-        # Adjust if off-screen
+        # Adjust if off-screen horizontally
         if tooltip_x + tooltip_width > screen_w:
             tooltip_x = mx - tooltip_width - 15
+        if tooltip_x < 0:
+            tooltip_x = 10  # Small margin from left edge
+        
+        # Adjust if off-screen vertically
         if tooltip_y < 0:
             tooltip_y = my + 15
+        if tooltip_y + tooltip_height > screen_h:
+            tooltip_y = screen_h - tooltip_height - 10  # Small margin from bottom
         
         # Draw background
         bg_surface = pygame.Surface((tooltip_width, tooltip_height), pygame.SRCALPHA)

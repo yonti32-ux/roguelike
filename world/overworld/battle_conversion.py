@@ -11,10 +11,10 @@ import random
 
 from world.entities import Enemy, Player
 from systems.enemies import (
-    get_archetype, 
-    EnemyArchetype, 
+    get_archetype,
+    EnemyArchetype,
     compute_scaled_stats,
-    choose_archetype_for_player_level,
+    choose_archetype_for_floor,
 )
 
 if TYPE_CHECKING:
@@ -23,94 +23,146 @@ if TYPE_CHECKING:
     from engine.core.game import Game
 
 
+def get_effective_alignment(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    game: "Game",
+    player_faction: Optional[str] = None
+) -> str:
+    """
+    Get the effective alignment of a party considering faction relations.
+    
+    This allows parties to change from allies to enemies based on reputation.
+    
+    Args:
+        party: The roaming party
+        party_type: The party's type definition
+        game: Game instance
+        player_faction: Player's faction ID (if any)
+    
+    Returns:
+        Effective alignment: "hostile", "neutral", or "friendly"
+    """
+    # If party is explicitly hostile, always hostile
+    if party_type.alignment.value == "hostile":
+        return "hostile"
+    
+    # If party is explicitly friendly, check faction relations
+    if party_type.alignment.value == "friendly":
+        # Check if faction relations make them hostile
+        if party.faction_id and player_faction and game.overworld_map and game.overworld_map.faction_manager:
+            relation = game.overworld_map.faction_manager.get_relation(
+                player_faction, party.faction_id
+            )
+            # Very hostile relations (< -50) -> become hostile
+            if relation < -50:
+                return "hostile"
+            # Very friendly relations (> 50) -> stay friendly
+            if relation > 50:
+                return "friendly"
+            # Neutral range -> neutral
+            return "neutral"
+        return "friendly"
+    
+    # Neutral parties check faction relations
+    if party_type.alignment.value == "neutral":
+        if party.faction_id and player_faction and game.overworld_map and game.overworld_map.faction_manager:
+            relation = game.overworld_map.faction_manager.get_relation(
+                player_faction, party.faction_id
+            )
+            # Hostile relations (< -50) -> become hostile
+            if relation < -50:
+                return "hostile"
+            # Friendly relations (> 50) -> become friendly
+            if relation > 50:
+                return "friendly"
+        return "neutral"
+    
+    # Default to party type alignment
+    return party_type.alignment.value
+
+
 def party_to_battle_enemies(
     party: "RoamingParty",
     party_type: "PartyType",
     game: "Game",
-    player_level: int = 1
+    player_level: int = 1,
+    player_faction: Optional[str] = None
 ) -> List[Enemy]:
     """
     Convert a roaming party into a list of Enemy entities for battle.
     
     Strategy:
-    1. Calculate player party size (hero + active companions)
-    2. Scale enemy count based on player party size (dynamic scaling)
+    1. Get party power from party_power module (type + size + state)
+    2. Scale enemy count from player party size and party power
     3. Use party_type.battle_unit_template if available (enemy archetype ID)
-    4. Otherwise, use party_type.combat_strength to scale generic enemies
-    5. Scale enemy stats based on player level and combat_strength
+    4. Otherwise pick archetype by power-derived floor (choose_archetype_for_floor)
+    5. Scale enemy stats by battle_floor (from power + player level) and stat_factor
+    
+    Note: This function is used when the party is hostile to the player.
+    For friendly parties, use allied_party_to_battle_units instead.
     
     Args:
         party: The roaming party to convert
         party_type: The party's type definition
         game: Game instance (for map/context and party access)
         player_level: Current player level (for scaling)
+        player_faction: Player's faction ID (for alignment checks)
     
     Returns:
         List of Enemy entities ready for battle
     """
+    from .party_power import (
+        get_party_power,
+        power_to_floor_index,
+        power_to_enemy_count_factor,
+        power_to_stat_factor,
+    )
+
     enemies = []
-    
+    power = get_party_power(party, party_type)
+    battle_floor = power_to_floor_index(power, player_level)
+
     # Calculate player party size (hero + active companions)
     player_party_size = _get_player_party_size(game)
-    
-    # Calculate enemy count based on party size and combat strength
+
+    # Calculate enemy count based on party size and party power
     num_enemies = _calculate_enemy_count(
         player_party_size=player_party_size,
-        party_combat_strength=party_type.combat_strength,
-        party_type_id=party_type.id
+        party_power=power,
+        party_type_id=party_type.id,
     )
-    
+
     # Try to use battle_unit_template if available
     if party_type.battle_unit_template:
         try:
             archetype = get_archetype(party_type.battle_unit_template)
             if archetype:
-                # Use the specified archetype
                 for i in range(num_enemies):
                     enemy = _create_enemy_from_archetype(
-                        archetype, player_level, party, i, num_enemies
+                        archetype, battle_floor, party, i, num_enemies,
+                        stat_factor=power_to_stat_factor(power),
                     )
                     enemies.append(enemy)
                 return enemies
         except (KeyError, Exception) as e:
             print(f"Warning: Failed to get archetype '{party_type.battle_unit_template}': {e}")
-            # Fall through to default
-    
-    # Fallback: Create generic enemies based on combat_strength
-    # Try to use new difficulty system first (player_level-based selection)
+
+    # Select archetype by party power (floor) so battle difficulty matches overworld threat
     try:
-        # Use new system: select archetype based on player level
-        # This allows higher-level enemies to appear in overworld as player progresses
-        default_archetype = choose_archetype_for_player_level(
-            player_level=player_level,
-            preferred_tags=None,  # Could add tag preferences based on party_type
-        )
-        
-        for i in range(num_enemies):
-            enemy = _create_enemy_from_archetype(
-                default_archetype, player_level, party, i, num_enemies
-            )
-            enemies.append(enemy)
+        default_archetype = choose_archetype_for_floor(battle_floor)
     except Exception as e:
-        # Fallback to old strength-based system if new system fails
-        print(f"Warning: choose_archetype_for_player_level failed: {e}, using fallback")
-        try:
-            default_archetype = _get_default_archetype_for_strength(
-                party_type.combat_strength
-            )
-            
-            for i in range(num_enemies):
-                enemy = _create_enemy_from_archetype(
-                    default_archetype, player_level, party, i, num_enemies
-                )
-                enemies.append(enemy)
-        except Exception as e2:
-            print(f"Error creating enemies: {e2}")
-            import traceback
-            traceback.print_exc()
-            # Return empty list if we can't create enemies
-            return []
-    
+        print(f"Warning: choose_archetype_for_floor failed: {e}, using power fallback")
+        default_archetype = _get_default_archetype_for_power(power)
+
+    stat_factor = power_to_stat_factor(power)
+    for i in range(num_enemies):
+        enemy = _create_enemy_from_archetype(
+            default_archetype, battle_floor, party, i, num_enemies,
+            stat_factor=stat_factor,
+        )
+        enemies.append(enemy)
+
     return enemies
 
 
@@ -143,52 +195,42 @@ def _get_player_party_size(game: "Game") -> int:
 
 def _calculate_enemy_count(
     player_party_size: int,
-    party_combat_strength: int,
-    party_type_id: str
+    party_power: float,
+    party_type_id: str,
 ) -> int:
     """
-    Calculate the number of enemies to spawn based on player party size.
-    
-    Scaling Formula:
-    - Base count: 1-3 enemies (when party_size = 2, hero + 1 companion)
-    - Per additional party member: +1.0 to +2.0 enemies (with variation)
-    - Combat strength affects base count
-    - Party type can have special scaling rules
-    - Minimum always 1 to allow weak encounters even with large party
-    
-    Configuration:
-    - MIN_ENEMIES: 1 (absolute minimum, allows variety)
-    - MAX_ENEMIES: 8 (default, can be increased later)
-    - BASE_SCALING_MIN: 1.0 enemies per party member (minimum)
-    - BASE_SCALING_MAX: 2.0 enemies per party member (maximum)
-    
+    Calculate the number of enemies to spawn based on player party size and party power.
+
+    Scaling:
+    - Base count scales with party power (higher power -> more enemies)
+    - Per additional player party member: +1.0 to +2.0 enemies (with variation)
+    - Party type can have special scaling rules (swarm vs elite)
+
     Args:
         player_party_size: Number of characters in player party (2+)
-                          Note: Game starts with hero + 1 companion = 2
-        party_combat_strength: Combat strength of the party (1-5)
+        party_power: Dynamic power rating of the overworld party (from party_power module)
         party_type_id: ID of the party type (for special rules)
-    
+
     Returns:
-        Number of enemies to spawn (1-8, with large variation)
+        Number of enemies to spawn (1-8, with variation)
     """
-    # Configuration constants (can be moved to settings later)
-    MIN_ENEMIES = 1  # Always allow weak encounters
-    MAX_ENEMIES = 8  # Can be increased later for larger battles
-    BASE_ENEMIES_MIN = 1  # Minimum base (when party_size = 2)
-    BASE_ENEMIES_MAX = 3  # Maximum base (when party_size = 2)
-    SCALING_MIN = 1.0  # Minimum enemies per additional party member
-    SCALING_MAX = 2.0  # Maximum enemies per additional party member
-    
-    # Ensure minimum party size is 2 (hero + 1 companion)
+    from .party_power import power_to_enemy_count_factor
+
+    MIN_ENEMIES = 1
+    MAX_ENEMIES = 8
+    BASE_ENEMIES_MIN = 1
+    BASE_ENEMIES_MAX = 4
+    SCALING_MIN = 1.0
+    SCALING_MAX = 2.0
+
     effective_party_size = max(2, player_party_size)
-    
-    # Base enemy count (when party_size = 2, hero + 1 companion)
-    # Combat strength affects base count: stronger parties = more base enemies
-    # But keep minimum at 1 to allow weak encounters
-    base_min = BASE_ENEMIES_MIN  # Always 1
-    base_max = BASE_ENEMIES_MAX + (party_combat_strength - 1)  # 1-5 max base
-    
-    # Random base count within range (creates variety)
+    power_factor = power_to_enemy_count_factor(party_power)
+
+    # Base count: power 20 -> ~1-2, power 50 -> ~2-3, power 80 -> ~2-4
+    base_range = max(1, int(1 + power_factor * 2.5))
+    base_min = BASE_ENEMIES_MIN
+    base_max = min(BASE_ENEMIES_MAX + 1, base_range + 1)
+
     base_count = random.randint(base_min, base_max)
     
     # Scale based on party size beyond the base (party_size - 2)
@@ -262,34 +304,40 @@ def _apply_party_type_scaling_rules(
 
 def _create_enemy_from_archetype(
     archetype: EnemyArchetype,
-    player_level: int,
+    battle_floor: int,
     party: "RoamingParty",
     index: int,
-    total_enemies: int
+    total_enemies: int,
+    stat_factor: float = 1.0,
 ) -> Enemy:
     """
     Create an Enemy entity from an archetype.
-    
+
+    Stats are scaled by battle_floor (from party power + player level) and
+    optionally by stat_factor for fine-tuning from overworld power.
+
     Args:
         archetype: Enemy archetype definition
-        player_level: Current player level
+        battle_floor: Floor index for stat scaling (from power_to_floor_index)
         party: The roaming party this enemy belongs to
         index: Index of this enemy (0-based)
         total_enemies: Total number of enemies in this battle (for naming)
-    
+        stat_factor: Multiplier for HP/attack/defense (from power_to_stat_factor)
+
     Returns:
         Enemy entity ready for battle
     """
-    # Calculate stats based on archetype and level
-    # Use player_level as the "floor" for scaling
-    floor = max(1, player_level)
+    floor = max(1, battle_floor)
     max_hp, attack, defense, xp, initiative = compute_scaled_stats(archetype, floor)
-    
-    # Adjust XP per enemy based on total count (more enemies = less XP each)
-    # This keeps total XP reward balanced regardless of enemy count
+
+    if stat_factor != 1.0:
+        max_hp = max(1, int(max_hp * stat_factor))
+        attack = max(1, int(attack * stat_factor))
+        defense = max(0, int(defense * stat_factor))
+
     if total_enemies > 1:
-        xp = int(xp / (1.0 + (total_enemies - 1) * 0.3))  # Diminishing returns
-        xp = max(1, xp)  # Minimum 1 XP
+        xp = int(xp / (1.0 + (total_enemies - 1) * 0.3))
+        xp = max(1, xp)
     
     # Create enemy name - use party name if available, otherwise use party type
     if party.party_name:
@@ -299,14 +347,13 @@ def _create_enemy_from_archetype(
     else:
         enemy_name = f"{party.party_type_id.title()} {index + 1}"  # e.g., "Bandit 1"
     
-    # Create Enemy entity
     enemy = Enemy(
-        x=0.0,  # Position doesn't matter for battle (set by battle scene)
+        x=0.0,
         y=0.0,
-        width=32,  # Standard enemy size
+        width=32,
         height=32,
-        speed=0.0,  # Enemies don't move in exploration
-        color=(200, 80, 80),  # Default enemy color
+        speed=0.0,
+        color=(200, 80, 80),
         max_hp=max_hp,
         hp=max_hp,
         attack_power=attack,
@@ -332,58 +379,73 @@ def _create_enemy_from_archetype(
     return enemy
 
 
-def _get_default_archetype_for_strength(strength: int) -> EnemyArchetype:
+def _get_default_archetype_for_power(power: float) -> EnemyArchetype:
     """
-    Get a default enemy archetype based on combat strength.
-    
-    This is a fallback when battle_unit_template is not set.
-    
-    Args:
-        strength: Combat strength (1-5)
-    
-    Returns:
-        EnemyArchetype to use
+    Get a default enemy archetype based on party power (fallback when choose_archetype_for_floor fails).
     """
-    # Map combat_strength (1-5) to appropriate archetypes
-    strength_to_archetype = {
-        1: "goblin_skirmisher",  # Weak enemies
-        2: "bandit_cutthroat",  # Moderate enemies
-        3: "orc_raider",        # Strong enemies
-        4: "dread_knight",      # Very strong enemies
-        5: "dragonkin",         # Boss-level enemies
-    }
-    
-    archetype_id = strength_to_archetype.get(strength, "bandit_cutthroat")
-    
+    if power < 25:
+        archetype_id = "goblin_skirmisher"
+    elif power < 45:
+        archetype_id = "bandit_cutthroat"
+    elif power < 70:
+        archetype_id = "orc_raider"
+    elif power < 100:
+        archetype_id = "dread_knight"
+    else:
+        archetype_id = "dragonkin"
+
     try:
-        archetype = get_archetype(archetype_id)
+        return get_archetype(archetype_id)
     except (KeyError, Exception) as e:
         print(f"Warning: get_archetype('{archetype_id}') failed: {e}")
-        archetype = None
-    
-        if archetype is None:
-            # Ultimate fallback: use goblin_skirmisher if available
-            try:
-                archetype = get_archetype("goblin_skirmisher")
-            except (KeyError, Exception):
-                archetype = None
-        
-        if archetype is None:
-            # Last resort: try to get any archetype
-            from systems.enemies import ENEMY_ARCHETYPES
-            if ENEMY_ARCHETYPES:
-                # Use the first available archetype
-                archetype = list(ENEMY_ARCHETYPES.values())[0]
-                print(f"Warning: Using fallback archetype '{archetype.id}' for strength {strength}")
-            else:
-                # This should never happen if enemy archetypes are properly registered
-                raise RuntimeError(
-                    f"No enemy archetype found for strength {strength} "
-                    "and no archetypes are registered. "
-                    "Ensure enemy archetypes are registered in systems.enemies."
-                )
-    
-    return archetype
+
+    for fallback_id in ("goblin_skirmisher", "bandit_cutthroat"):
+        try:
+            return get_archetype(fallback_id)
+        except (KeyError, Exception):
+            pass
+
+    from systems.enemies import ENEMY_ARCHETYPES
+    if ENEMY_ARCHETYPES:
+        return list(ENEMY_ARCHETYPES.values())[0]
+    raise RuntimeError(
+        "No enemy archetype found for power and no archetypes are registered."
+    )
+
+
+def _get_default_archetype_for_strength(strength: int) -> EnemyArchetype:
+    """
+    Get a default enemy archetype based on combat strength (1-5).
+    Legacy fallback; prefer _get_default_archetype_for_power when party power is available.
+    """
+    strength_to_archetype = {
+        1: "goblin_skirmisher",
+        2: "bandit_cutthroat",
+        3: "orc_raider",
+        4: "dread_knight",
+        5: "dragonkin",
+    }
+    archetype_id = strength_to_archetype.get(strength, "bandit_cutthroat")
+
+    try:
+        archetype = get_archetype(archetype_id)
+        if archetype is not None:
+            return archetype
+    except (KeyError, Exception) as e:
+        print(f"Warning: get_archetype('{archetype_id}') failed: {e}")
+
+    try:
+        return get_archetype("goblin_skirmisher")
+    except (KeyError, Exception):
+        pass
+
+    from systems.enemies import ENEMY_ARCHETYPES
+    if ENEMY_ARCHETYPES:
+        return list(ENEMY_ARCHETYPES.values())[0]
+    raise RuntimeError(
+        f"No enemy archetype found for strength {strength}. "
+        "Ensure enemy archetypes are registered in systems.enemies."
+    )
 
 
 def allied_party_to_battle_units(
@@ -396,7 +458,7 @@ def allied_party_to_battle_units(
     Convert an allied roaming party into Player entities for battle.
     
     Allied parties fight on the player's side but are AI-controlled.
-    They are similar to companions but are temporary (only for this battle).
+    Uses ally archetypes for variety and proper stat scaling.
     
     Args:
         party: The allied roaming party
@@ -407,58 +469,183 @@ def allied_party_to_battle_units(
     Returns:
         List of Player entities ready for battle (on player's side)
     """
-    from systems.party import CompanionDef, create_companion_entity
-    
-    # Calculate how many allies join (similar to enemy scaling, but fewer)
-    # Allied parties typically send 1-2 members to help
-    num_allies = min(2, max(1, party_type.combat_strength))
+    from world.entities import Player
+    from systems.allies import get_archetype, get_archetype_for_party_type
+    from systems.allies.scaling import compute_scaled_stats
+    from .party_power import get_party_power, power_to_stat_factor
+
+    power = get_party_power(party, party_type)
+    stat_factor = power_to_stat_factor(power)
+
+    # Number of allies: scale with party power (1-3 typically)
+    num_allies = min(3, max(1, int(1 + power / 40)))
     
     allies: List[Player] = []
     
-    # Get reference player stats for scaling
-    reference_player = game.player if game.player else None
-    if not reference_player:
+    # Try to use ally pack if multiple allies and pack exists
+    from systems.allies import get_packs_for_party_type
+    import random
+    
+    ally_pack = None
+    if num_allies >= 2:
+        available_packs = get_packs_for_party_type(party_type.id)
+        if available_packs:
+            # Weighted random selection
+            total_weight = sum(pack.weight for pack in available_packs)
+            if total_weight > 0:
+                rand = random.random() * total_weight
+                cumulative = 0
+                for pack in available_packs:
+                    cumulative += pack.weight
+                    if rand <= cumulative:
+                        ally_pack = pack
+                        break
+    
+    # If we have a pack, use it
+    if ally_pack and len(ally_pack.member_arch_ids) <= num_allies:
+        # Use pack members
+        for i, arch_id in enumerate(ally_pack.member_arch_ids[:num_allies]):
+            try:
+                ally_archetype = get_archetype(arch_id)
+            except KeyError:
+                # Fall back to single archetype lookup
+                ally_archetype = get_archetype_for_party_type(party_type.id)
+                if not ally_archetype:
+                    break
+    else:
+        # Try to get ally archetype for this party type
+        ally_archetype = None
+        
+        # First, try to get archetype by party type ID
+        ally_archetype = get_archetype_for_party_type(party_type.id)
+    
+    # If no archetype found, try using battle_unit_template (if it's an ally archetype)
+    if not ally_archetype and party_type.battle_unit_template:
+        try:
+            # Check if it's an ally archetype (not an enemy archetype)
+            ally_archetype = get_archetype(party_type.battle_unit_template)
+        except (KeyError, Exception):
+            # Not an ally archetype, fall through to default
+            pass
+    
+    # If still no archetype, use a default based on party type
+    if not ally_archetype:
+        # Fallback: create a basic ally based on party type
+        # This maintains backward compatibility
+        from systems.party import CompanionDef, create_companion_entity
+        
+        reference_player = game.player if game.player else None
+        if not reference_player:
+            return allies
+        
+        base_hp = getattr(reference_player, "max_hp", 30)
+        base_attack = getattr(reference_player, "attack_power", 5)
+        base_defense = int(getattr(reference_player, "defense", 0))
+        base_skill_power = float(getattr(reference_player, "skill_power", 1.0))
+        
+        for i in range(num_allies):
+            ally_template = CompanionDef(
+                id=f"{party_type.id}_ally",
+                name=party_type.name,
+                role="Ally",
+                class_id=None,
+                hp_factor=min(1.2, 0.6 + stat_factor * 0.4),
+                attack_factor=min(1.2, 0.5 + stat_factor * 0.4),
+                defense_factor=min(1.2, 0.6 + stat_factor * 0.4),
+                skill_power_factor=1.0,
+                skill_ids=["guard"]
+            )
+            
+            ally_entity = create_companion_entity(
+                template=ally_template,
+                state=None,
+                reference_player=reference_player,
+                hero_base_hp=base_hp,
+                hero_base_attack=base_attack,
+                hero_base_defense=base_defense,
+                hero_base_skill_power=base_skill_power,
+            )
+            
+            ally_entity.name = f"{party_type.name} Ally {i + 1}"
+            ally_entity.party_id = party.party_id
+            ally_entity.is_ally = True
+            ally_entity.ally_archetype_id = None  # No archetype for fallback
+            
+            allies.append(ally_entity)
+        
         return allies
     
-    base_hp = getattr(reference_player, "max_hp", 30)
-    base_attack = getattr(reference_player, "attack_power", 5)
-    base_defense = int(getattr(reference_player, "defense", 0))
-    base_skill_power = float(getattr(reference_player, "skill_power", 1.0))
+    # Use ally archetype system
+    archetypes_to_use = []
     
-    # Create a companion-like template for the ally
-    # Use party type name and combat strength to determine stats
-    for i in range(num_allies):
-        # Create a simple companion template based on party type
-        ally_template = CompanionDef(
-            id=f"{party_type.id}_ally",
-            name=party_type.name,
-            role="Ally",
-            class_id=None,  # No class for temporary allies
-            hp_factor=0.7 + (party_type.combat_strength * 0.1),  # 0.7-1.2
-            attack_factor=0.6 + (party_type.combat_strength * 0.1),  # 0.6-1.1
-            defense_factor=0.8 + (party_type.combat_strength * 0.1),  # 0.8-1.3
-            skill_power_factor=1.0,
-            skill_ids=[]  # Allies get basic skills
+    if ally_pack:
+        # Use pack members
+        for arch_id in ally_pack.member_arch_ids[:num_allies]:
+            try:
+                arch = get_archetype(arch_id)
+                archetypes_to_use.append(arch)
+            except KeyError:
+                pass
+    else:
+        # Use single archetype for all allies
+        for _ in range(num_allies):
+            archetypes_to_use.append(ally_archetype)
+    
+    # Create allies from archetypes
+    for i, archetype in enumerate(archetypes_to_use):
+        if not archetype:
+            continue
+            
+        # Calculate scaled stats
+        max_hp, attack, defense, skill_power, initiative = compute_scaled_stats(
+            archetype, player_level
         )
         
-        # Create ally entity (similar to companion)
-        ally_entity = create_companion_entity(
-            template=ally_template,
-            state=None,  # No state for temporary allies
-            reference_player=reference_player,
-            hero_base_hp=base_hp,
-            hero_base_attack=base_attack,
-            hero_base_defense=base_defense,
-            hero_base_skill_power=base_skill_power,
+        # Get reference player for dimensions/color
+        reference_player = game.player if game.player else None
+        if reference_player:
+            width = reference_player.width
+            height = reference_player.height
+            color = reference_player.color
+        else:
+            width = 32
+            height = 32
+            color = (100, 150, 255)  # Blue-ish for allies
+        
+        # Create Player entity
+        ally_entity = Player(
+            x=0.0,
+            y=0.0,
+            width=width,
+            height=height,
+            speed=0.0,
+            color=color,
+            max_hp=max_hp,
+            hp=max_hp,
+            attack_power=attack,
         )
         
-        # Set ally name
-        ally_name = f"{party_type.name} Ally {i + 1}"
-        ally_entity.name = ally_name
+        # Set additional stats
+        setattr(ally_entity, "defense", defense)
+        setattr(ally_entity, "skill_power", skill_power)
+        setattr(ally_entity, "initiative", initiative)
+        setattr(ally_entity, "level", player_level)
         
-        # Store party reference for post-combat
+        # Set ally properties
+        if len(archetypes_to_use) > 1:
+            ally_entity.name = f"{archetype.name} {i + 1}"
+        else:
+            ally_entity.name = archetype.name
         ally_entity.party_id = party.party_id
-        ally_entity.is_ally = True  # Mark as temporary ally
+        ally_entity.is_ally = True
+        ally_entity.ally_archetype_id = archetype.id  # Store archetype ID for AI profile
+        
+        # Store skill IDs for later assignment
+        ally_entity.ally_skill_ids = archetype.skill_ids.copy()
+        
+        # Store pack info if using a pack
+        if ally_pack:
+            ally_entity.ally_pack_id = ally_pack.id
         
         allies.append(ally_entity)
     

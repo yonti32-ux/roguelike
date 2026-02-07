@@ -323,7 +323,7 @@ class BattleAI:
                 base_damage = int(base_damage * falloff_factor)
                 base_damage = max(1, base_damage)  # Always deal at least 1 damage
         
-        damage = self.scene.combat.apply_damage(unit, target_unit, base_damage)
+        damage = self.scene.combat.apply_damage(unit, target_unit, base_damage, skill_id=None)
         
         # Different attack messages for ranged vs melee
         is_ranged = weapon_range > 1

@@ -523,7 +523,103 @@ def _draw_roaming_parties(
             text_rect = icon_text.get_rect(center=(screen_x, screen_y))
             screen.blit(icon_text, text_rect)
     
+    # Draw battle indicators
+    _draw_battle_indicators(game, screen, start_x, start_y, end_x, end_y, tile_size, zoom, player_x, player_y, mouse_x, mouse_y, config, current_time, explored_tiles)
+    
     return hovered_party
+
+
+def _draw_battle_indicators(
+    game: "Game",
+    screen: pygame.Surface,
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+    tile_size: int,
+    zoom: float,
+    player_x: int,
+    player_y: int,
+    mouse_x: int,
+    mouse_y: int,
+    config,
+    current_time: Optional[float],
+    explored_tiles: dict,
+) -> None:
+    """Draw visual indicators for ongoing battles."""
+    party_manager = game.overworld_map.party_manager
+    if party_manager is None or not hasattr(party_manager, "active_battles"):
+        return
+    
+    # Get battles in viewport
+    battles_in_view = []
+    for battle in party_manager.active_battles.values():
+        bx, by = battle.position
+        if start_x <= bx < end_x and start_y <= by < end_y:
+            battles_in_view.append(battle)
+    
+    for battle in battles_in_view:
+        bx, by = battle.position
+        
+        # Check visibility (same logic as parties)
+        dx = abs(bx - player_x)
+        dy = abs(by - player_y)
+        distance = max(dx, dy)
+        is_within_sight = distance <= config.sight_radius
+        
+        if is_within_sight:
+            is_visible = True
+        else:
+            if current_time is not None:
+                tile_pos = (bx, by)
+                if tile_pos not in explored_tiles:
+                    is_visible = False
+                else:
+                    last_seen = explored_tiles[tile_pos]
+                    time_since_seen = current_time - last_seen
+                    is_visible = time_since_seen <= config.memory_timeout_hours
+            else:
+                is_visible = game.overworld_map.is_explored(bx, by, current_time=None, timeout_hours=0.0)
+        
+        if not is_visible:
+            continue
+        
+        # Calculate screen position
+        screen_x = (bx - start_x) * tile_size + tile_size // 2
+        screen_y = (by - start_y) * tile_size + tile_size // 2
+        
+        # Draw pulsing red circle to indicate battle
+        import math
+        import time
+        pulse = (math.sin(time.time() * 3) + 1) / 2  # 0 to 1
+        radius = int((8 + pulse * 4) * zoom)
+        
+        # Draw outer glow
+        for i in range(3):
+            alpha = int(100 * (1 - i / 3) * (0.5 + pulse * 0.5))
+            color = (255, 0, 0, alpha)
+            glow_radius = radius + i * 2
+            # Create surface with per-pixel alpha
+            glow_surface = pygame.Surface((glow_radius * 2 + 2, glow_radius * 2 + 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, color, (glow_radius + 1, glow_radius + 1), glow_radius)
+            screen.blit(glow_surface, (screen_x - glow_radius - 1, screen_y - glow_radius - 1))
+        
+        # Draw main battle indicator
+        pygame.draw.circle(screen, (255, 0, 0), (screen_x, screen_y), radius, max(1, int(2 * zoom)))
+        pygame.draw.circle(screen, (255, 100, 100), (screen_x, screen_y), radius - 1)
+        
+        # Draw "!" icon if player can join
+        if battle.can_player_join and not battle.player_joined:
+            font_size = max(10, int(12 * zoom))
+            if not hasattr(game, "_battle_font_cache"):
+                game._battle_font_cache = {}
+            if font_size not in game._battle_font_cache:
+                game._battle_font_cache[font_size] = pygame.font.Font(None, font_size)
+            font = game._battle_font_cache[font_size]
+            
+            exclamation = font.render("!", True, (255, 255, 0))
+            exclamation_rect = exclamation.get_rect(center=(screen_x, screen_y - radius - 8))
+            screen.blit(exclamation, exclamation_rect)
 
 
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:

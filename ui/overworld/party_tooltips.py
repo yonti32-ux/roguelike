@@ -71,13 +71,15 @@ def create_party_tooltip_data(
     behavior_label = behavior_labels.get(party_type.behavior.value, "Unknown")
     lines.append(f"Behavior: {behavior_label}")
     
-    # Combat info
-    if party_type.can_attack:
-        lines.append(f"Combat Strength: {party_type.combat_strength}/5")
+    # Combat / threat (dynamic power rating)
+    if party_type.can_attack or party_type.can_be_attacked:
+        from world.overworld.party_power import get_party_power, get_power_display_string
+        power = get_party_power(party, party_type)
+        lines.append(f"Threat: {get_power_display_string(power)}")
         if party_type.can_be_attacked:
             lines.append("Can be attacked")
-        else:
-            lines.append("Cannot be attacked")
+        elif party_type.can_attack:
+            lines.append("Hostile")
     else:
         lines.append("Non-combatant")
     
@@ -103,12 +105,28 @@ def create_party_tooltip_data(
     
     # Relationships
     if party_type.enemy_types:
-        enemy_list = ", ".join(sorted(party_type.enemy_types))
-        lines.append(f"Enemies: {enemy_list}")
+        sorted_enemies = sorted(party_type.enemy_types)
+        if len(sorted_enemies) <= 3:
+            # Short list: show on one line
+            enemy_list = ", ".join(sorted_enemies)
+            lines.append(f"Enemies: {enemy_list}")
+        else:
+            # Long list: show label first, then list items
+            lines.append("Enemies:")
+            for enemy in sorted_enemies:
+                lines.append(f"  • {enemy}")
     
     if party_type.ally_types:
-        ally_list = ", ".join(sorted(party_type.ally_types))
-        lines.append(f"Allies: {ally_list}")
+        sorted_allies = sorted(party_type.ally_types)
+        if len(sorted_allies) <= 3:
+            # Short list: show on one line
+            ally_list = ", ".join(sorted_allies)
+            lines.append(f"Allies: {ally_list}")
+        else:
+            # Long list: show label first, then list items
+            lines.append("Allies:")
+            for ally in sorted_allies:
+                lines.append(f"  • {ally}")
     
     return TooltipData(
         title=title,

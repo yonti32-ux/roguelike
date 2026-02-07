@@ -88,6 +88,8 @@ from .pathfinding import BattlePathfinding
 from .combat import BattleCombat
 from .terrain import BattleTerrainManager
 from .ai import BattleAI
+# Initialize AI profiles on import
+from .ai.profiles import *  # This registers all profiles
 from .reactions import BattleReactions, ReactionType
 from .visual_effects import VisualEffectsManager
 from ..core.config import get_config
@@ -576,6 +578,10 @@ class BattleScene:
                     pass
 
             self.enemy_units.append(unit)
+        
+        # Apply pack synergies after all enemies are initialized
+        from systems.enemies.synergies import apply_synergies_to_enemies
+        apply_synergies_to_enemies(self.enemy_units)
 
         # Group label for enemies (used in victory text etc.)
         counter = Counter(enemy_type_list)
@@ -733,6 +739,10 @@ class BattleScene:
         # Reset movement points at start of turn
         unit.current_movement_points = unit.max_movement_points
         
+        # Process unique mechanics (for enemies)
+        if unit.side == "enemy":
+            self._process_unique_mechanics(unit)
+        
         # Auto-start movement mode for player units if not engaged
         if unit.side == "player" and unit.current_movement_points > 0:
             # Check if unit is engaged (adjacent to enemies)
@@ -749,6 +759,41 @@ class BattleScene:
             setattr(unit.entity, "hp", new_hp)
             if new_hp < current_hp:
                 self._log(f"{unit.name} takes {terrain.hazard_damage} damage from hazardous terrain!")
+    
+    def _process_unique_mechanics(self, unit: BattleUnit) -> None:
+        """
+        Process unique mechanics for enemy units at the start of their turn.
+        Handles regeneration, phase_through, and other passive abilities.
+        """
+        from systems.enemies import get_archetype
+        
+        arch_id = getattr(unit.entity, "archetype_id", None)
+        if not arch_id:
+            return
+        
+        try:
+            arch = get_archetype(arch_id)
+            if not hasattr(arch, "unique_mechanics"):
+                return
+            
+            mechanics = arch.unique_mechanics
+            if not mechanics:
+                return
+            
+            current_hp = getattr(unit.entity, "hp", 0)
+            max_hp = getattr(unit.entity, "max_hp", 1)
+            
+            # Regeneration: Heal each turn (scales with missing HP for balance)
+            if "regeneration" in mechanics:
+                missing_hp = max_hp - current_hp
+                # Heal 2-4 HP per turn, more if heavily damaged (balanced)
+                heal_amount = min(4, max(2, int(missing_hp * 0.1)))
+                new_hp = min(max_hp, current_hp + heal_amount)
+                setattr(unit.entity, "hp", new_hp)
+                if new_hp > current_hp:
+                    self._log(f"{unit.name} regenerates {new_hp - current_hp} HP!")
+        except (KeyError, AttributeError):
+            pass
 
     # ----- Grid / movement helpers -----
 
@@ -1290,7 +1335,7 @@ class BattleScene:
                 if skill.uses_skill_power:
                     sp = float(getattr(unit.entity, "skill_power", 1.0))
                     dmg *= max(DEFAULT_MIN_SKILL_POWER, sp)
-                damage = self.combat.apply_damage(unit, affected, int(dmg))
+                damage = self.combat.apply_damage(unit, affected, int(dmg), skill_id=skill.id)
                 total_damage += damage
                 
                 # Handle life drain healing (only from primary target)

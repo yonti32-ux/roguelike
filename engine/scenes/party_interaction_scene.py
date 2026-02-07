@@ -65,6 +65,13 @@ class PartyInteractionScene:
     
     def _action_talk(self) -> None:
         """Talk to the party."""
+        from world.overworld.party_player_interactions import (
+            get_party_information,
+            get_party_warning,
+            get_party_request,
+            can_party_offer_escort,
+        )
+        
         # Generate a random greeting based on party type
         greetings = {
             "merchant": [
@@ -102,6 +109,33 @@ class PartyInteractionScene:
         import random
         greeting = random.choice(party_greetings)
         self.game.add_message(f"{self.party_type.name}: {greeting}")
+        
+        # Get party information
+        if self.game.overworld_map:
+            player_pos = self.game.overworld_map.get_player_position()
+            
+            # Check for warnings
+            warning = get_party_warning(self.party, self.party_type, player_pos, self.game.overworld_map)
+            if warning:
+                self.game.add_message(f"{self.party_type.name}: {warning}")
+            
+            # Get information party can share
+            info = get_party_information(self.party, self.party_type, self.game.overworld_map)
+            if info:
+                # Share one piece of information
+                shared_info = random.choice(info)
+                self.game.add_message(f"{self.party_type.name}: {shared_info}")
+            
+            # Check for requests
+            request = get_party_request(self.party, self.party_type, self.game.overworld_map)
+            if request:
+                self.game.add_message(f"{self.party_type.name}: {request}")
+            
+            # Check if party can offer escort
+            if can_party_offer_escort(self.party, self.party_type, player_pos):
+                if random.random() < 0.3:  # 30% chance to offer
+                    self.game.add_message(f"{self.party_type.name}: We could escort you if you'd like.")
+        
         self.closed = True
     
     def _action_trade(self) -> None:
@@ -279,9 +313,10 @@ class PartyInteractionScene:
         
         if self.party.gold > 0:
             info_lines.append(f"Gold: {self.party.gold}")
-        
-        if self.party_type.combat_strength > 0:
-            info_lines.append(f"Combat Strength: {self.party_type.combat_strength}/5")
+        if getattr(self.party_type, "can_attack", False) or getattr(self.party_type, "can_be_attacked", False):
+            from world.overworld.party_power import get_party_power, get_power_display_string
+            power = get_party_power(self.party, self.party_type)
+            info_lines.append(f"Threat: {get_power_display_string(power)}")
         
         for line in info_lines:
             info_surface = self.font_small.render(line, True, (180, 180, 180))

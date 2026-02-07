@@ -1171,11 +1171,27 @@ class Game:
                 ally_unit.max_movement_points = max(1, int(BASE_MOVEMENT_POINTS * ally_speed))
                 ally_unit.current_movement_points = ally_unit.max_movement_points
                 
-                # Give basic skills (guard at minimum)
+                # Give skills from ally archetype (if available)
                 from systems.skills import get as get_skill
+                skill_ids = getattr(ally_entity, "ally_skill_ids", [])
+                
+                # Always give guard as a fallback
+                if not skill_ids:
+                    skill_ids = ["guard"]
+                
+                # Add all skills from archetype
+                for skill_id in skill_ids:
+                    try:
+                        skill = get_skill(skill_id)
+                        if skill:
+                            ally_unit.skills[skill_id] = skill
+                    except (KeyError, AttributeError):
+                        pass
+                
+                # Ensure guard is always available (for defensive actions)
                 try:
                     guard_skill = get_skill("guard")
-                    if guard_skill:
+                    if guard_skill and "guard" not in ally_unit.skills:
                         ally_unit.skills["guard"] = guard_skill
                 except (KeyError, AttributeError):
                     pass
@@ -1194,6 +1210,24 @@ class Game:
                 party.in_combat = True
                 
                 ally_index += 1
+        
+        # Apply synergies to allies if we have multiple
+        if ally_index > 1:
+            from systems.allies.synergies import apply_synergies_to_allies
+            # Get all ally units we just added
+            ally_units = [u for u in self.battle_scene.player_units if getattr(u, "is_ally", False)]
+            if len(ally_units) >= 2:
+                apply_synergies_to_allies(ally_units)
+                # Log synergy message if any bonuses were applied
+                pack_id = getattr(ally_units[0].entity, "ally_pack_id", None)
+                if pack_id:
+                    from systems.allies import get_pack
+                    try:
+                        pack = get_pack(pack_id)
+                        if pack.synergy_bonus:
+                            self.add_message(f"{pack.synergy_bonus}")
+                    except (KeyError, Exception):
+                        pass
         
         # Re-initialize turn order to include allies
         if ally_index > 0:
@@ -1335,8 +1369,9 @@ class Game:
                 current_relation = self.overworld_map.faction_manager.get_relation(
                     player_faction, party.faction_id
                 )
-                # Decrease by 5-15 points depending on party type
-                decrease = 5 + (party_type.combat_strength * 2)
+                from world.overworld.party_power import get_party_power
+                power = get_party_power(party, party_type)
+                decrease = 5 + max(0, int(power / 12))
                 new_relation = max(-100, current_relation - decrease)
                 
                 self.overworld_map.faction_manager.set_relation(

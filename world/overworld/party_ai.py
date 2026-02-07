@@ -25,10 +25,12 @@ def _handle_party_interaction(
     all_parties: List["RoamingParty"],
 ) -> None:
     """
-    Handle interactions between parties (combat, fleeing, etc.).
+    Handle interactions between parties (combat, fleeing, alliances, etc.).
     
     When parties meet, they may:
     - Fight (if both can attack and are enemies)
+    - Form temporary alliances (if allies and facing common enemy)
+    - Share information (if friendly)
     - One party flees (if weaker)
     - Ignore each other (if neutral)
     """
@@ -47,36 +49,225 @@ def _handle_party_interaction(
     if party.in_combat or other_party.in_combat:
         return
     
+    # Check relationship status
+    relationship = party.party_relationships.get(other_party.party_id, "neutral")
+    
+    # Check if they're enemies
+    is_enemy = (other_party.party_type_id in party_type.enemy_types or
+                party.party_type_id in other_party_type.enemy_types or
+                relationship == "enemy")
+    
+    # Check if they're allies
+    is_ally = (other_party.party_type_id in party_type.ally_types or
+               relationship == "ally" or
+               relationship == "friendly" or
+               other_party.party_id in party.temporary_allies)
+    
+    # If allies, check for information sharing or group formation
+    if is_ally and not is_enemy:
+        _handle_ally_interaction(party, party_type, other_party, other_party_type, overworld_map, all_parties)
+        return
+    
     # Both parties must be able to attack for combat
     if not (party_type.can_attack and other_party_type.can_attack):
         return
     
-    # Check if they're enemies
-    is_enemy = (other_party.party_type_id in party_type.enemy_types or
-                party.party_type_id in other_party_type.enemy_types)
-    
     if not is_enemy:
-        return  # Not enemies, no interaction
+        return  # Not enemies, no combat interaction
     
-    # Determine combat outcome based on strength
-    party_strength = party_type.combat_strength
-    other_strength = other_party_type.combat_strength
+    # Start a multi-turn battle instead of instant resolution
+    _start_party_battle(party, other_party, overworld_map)
+
+
+def _handle_ally_interaction(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    other_party: "RoamingParty",
+    other_party_type: "PartyType",
+    overworld_map: "OverworldMap",
+    all_parties: List["RoamingParty"],
+) -> None:
+    """
+    Handle interactions between allied parties.
     
-    # Add some randomness
-    party_roll = party_strength + random.randint(-1, 1)
-    other_roll = other_strength + random.randint(-1, 1)
+    Allies may:
+    - Share information about dangers/POIs
+    - Form temporary groups
+    - Coordinate movement
+    """
+    # Share information about known dangers
+    if party.known_dangers and random.random() < 0.3:  # 30% chance to share info
+        for location, description in list(party.known_dangers.items())[:2]:  # Share up to 2 dangers
+            if location not in other_party.known_dangers:
+                other_party.known_dangers[location] = description
     
-    # Determine winner
-    if party_roll > other_roll:
-        # This party wins
-        _resolve_party_combat(party, other_party, overworld_map, all_parties)
-    elif other_roll > party_roll:
-        # Other party wins
-        _resolve_party_combat(other_party, party, overworld_map, all_parties)
+    # Share information about visited POIs
+    if party.visited_pois and random.random() < 0.2:  # 20% chance
+        for poi_id in list(party.visited_pois)[:1]:  # Share 1 POI
+            if poi_id not in other_party.visited_pois:
+                other_party.visited_pois.add(poi_id)
+    
+    # Check if they should form a temporary group (if facing common enemy nearby)
+    nearby_enemy = None
+    for other in all_parties:
+        if (other.party_id != party.party_id and 
+            other.party_id != other_party.party_id and
+            other.party_type_id in party_type.enemy_types):
+            dist = min(party.distance_to_party(other), other_party.distance_to_party(other))
+            if dist <= party_type.sight_range:
+                nearby_enemy = other
+                break
+    
+    # Form temporary alliance if facing common enemy
+    if nearby_enemy and random.random() < 0.4:  # 40% chance to form temporary alliance
+        if other_party.party_id not in party.temporary_allies:
+            party.temporary_allies.add(other_party.party_id)
+        if party.party_id not in other_party.temporary_allies:
+            other_party.temporary_allies.add(party.party_id)
+        
+        # Coordinate movement towards enemy or away
+        if party_type.behavior.value == "hunt" or party_type.behavior.value == "guard":
+            # Move together towards enemy
+            party.set_target(nearby_enemy.x, nearby_enemy.y)
+            other_party.set_target(nearby_enemy.x, nearby_enemy.y)
+        elif party_type.behavior.value == "flee":
+            # Move together away from enemy
+            _make_party_flee(party, nearby_enemy, overworld_map)
+            _make_party_flee(other_party, nearby_enemy, overworld_map)
+
+
+def _start_party_battle(
+    party1: "RoamingParty",
+    party2: "RoamingParty",
+    overworld_map: "OverworldMap",
+) -> None:
+    """
+    Start a multi-turn battle between two parties.
+    
+    The battle will last multiple turns, giving the player time to join.
+    """
+    if not hasattr(overworld_map, "party_manager") or not overworld_map.party_manager:
+        return
+    
+    # Check if battle already exists
+    battle_at_pos = overworld_map.party_manager.get_battle_at(party1.x, party1.y)
+    if battle_at_pos:
+        # Battle already ongoing at this location
+        return
+    
+    # Mark parties as in combat
+    party1.in_combat = True
+    party2.in_combat = True
+    party1.combat_target_id = party2.party_id
+    party2.combat_target_id = party1.party_id
+    
+    # Create battle state
+    from .party_manager import BattleState
+    import uuid
+    
+    battle_id = f"battle_{uuid.uuid4().hex[:8]}"
+    battle = BattleState(
+        battle_id=battle_id,
+        party1_id=party1.party_id,
+        party2_id=party2.party_id,
+        position=(party1.x, party1.y),
+        max_turns=15,  # Battle lasts 15 turns (gives player time to join)
+        party1_health=100,
+        party2_health=100,
+        can_player_join=True,
+    )
+    
+    overworld_map.party_manager.active_battles[battle_id] = battle
+    
+    # Parties stop moving during battle
+    party1.clear_target()
+    party2.clear_target()
+    party1.behavior_state = "in_combat"
+    party2.behavior_state = "in_combat"
+
+
+def _update_party_battle(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    overworld_map: "OverworldMap",
+) -> None:
+    """
+    Update a party's participation in an ongoing battle.
+    
+    Called each turn to progress the battle.
+    """
+    if not party.in_combat or not party.combat_target_id:
+        return
+    
+    if not hasattr(overworld_map, "party_manager") or not overworld_map.party_manager:
+        return
+    
+    # Find the battle
+    battle = overworld_map.party_manager.get_battle_at(party.x, party.y)
+    if not battle:
+        # Battle ended or parties moved
+        party.in_combat = False
+        party.combat_target_id = None
+        return
+    
+    # Determine which side this party is on
+    is_party1 = battle.party1_id == party.party_id
+    target_party_id = battle.party2_id if is_party1 else battle.party1_id
+    
+    # Get target party
+    target_party = overworld_map.party_manager.get_party(target_party_id)
+    if not target_party:
+        # Target party is gone
+        party.in_combat = False
+        return
+    
+    from .party_types import get_party_type
+    from .party_power import get_party_power
+
+    target_party_type = get_party_type(target_party.party_type_id)
+    if not target_party_type:
+        return
+
+    party_power = get_party_power(party, party_type)
+    target_power = get_party_power(target_party, target_party_type)
+    # Simulate damage from power (scale similar to battle conversion)
+    party_damage = int(party_power * 0.4) + random.randint(0, 12)
+    target_damage = int(target_power * 0.4) + random.randint(0, 12)
+    
+    # Apply damage
+    if is_party1:
+        battle.party2_health = max(0, battle.party2_health - party_damage)
+        battle.party1_health = max(0, battle.party1_health - target_damage)
     else:
-        # Tie - both parties retreat
-        _make_party_flee(party, other_party, overworld_map)
-        _make_party_flee(other_party, party, overworld_map)
+        battle.party1_health = max(0, battle.party1_health - party_damage)
+        battle.party2_health = max(0, battle.party2_health - target_damage)
+    
+    # Check if battle should end
+    if battle.party1_health <= 0 or battle.party2_health <= 0:
+        # Battle is over
+        if battle.party1_health <= 0:
+            winner = target_party
+            loser = party
+        else:
+            winner = party
+            loser = target_party
+        
+        # Remove loser
+        overworld_map.party_manager.remove_party(loser.party_id)
+        
+        # Winner gains gold
+        if loser.gold > 0:
+            gold_gained = min(loser.gold, random.randint(1, loser.gold))
+            winner.gold += gold_gained
+        
+        # Clean up
+        winner.in_combat = False
+        winner.combat_target_id = None
+        winner.behavior_state = "idle"
+        
+        # Remove battle
+        if battle.battle_id in overworld_map.party_manager.active_battles:
+            del overworld_map.party_manager.active_battles[battle.battle_id]
 
 
 def _resolve_party_combat(
@@ -105,12 +296,75 @@ def _resolve_party_combat(
         winner.gold += gold_gained
         loser.gold -= gold_gained
     
+    # Winner learns about loser's known dangers
+    if loser.known_dangers:
+        winner.known_dangers.update(loser.known_dangers)
+    
     # Remove loser from map
     if hasattr(overworld_map, "party_manager") and overworld_map.party_manager:
         overworld_map.party_manager.remove_party(loser.party_id)
     
+    # Update relationships - parties that were allied with loser may become enemies
+    for other in all_parties:
+        if other.party_id in loser.temporary_allies:
+            other.temporary_allies.discard(loser.party_id)
+        if loser.party_id in other.temporary_allies:
+            other.temporary_allies.discard(loser.party_id)
+    
     # Log combat result (if game has message system, could add it here)
     # For now, combat happens silently but could be logged to message log
+
+
+def _coordinate_with_allies(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    nearby_allies: List[Tuple["RoamingParty", float]],
+    enemy: "RoamingParty",
+    overworld_map: "OverworldMap",
+) -> None:
+    """
+    Coordinate movement with nearby allies when facing a common enemy.
+    
+    Parties may:
+    - Form defensive formations
+    - Flank enemies
+    - Support each other
+    """
+    if not nearby_allies:
+        return
+    
+    # Sort allies by distance
+    nearby_allies.sort(key=lambda x: x[1])
+    
+    # If we have multiple allies, form a formation
+    if len(nearby_allies) >= 2:
+        # Simple formation: position around enemy
+        # Party takes one position, allies take others
+        enemy_x, enemy_y = enemy.x, enemy.y
+        
+        # Calculate formation positions (circle around enemy)
+        formation_radius = 3
+        angle_step = 2 * math.pi / (len(nearby_allies) + 1)
+        
+        # Party's position in formation
+        party_angle = 0
+        party_form_x = int(enemy_x + formation_radius * math.cos(party_angle))
+        party_form_y = int(enemy_y + formation_radius * math.sin(party_angle))
+        
+        # Clamp and validate
+        party_form_x = max(0, min(overworld_map.width - 1, party_form_x))
+        party_form_y = max(0, min(overworld_map.height - 1, party_form_y))
+        
+        if overworld_map.is_walkable(party_form_x, party_form_y):
+            party.set_target(party_form_x, party_form_y)
+            party.behavior_state = "forming_formation"
+    else:
+        # Single ally - support them by moving to their side
+        ally, ally_dist = nearby_allies[0]
+        if ally_dist > 2:
+            # Move closer to ally
+            party.set_target(ally.x, ally.y)
+            party.behavior_state = "supporting_ally"
 
 
 def _make_party_flee(
@@ -303,10 +557,71 @@ def get_next_wander_target(
     return (target_x, target_y)
 
 
+def _handle_poi_interaction(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    poi: "PointOfInterest",
+    overworld_map: "OverworldMap",
+    current_time: float,
+) -> None:
+    """
+    Handle party interaction with a POI.
+    
+    Parties may:
+    - Rest at friendly POIs
+    - Resupply at towns/villages
+    - Spawn from POIs (if appropriate)
+    - Guard POIs
+    - Learn about POI state
+    """
+    poi_type = getattr(poi, "poi_type", None) or getattr(poi, "type", None)
+    
+    # Mark POI as visited
+    if poi.poi_id not in party.visited_pois:
+        party.visited_pois.add(poi.poi_id)
+    party.last_poi_visit_time[poi.poi_id] = current_time
+    
+    # Check if party can rest at this POI
+    if poi_type in ["village", "town", "camp"]:
+        # Check faction alignment
+        can_rest = True
+        if poi.faction_id and party.faction_id:
+            # Check if factions are aligned (simplified - same faction or neutral)
+            if poi.faction_id != party.faction_id:
+                # Check faction relations if available
+                if hasattr(overworld_map, "faction_manager") and overworld_map.faction_manager:
+                    relation = overworld_map.faction_manager.get_relation(party.faction_id, poi.faction_id)
+                    if relation < 0:  # Hostile relations
+                        can_rest = False
+        
+        if can_rest and party.rest_cooldown <= current_time:
+            # Rest at POI (reduces cooldown, heals party state)
+            party.rest_cooldown = current_time + 20.0  # Can rest again after 20 moves
+            party.health_state = "healthy"  # Restore health
+            party.behavior_state = "resting"
+    
+    # Resupply at towns/villages (for merchants, traders)
+    if poi_type in ["town", "village"] and party.party_type_id in ["merchant", "trader", "villager"]:
+        if party.resupply_cooldown <= current_time:
+            party.resupply_cooldown = current_time + 30.0  # Can resupply after 30 moves
+            # Merchants gain some gold when visiting towns
+            if party.party_type_id in ["merchant", "trader"]:
+                party.gold += random.randint(50, 200)
+    
+    # Guards patrol around POIs
+    if party_type.behavior.value == "guard" and poi_type in party_type.preferred_poi_types:
+        # Set guard position to POI
+        if party.patrol_center_x is None or party.patrol_center_y is None:
+            party.patrol_center_x = poi.position[0]
+            party.patrol_center_y = poi.position[1]
+            party.patrol_radius = random.randint(3, 6)
+
+
 def get_travel_target(
     party: "RoamingParty",
     party_type: "PartyType",
     overworld_map: "OverworldMap",
+    current_time: float = 0.0,
 ) -> Optional[Tuple[int, int]]:
     """
     Get travel target for a party (between POIs).
@@ -323,9 +638,16 @@ def get_travel_target(
             # Check if we're close enough (within 2 tiles)
             dist = party.distance_to(poi.position[0], poi.position[1])
             if dist <= 2:
-                # Reached destination, pick a new one
+                # Reached destination - interact with POI
+                _handle_poi_interaction(party, party_type, poi, overworld_map, current_time)
+                
+                # Pick a new destination after visiting
                 party.destination_poi_id = None
                 party.origin_poi_id = poi.poi_id
+                
+                # Stay at POI for a few turns (rest/resupply)
+                if party.behavior_state == "resting":
+                    return None  # Don't move while resting
             else:
                 # Continue to destination
                 return poi.position
@@ -335,10 +657,14 @@ def get_travel_target(
     
     # Filter POIs based on preferences
     candidate_pois = []
+    preferred_pois = []
+    
     for poi in all_pois:
-        # Skip current origin
+        # Skip current origin (unless enough time has passed)
         if poi.poi_id == party.origin_poi_id:
-            continue
+            last_visit = party.last_poi_visit_time.get(poi.poi_id, 0.0)
+            if current_time - last_visit < 50.0:  # Don't return to same POI too soon
+                continue
         
         # Check preferences
         poi_type = getattr(poi, "poi_type", None) or getattr(poi, "type", None)
@@ -347,18 +673,21 @@ def get_travel_target(
         
         # Prefer certain types if specified
         if party_type.preferred_poi_types:
-            if poi_type not in party_type.preferred_poi_types:
-                # Still allow, but lower priority
-                pass
+            if poi_type in party_type.preferred_poi_types:
+                preferred_pois.append(poi)
+                continue
         
         candidate_pois.append(poi)
     
-    if not candidate_pois:
+    # Prefer preferred POIs, but allow others
+    if preferred_pois:
+        target_poi = random.choice(preferred_pois)
+    elif candidate_pois:
+        target_poi = random.choice(candidate_pois)
+    else:
         # No valid POIs, just wander
         return get_next_wander_target(party, party_type, overworld_map)
     
-    # Pick a random candidate
-    target_poi = random.choice(candidate_pois)
     party.destination_poi_id = target_poi.poi_id
     
     return target_poi.position
@@ -394,12 +723,47 @@ def update_party_ai(
     
     # Handle combat state
     if party.in_combat:
-        # Combat logic handled elsewhere
+        # Update ongoing battle
+        _update_party_battle(party, party_type, overworld_map)
         return
+    
+    # Update cooldowns
+    if party.rest_cooldown > 0:
+        party.rest_cooldown = max(0, party.rest_cooldown - 1.0)
+    if party.resupply_cooldown > 0:
+        party.resupply_cooldown = max(0, party.resupply_cooldown - 1.0)
+    
+    # Check if party is at a POI and should interact
+    nearby_pois = overworld_map.get_pois_in_range(party.x, party.y, radius=2)
+    for poi in nearby_pois:
+        dist = party.distance_to(poi.position[0], poi.position[1])
+        if dist <= 2:
+            # Check if we should interact with this POI
+            if poi.poi_id not in party.visited_pois or current_time - party.last_poi_visit_time.get(poi.poi_id, 0.0) > 30.0:
+                _handle_poi_interaction(party, party_type, poi, overworld_map, current_time)
+    
+    # Check for player (if available)
+    player_position = overworld_map.get_player_position()
+    if player_position:
+        from .party_player_interactions import update_party_player_awareness
+        update_party_player_awareness(party, party_type, player_position, overworld_map)
+        
+        # Handle following player
+        if party.following_party_id == "player":
+            player_x, player_y = player_position
+            dist_to_player = party.distance_to(player_x, player_y)
+            if dist_to_player > 3:  # Follow if more than 3 tiles away
+                party.set_target(player_x, player_y)
+            elif dist_to_player <= 1:
+                # Close enough, might stop following after a while
+                if random.random() < 0.1:  # 10% chance to stop following each turn
+                    party.following_party_id = None
+                    party.behavior_state = "idle"
+                    party.clear_target()
     
     # Check for nearby enemies and allies
     nearby_enemy = None
-    nearby_ally = None
+    nearby_allies = []
     for other_party in all_parties:
         if other_party.party_id == party.party_id:
             continue
@@ -410,14 +774,20 @@ def update_party_ai(
         
         # Check if this is an enemy
         if other_party.party_type_id in party_type.enemy_types:
-            nearby_enemy = other_party
+            if nearby_enemy is None or dist < party.distance_to_party(nearby_enemy):
+                nearby_enemy = other_party
             # Check for party-to-party combat (only if adjacent)
             if dist <= 1:
                 _handle_party_interaction(party, party_type, other_party, overworld_map, all_parties)
-            break
         # Check if this is an ally
-        elif other_party.party_type_id in party_type.ally_types:
-            nearby_ally = other_party
+        elif (other_party.party_type_id in party_type.ally_types or
+              other_party.party_id in party.temporary_allies):
+            nearby_allies.append((other_party, dist))
+    
+    # Coordinate with nearby allies
+    if nearby_allies and nearby_enemy:
+        # Form defensive formation with allies
+        _coordinate_with_allies(party, party_type, nearby_allies, nearby_enemy, overworld_map)
     
     # React to enemies based on behavior
     if nearby_enemy:
@@ -453,7 +823,7 @@ def update_party_ai(
         if party_type.behavior == PartyBehavior.PATROL:
             target = get_next_patrol_target(party, party_type, overworld_map)
         elif party_type.behavior == PartyBehavior.TRAVEL:
-            target = get_travel_target(party, party_type, overworld_map)
+            target = get_travel_target(party, party_type, overworld_map, current_time)
         elif party_type.behavior == PartyBehavior.WANDER:
             target = get_next_wander_target(party, party_type, overworld_map)
         elif party_type.behavior == PartyBehavior.GUARD:

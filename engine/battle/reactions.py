@@ -196,7 +196,7 @@ class BattleReactions:
         base_damage = int(base_damage * 0.75)  # AoO deals 75% damage
         
         # Apply damage
-        damage = self.scene.combat.apply_damage(reactor, target, base_damage)
+        damage = self.scene.combat.apply_damage(reactor, target, base_damage, skill_id=None)
         
         # Log the reaction
         self.scene._log(f"{reactor.name} makes an attack of opportunity against {target.name} for {damage} dmg!")

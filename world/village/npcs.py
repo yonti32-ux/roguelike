@@ -244,6 +244,8 @@ class VillagerNPC(VillageNPC):
         )
         self.npc_id = npc_id
         self.dialogue = _generate_villager_dialogue()
+        # Add speed for wandering behavior
+        self.speed = 30.0  # Slower than enemies, peaceful pace
 
 
 class ElderNPC(VillageNPC):

@@ -15,6 +15,11 @@ try:
     from world.village.npcs import VillageNPC  # Village NPCs
 except ImportError:
     VillageNPC = None  # Fallback if village system not available
+
+try:
+    from world.town.npcs import TownNPC  # Town NPCs
+except ImportError:
+    TownNPC = None  # Fallback if town system not available
 from world.ai import update_enemy_ai  # NEW: centralised enemy AI
 from systems.inventory import get_item_def
 from systems.loot import roll_chest_loot, get_shop_stock_for_floor
@@ -379,6 +384,23 @@ class ExplorationController:
         for entity in list(game.current_map.entities):
             if isinstance(entity, Enemy):
                 update_enemy_ai(entity, game, dt)
+        
+        # --- NPC updates (wandering villagers/citizens) ---
+        try:
+            from world.npc_ai import update_npc_ai
+            for entity in list(game.current_map.entities):
+                # Check for both VillageNPC and TownNPC
+                is_npc = False
+                if VillageNPC is not None and isinstance(entity, VillageNPC):
+                    is_npc = True
+                elif TownNPC is not None and isinstance(entity, TownNPC):
+                    is_npc = True
+                
+                if is_npc:
+                    update_npc_ai(entity, game, dt)
+        except ImportError:
+            # NPC AI not available, skip
+            pass
 
     # ---------------------------------------------------------------------
     # Internal helpers
@@ -749,9 +771,9 @@ class ExplorationController:
         max_distance_px: int = TILE_SIZE,
     ) -> Optional["VillageNPC"]:
         """
-        Return a village NPC entity near/under the player, or None.
+        Return a village or town NPC entity near/under the player, or None.
         """
-        if VillageNPC is None:
+        if VillageNPC is None and TownNPC is None:
             return None
         
         game = self.game
@@ -763,8 +785,16 @@ class ExplorationController:
         max_dist_sq = max_distance_px * max_distance_px
         
         for entity in getattr(game.current_map, "entities", []):
-            if not isinstance(entity, VillageNPC):
+            # Check for both VillageNPC and TownNPC
+            is_npc = False
+            if VillageNPC is not None and isinstance(entity, VillageNPC):
+                is_npc = True
+            elif TownNPC is not None and isinstance(entity, TownNPC):
+                is_npc = True
+            
+            if not is_npc:
                 continue
+            
             mx, my = entity.rect.center
             dx = mx - px
             dy = my - py
@@ -810,13 +840,38 @@ class ExplorationController:
             npc_id = getattr(npc, "npc_id", "elder")
             open_quest_screen(game, elder_id=npc_id)
             
-        elif npc_type == "villager":
+        elif npc_type == "mayor":
+            # Open quest screen (mayor works like elder)
+            from systems.village.services import open_quest_screen
+            npc_id = getattr(npc, "npc_id", "mayor")
+            open_quest_screen(game, elder_id=npc_id)
+            
+        elif npc_type == "blacksmith":
+            # Blacksmith - for now just dialogue (can add upgrade system later)
+            dialogue = getattr(npc, "dialogue", [])
+            if dialogue:
+                game.add_message(dialogue[0])
+            else:
+                game.add_message(f"{getattr(npc, 'name', 'Blacksmith')} offers to upgrade your equipment.")
+            # TODO: Add blacksmith upgrade system
+            
+        elif npc_type == "librarian":
+            # Librarian - for now just dialogue (can add skill book system later)
+            dialogue = getattr(npc, "dialogue", [])
+            if dialogue:
+                game.add_message(dialogue[0])
+            else:
+                game.add_message(f"{getattr(npc, 'name', 'Librarian')} offers access to skill books.")
+            # TODO: Add library/skill book system
+            
+        elif npc_type == "villager" or npc_type == "citizen":
             # Show dialogue (for now, just a message)
             dialogue = getattr(npc, "dialogue", [])
             if dialogue:
                 game.add_message(dialogue[0])
             else:
-                game.add_message(f"{getattr(npc, 'name', 'Villager')} greets you warmly.")
+                name = "Villager" if npc_type == "villager" else "Citizen"
+                game.add_message(f"{getattr(npc, 'name', name)} greets you warmly.")
         elif npc_type == "camp_merchant":
             # Camp merchant - open camp shop
             from systems.camp.services import open_camp_merchant
@@ -1292,12 +1347,18 @@ class ExplorationController:
             px, py = game.player.rect.center
             player_tx, player_ty = game.current_map.world_to_tile(px, py)
             
-            # Check if we're in a village
-            from world.poi.types import VillagePOI, CampPOI
+            # Check if we're in a village, town, or camp
+            from world.poi.types import VillagePOI, TownPOI, CampPOI
             if game.current_poi is not None:
                 if isinstance(game.current_poi, VillagePOI):
                     # Check if standing on any village exit tile
                     exit_tiles = getattr(game.current_map, "village_exit_tiles", None)
+                    if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
+                        game.exit_poi()
+                        return
+                elif isinstance(game.current_poi, TownPOI):
+                    # Check if standing on any town exit tile
+                    exit_tiles = getattr(game.current_map, "town_exit_tiles", None)
                     if exit_tiles is not None and (player_tx, player_ty) in exit_tiles:
                         game.exit_poi()
                         return

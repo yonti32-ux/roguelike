@@ -121,6 +121,11 @@ class OverworldController:
             self.try_move(direction)
             return
         
+        # Join battle (J key)
+        if event.key == pygame.K_j:
+            if self.try_join_battle():
+                return  # Battle joined, don't process other actions
+        
         # Interaction (enter POI or interact with party)
         if input_manager is not None:
             if input_manager.event_matches_action(InputAction.INTERACT, event):
@@ -444,4 +449,125 @@ class OverworldController:
         """Check for automatic party interactions (combat, etc.)."""
         # This is now only for automatic interactions, not player-initiated
         pass
+    
+    def try_join_battle(self) -> bool:
+        """
+        Try to join a nearby battle.
+        
+        Returns:
+            True if a battle was joined, False otherwise
+        """
+        game = self.game
+        
+        if game.overworld_map is None or game.overworld_map.party_manager is None:
+            return False
+        
+        player_x, player_y = game.overworld_map.get_player_position()
+        
+        # Check for battles within 2 tiles
+        nearby_battles = game.overworld_map.party_manager.get_battles_in_range(
+            player_x, player_y, radius=2
+        )
+        
+        if not nearby_battles:
+            return False
+        
+        # Get the closest battle
+        closest_battle = None
+        closest_dist = float('inf')
+        for battle in nearby_battles:
+            bx, by = battle.position
+            dist = max(abs(bx - player_x), abs(by - player_y))
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_battle = battle
+        
+        if not closest_battle or not closest_battle.can_player_join:
+            return False
+        
+        # Show battle join dialog
+        self._show_battle_join_dialog(closest_battle)
+        return True
+    
+    def _show_battle_join_dialog(self, battle) -> None:
+        """Show dialog for player to choose which side to join."""
+        from engine.scenes.battle_join_scene import BattleJoinScene
+        
+        scene = BattleJoinScene(self.game.screen, battle, self.game)
+        result = scene.run()
+        
+        if result:
+            side, party1, party2 = result
+            self._join_battle(battle, side, party1, party2)
+    
+    def _join_battle(self, battle, side: str, party1, party2) -> None:
+        """Join a battle on the specified side."""
+        from world.overworld.battle_conversion import party_to_battle_enemies
+        from world.overworld.party_types import get_party_type
+        
+        # Mark battle as joined
+        battle.player_joined = True
+        battle.side_joined = side
+        battle.can_player_join = False
+        
+        # Determine which party is enemy and which is ally
+        if side == "party1":
+            enemy_party = party2
+            ally_party = party1
+        else:
+            enemy_party = party1
+            ally_party = party2
+        
+        # Get player level
+        player_level = 1
+        if self.game.player:
+            if hasattr(self.game.player, 'level'):
+                player_level = self.game.player.level
+            elif hasattr(self.game, 'hero_stats') and self.game.hero_stats:
+                player_level = getattr(self.game.hero_stats, 'level', 1)
+        
+        # Convert enemy party to battle enemies
+        enemy_party_type = get_party_type(enemy_party.party_type_id)
+        if not enemy_party_type:
+            return
+        
+        enemies = party_to_battle_enemies(
+            party=enemy_party,
+            party_type=enemy_party_type,
+            game=self.game,
+            player_level=player_level
+        )
+        
+        if not enemies:
+            self.game.add_message("Unable to join battle.")
+            return
+        
+        # Add allies if available
+        allies = []
+        if ally_party:
+            ally_party_type = get_party_type(ally_party.party_type_id)
+            if ally_party_type and ally_party_type.can_join_battle:
+                # Convert ally party to battle allies
+                from world.overworld.battle_conversion import allied_party_to_battle_units
+                allies = allied_party_to_battle_units(
+                    party=ally_party,
+                    party_type=ally_party_type,
+                    game=self.game,
+                    player_level=player_level
+                )
+        
+        # Start battle
+        self.game.add_message(f"You join the battle on {ally_party.party_name if ally_party else 'your own'} side!")
+        self.game.start_battle_from_overworld(enemies, allies=allies, context_party=enemy_party)
+        
+        # Remove battle from active battles (battle is now player-controlled)
+        if hasattr(self.game.overworld_map.party_manager, 'active_battles'):
+            if battle.battle_id in self.game.overworld_map.party_manager.active_battles:
+                del self.game.overworld_map.party_manager.active_battles[battle.battle_id]
+        
+        # Mark parties as no longer in combat (player took over)
+        if party1:
+            party1.in_combat = False
+        if party2:
+            party2.in_combat = False
 

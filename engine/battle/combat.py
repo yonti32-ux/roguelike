@@ -17,6 +17,7 @@ from settings import (
 )
 from systems.statuses import outgoing_multiplier, incoming_multiplier
 from engine.battle.types import BattleUnit
+from systems.enemies import get_archetype
 
 
 def _get_distance(gx1: int, gy1: int, gx2: int, gy2: int, use_chebyshev: bool = False) -> int:
@@ -121,13 +122,71 @@ class BattleCombat:
         
         return False
     
-    def calculate_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int, is_crit: bool = False) -> int:
+    def _get_damage_type(self, attacker: BattleUnit, skill_id: Optional[str] = None) -> str:
+        """
+        Determine damage type from skill or attack.
+        Returns: "fire", "ice", "poison", "magic", or "physical" (default)
+        """
+        if skill_id:
+            # Map skill IDs to damage types
+            fire_skills = ["fireball", "flame_wall", "ignite"]
+            ice_skills = ["ice_bolt", "frost_nova", "freeze"]
+            poison_skills = ["poison_strike", "disease_strike", "venom_blast"]
+            magic_skills = ["dark_hex", "lightning_bolt", "magic_missile", "void_bolt"]
+            
+            if skill_id in fire_skills:
+                return "fire"
+            elif skill_id in ice_skills:
+                return "ice"
+            elif skill_id in poison_skills:
+                return "poison"
+            elif skill_id in magic_skills:
+                return "magic"
+        
+        # Default to physical for basic attacks
+        return "physical"
+    
+    def _get_resistance_multiplier(self, target: BattleUnit, damage_type: str) -> float:
+        """
+        Get resistance multiplier for damage type.
+        Returns: 0.0 = immune, 0.5 = 50% damage, 1.0 = normal, 1.5 = 150% (weakness)
+        """
+        # Check if target has resistances from archetype
+        arch_id = getattr(target.entity, "archetype_id", None)
+        if arch_id:
+            try:
+                arch = get_archetype(arch_id)
+                if hasattr(arch, "resistances") and arch.resistances:
+                    return arch.resistances.get(damage_type, 1.0)
+            except (KeyError, AttributeError):
+                pass
+        
+        # Default: no resistance
+        return 1.0
+    
+    def calculate_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int, is_crit: bool = False, skill_id: Optional[str] = None) -> int:
         """
         Calculate damage that would be dealt without actually applying it.
         Useful for previews.
         """
         damage = int(base_damage * self._outgoing_multiplier(attacker))
         damage = int(damage * self._incoming_multiplier(target))
+        
+        # Apply resistance/weakness based on damage type
+        damage_type = self._get_damage_type(attacker, skill_id)
+        resistance_mult = self._get_resistance_multiplier(target, damage_type)
+        damage = int(damage * resistance_mult)
+        
+        # Log resistance messages (only for significant changes)
+        if resistance_mult == 0.0:
+            # Will be logged in apply_damage
+            pass
+        elif resistance_mult < 0.7:
+            # Strong resistance
+            pass
+        elif resistance_mult > 1.3:
+            # Weakness
+            pass
         
         # Apply flanking bonus (melee attacks only)
         weapon_range = self._get_weapon_range(attacker)
@@ -147,10 +206,16 @@ class BattleCombat:
         
         return damage
     
-    def apply_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int) -> int:
+    def apply_damage(self, attacker: BattleUnit, target: BattleUnit, base_damage: int, skill_id: Optional[str] = None) -> int:
         """
         Apply damage from attacker to target, respecting statuses and defenses.
         Returns the actual damage dealt.
+        
+        Args:
+            attacker: Unit dealing damage
+            target: Unit receiving damage
+            base_damage: Base damage amount
+            skill_id: Optional skill ID for damage type determination
         """
         # Check for dodge first (before any damage calculations)
         dodge_chance = float(getattr(target.entity, "dodge_chance", 0.0))
@@ -168,6 +233,18 @@ class BattleCombat:
             })
             return 0  # No damage dealt
         
+        # Determine damage type and check resistances
+        damage_type = self._get_damage_type(attacker, skill_id)
+        resistance_mult = self._get_resistance_multiplier(target, damage_type)
+        
+        # Log resistance messages
+        if resistance_mult == 0.0:
+            self.scene._log(f"{target.name} is immune to {damage_type} damage!")
+        elif resistance_mult < 0.7:
+            self.scene._log(f"{target.name} resists {damage_type} damage!")
+        elif resistance_mult > 1.3:
+            self.scene._log(f"{target.name} is weak to {damage_type} damage!")
+        
         # Roll for critical hit
         is_crit = self._roll_critical_hit()
         
@@ -176,7 +253,7 @@ class BattleCombat:
         is_flanking = weapon_range == 1 and self.is_flanking(attacker, target)
         has_cover = weapon_range > 1 and self.has_cover(attacker, target)
         
-        damage = self.calculate_damage(attacker, target, base_damage, is_crit=is_crit)
+        damage = self.calculate_damage(attacker, target, base_damage, is_crit=is_crit, skill_id=skill_id)
         
         # Log flanking/cover messages
         if is_flanking:

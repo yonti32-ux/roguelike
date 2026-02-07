@@ -21,6 +21,9 @@ def should_initiate_combat(
     """
     Determine if combat should be initiated with a party based on faction relations.
     
+    Uses effective alignment which considers reputation/faction relations,
+    allowing parties to change from allies to enemies dynamically.
+    
     Args:
         party: The roaming party to check
         party_type: The party type definition
@@ -32,40 +35,28 @@ def should_initiate_combat(
         - should_fight: True if combat should happen
         - reason: Explanation for the decision
     """
-    # Always fight if party is explicitly hostile
-    if party_type.alignment.value == "hostile":
+    from .battle_conversion import get_effective_alignment
+    
+    # Get effective alignment (considers faction relations)
+    effective_alignment = get_effective_alignment(party, party_type, game, player_faction)
+    
+    # Always fight if effective alignment is hostile
+    if effective_alignment == "hostile":
+        # Check if this is due to faction relations or base alignment
+        if party_type.alignment.value != "hostile" and party.faction_id and player_faction:
+            if game.overworld_map and game.overworld_map.faction_manager:
+                relation = game.overworld_map.faction_manager.get_relation(
+                    player_faction, party.faction_id
+                )
+                return True, f"Faction relations are hostile ({relation})"
         return True, "Party is hostile"
     
-    # Never fight if party is explicitly friendly
-    if party_type.alignment.value == "friendly":
+    # Never fight if effective alignment is friendly
+    if effective_alignment == "friendly":
         return False, "Party is friendly"
     
-    # For neutral parties, check faction relations
-    if party_type.alignment.value == "neutral":
-        if not party.faction_id or not player_faction:
-            # No faction info - default to neutral (no combat)
-            return False, "Neutral party, no faction conflict"
-        
-        # Check faction relations
-        if game.overworld_map and game.overworld_map.faction_manager:
-            relation = game.overworld_map.faction_manager.get_relation(
-                player_faction, party.faction_id
-            )
-            
-            # Hostile relations (< -50) -> combat
-            if relation < -50:
-                return True, f"Faction relations are hostile ({relation})"
-            
-            # Very friendly relations (> 50) -> no combat
-            if relation > 50:
-                return False, f"Faction relations are friendly ({relation})"
-            
-            # Neutral range (-50 to 50) -> no combat by default
-            # Player can still manually attack if they want
-            return False, f"Faction relations are neutral ({relation})"
-    
-    # Default: no combat
-    return False, "No reason to fight"
+    # Neutral parties - no combat by default, but player can manually attack
+    return False, "Neutral party, no faction conflict"
 
 
 def get_allied_parties_for_battle(
