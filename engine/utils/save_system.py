@@ -362,6 +362,9 @@ def _serialize_overworld(overworld_map) -> Dict[str, Any]:
     # Serialize explored tiles
     explored_list = [list(coord) for coord in overworld_map.explored_tiles]
     
+    # Discovery log (codex) - list of discovered POI records
+    discovery_log = getattr(overworld_map, "discovery_log", [])
+    
     return {
         "width": overworld_map.width,
         "height": overworld_map.height,
@@ -369,6 +372,7 @@ def _serialize_overworld(overworld_map) -> Dict[str, Any]:
         "tiles": tiles_data,
         "player_position": list(overworld_map.player_position),
         "explored_tiles": explored_list,
+        "discovery_log": discovery_log,
     }
 
 
@@ -387,6 +391,15 @@ def _serialize_pois(overworld_map) -> Dict[str, Any]:
             "cleared": poi.cleared,
             "state": poi.state,
         }
+        # Temporary POI fields (for quest/event POIs)
+        if getattr(poi, "is_temporary", False):
+            poi_data["is_temporary"] = True
+            if getattr(poi, "source_quest_id", None):
+                poi_data["source_quest_id"] = poi.source_quest_id
+            if getattr(poi, "source_event_id", None):
+                poi_data["source_event_id"] = poi.source_event_id
+            if getattr(poi, "expires_at_hours", None) is not None:
+                poi_data["expires_at_hours"] = poi.expires_at_hours
         
         # Add type-specific data using extensibility method
         poi_specific_data = poi.serialize_state()
@@ -805,6 +818,9 @@ def _deserialize_overworld(data: Dict[str, Any]):
     explored_list = data.get("explored_tiles", [])
     overworld.explored_tiles = {tuple(coord) for coord in explored_list}
     
+    # Discovery log (codex)
+    overworld.discovery_log = list(data.get("discovery_log", []))
+    
     # Restore player position (this will also explore tiles in sight radius,
     # but we've already restored the explored tiles, so we won't lose any)
     player_pos = data.get("player_position", [0, 0])
@@ -851,11 +867,19 @@ def _deserialize_pois(overworld_map, pois_data: Dict[str, Any]) -> None:
         poi.discovered = poi_data.get("discovered", False)
         poi.cleared = poi_data.get("cleared", False)
         poi.state = poi_data.get("state", {})
+        # Temporary POI fields
+        poi.is_temporary = poi_data.get("is_temporary", False)
+        poi.source_quest_id = poi_data.get("source_quest_id")
+        poi.source_event_id = poi_data.get("source_event_id")
+        poi.expires_at_hours = poi_data.get("expires_at_hours")
         
         # Restore POI-specific state using extensibility method
-        poi_specific_data = {k: v for k, v in poi_data.items() 
-                            if k not in ["poi_id", "poi_type", "position", "level", "name", 
-                                        "discovered", "cleared", "state", "floor_count", "cleared_floors"]}
+        _common_keys = [
+            "poi_id", "poi_type", "position", "level", "name",
+            "discovered", "cleared", "state", "floor_count", "cleared_floors",
+            "is_temporary", "source_quest_id", "source_event_id", "expires_at_hours",
+        ]
+        poi_specific_data = {k: v for k, v in poi_data.items() if k not in _common_keys}
         if poi_specific_data:
             poi.deserialize_state(poi_specific_data)
         

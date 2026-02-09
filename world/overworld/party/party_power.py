@@ -71,6 +71,12 @@ def get_party_power(
     size_factor = min(2.0, size_factor)
     
     effective = base * size_factor
+
+    # Hunt XP: natural creatures that have killed prey get slightly stronger (cap +25%)
+    xp = getattr(party, "xp", 0)
+    if xp > 0:
+        xp_factor = 1.0 + min(0.25, xp / 200.0)  # 200 XP -> +25% power
+        effective *= xp_factor
     
     # Health state (for future: wounded parties are weaker)
     health_state = getattr(party, "health_state", "healthy")

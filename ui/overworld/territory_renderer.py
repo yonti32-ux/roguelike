@@ -28,6 +28,7 @@ def draw_territory_overlay(
     explored_tiles: dict = None,
     current_time: float = None,
     sight_radius: int = 8,
+    timeout_hours: float = 12.0,
 ) -> None:
     """
     Draw territory overlay on the overworld map (OPTIMIZED - only visible tiles).
@@ -44,6 +45,7 @@ def draw_territory_overlay(
         explored_tiles: Dict of explored tiles (for fog of war)
         current_time: Current time (for fog of war timeout)
         sight_radius: Sight radius (for fog of war)
+        timeout_hours: Hours after which explored tiles fade (use OverworldConfig.memory_timeout_hours)
     """
     if not territory_manager or not territory_manager.enabled or not territory_manager.initialized:
         return
@@ -101,8 +103,6 @@ def draw_territory_overlay(
             if current_time is not None and was_explored and not is_within_sight:
                 last_seen = explored_tiles.get(tile_pos, 0.0)
                 time_since_seen = current_time - last_seen
-                # Use same timeout as terrain (2 hours default, but check config)
-                timeout_hours = 2.0  # Could get from config
                 is_within_timeout = time_since_seen <= timeout_hours
             
             # Only show territory if within sight or within timeout

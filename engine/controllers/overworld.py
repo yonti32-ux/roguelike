@@ -44,6 +44,8 @@ class OverworldController:
                 # Close other overlays when opening tutorial
                 if hasattr(game, "show_exploration_log"):
                     game.show_exploration_log = False
+                if hasattr(game, "show_discovery_log"):
+                    game.show_discovery_log = False
                 # Initialize scroll offset if not exists
                 if not hasattr(game, "overworld_tutorial_scroll_offset"):
                     game.overworld_tutorial_scroll_offset = 0
@@ -77,6 +79,26 @@ class OverworldController:
                     game.overworld_tutorial_scroll_offset = 0
                 game.overworld_tutorial_scroll_offset += 200
                 return
+        
+        # Handle discovery log (codex) scrolling and closing
+        if getattr(game, "show_discovery_log", False):
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_l:
+                game.show_discovery_log = False
+                return
+            if event.key == pygame.K_UP or event.key == pygame.K_w:
+                game.discovery_log_scroll_offset = max(0, getattr(game, "discovery_log_scroll_offset", 0) - 24)
+                return
+            if event.key == pygame.K_DOWN or event.key == pygame.K_s:
+                game.discovery_log_scroll_offset = getattr(game, "discovery_log_scroll_offset", 0) + 24
+                return
+            if event.key == pygame.K_PAGEUP:
+                game.discovery_log_scroll_offset = max(0, getattr(game, "discovery_log_scroll_offset", 0) - 200)
+                return
+            if event.key == pygame.K_PAGEDOWN:
+                game.discovery_log_scroll_offset = getattr(game, "discovery_log_scroll_offset", 0) + 200
+                return
+            # Block all other input while discovery log is open
+            return
         
         # Block input if overlays are open (but tutorial was handled above)
         if game.is_overlay_open():
@@ -172,6 +194,21 @@ class OverworldController:
                 game.toggle_quest_screen()
                 return
         
+        # Toggle minimap (M key)
+        if event.key == pygame.K_m:
+            game.show_minimap = not getattr(game, "show_minimap", True)
+            return
+        
+        # Toggle discovery log / codex (L key)
+        if event.key == pygame.K_l:
+            game.show_discovery_log = not getattr(game, "show_discovery_log", False)
+            if getattr(game, "show_discovery_log", False):
+                if hasattr(game, "show_overworld_tutorial"):
+                    game.show_overworld_tutorial = False
+                if not hasattr(game, "discovery_log_scroll_offset"):
+                    game.discovery_log_scroll_offset = 0
+            return
+        
         # Zoom controls
         if event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS or event.key == pygame.K_KP_PLUS:
             self.zoom_in()
@@ -184,7 +221,7 @@ class OverworldController:
             return
     
     def handle_mouse_wheel(self, event: pygame.event.Event) -> None:
-        """Handle mouse wheel events for zooming or tutorial scrolling."""
+        """Handle mouse wheel events for zooming or tutorial/discovery log scrolling."""
         if event.type == pygame.MOUSEWHEEL:
             game = self.game
             # Handle mouse wheel for tutorial scrolling
@@ -193,6 +230,8 @@ class OverworldController:
                     game.overworld_tutorial_scroll_offset = 0
                 # Scroll tutorial (negative y means scroll up)
                 game.overworld_tutorial_scroll_offset = max(0, game.overworld_tutorial_scroll_offset - event.y * 30)
+            elif getattr(game, "show_discovery_log", False):
+                game.discovery_log_scroll_offset = max(0, getattr(game, "discovery_log_scroll_offset", 0) - event.y * 24)
             else:
                 # Normal zoom behavior
                 if event.y > 0:
@@ -307,11 +346,13 @@ class OverworldController:
             # Store the direction we moved in (for arrow rendering)
             self.last_direction = direction
             
-            # Consume time based on terrain
+            # Consume time based on terrain; roads reduce cost (faster travel)
             if game.time_system is not None:
                 tile = game.overworld_map.get_tile(new_x, new_y)
                 if tile:
                     cost = config.terrain_costs.get(tile.id, config.movement_cost_base)
+                    if getattr(game.overworld_map, "road_manager", None) and game.overworld_map.road_manager.has_road_at(new_x, new_y):
+                        cost *= config.road_movement_multiplier
                     game.time_system.add_time(cost * config.movement_cost_base)
             
             # Update roaming parties when player moves (turn-based movement)
@@ -327,6 +368,7 @@ class OverworldController:
             for poi in nearby_pois:
                 if not poi.discovered:
                     poi.discover()
+                    game.overworld_map.record_discovery(poi)
                     # Better discovery message with type, level, and faction
                     type_labels = {
                         "dungeon": "Dungeon",
@@ -345,6 +387,14 @@ class OverworldController:
                             faction_info = f" ({faction.name})"
                     
                     game.add_message(f"You discover {poi.name} - A {type_label} (Level {poi.level}){faction_info}")
+            
+            # Random events: occasionally spawn temporary POIs (bandit camp, stranded merchant)
+            game._overworld_move_count = getattr(game, "_overworld_move_count", 0) + 1
+            try:
+                from world.overworld.random_events import try_trigger_random_event
+                try_trigger_random_event(game)
+            except Exception:
+                pass
     
     def try_enter_poi(self) -> None:
         """Attempt to enter a POI at the player's current position."""
@@ -373,6 +423,7 @@ class OverworldController:
         
         if not poi.discovered:
             poi.discover()
+            game.overworld_map.record_discovery(poi)
             # Better discovery message
             type_labels = {
                 "dungeon": "Dungeon",
@@ -426,7 +477,7 @@ class OverworldController:
     
     def _open_party_interaction(self, party) -> None:
         """Open the party interaction screen."""
-        from world.overworld.party_types import get_party_type
+        from world.overworld.party import get_party_type
         from engine.scenes.party_interaction_scene import PartyInteractionScene
         
         party_type = get_party_type(party.party_type_id)
@@ -502,8 +553,8 @@ class OverworldController:
     
     def _join_battle(self, battle, side: str, party1, party2) -> None:
         """Join a battle on the specified side."""
-        from world.overworld.battle_conversion import party_to_battle_enemies
-        from world.overworld.party_types import get_party_type
+        from world.overworld.party import party_to_battle_enemies
+        from world.overworld.party import get_party_type
         
         # Mark battle as joined
         battle.player_joined = True
@@ -548,7 +599,7 @@ class OverworldController:
             ally_party_type = get_party_type(ally_party.party_type_id)
             if ally_party_type and ally_party_type.can_join_battle:
                 # Convert ally party to battle allies
-                from world.overworld.battle_conversion import allied_party_to_battle_units
+                from world.overworld.party import allied_party_to_battle_units
                 allies = allied_party_to_battle_units(
                     party=ally_party,
                     party_type=ally_party_type,

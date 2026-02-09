@@ -43,6 +43,7 @@ class OverworldConfig:
     
     # Time settings
     movement_cost_base: float = 1.0
+    road_movement_multiplier: float = 0.7  # Moving on a road costs 70% of terrain time (faster travel)
     terrain_costs: Dict[str, float] = field(default_factory=lambda: {
         "grass": 1.0,
         "forest": 1.5,
@@ -57,10 +58,13 @@ class OverworldConfig:
     
     # Sight/exploration settings
     sight_radius: int = 8
-    memory_timeout_hours: float = 12.0  # How long explored tiles stay visible (only for tiles outside sight radius)
+    memory_timeout_hours: float = 12.0  # Single source of truth: how long explored tiles stay visible after leaving (fog of war). Used by map renderer and overlays.
     
     # Zoom settings
     default_zoom_index: int = 1  # Index into zoom levels (1 = 75% default)
+    
+    # UI: minimap size in pixels (width and height). Clamped in renderer to 64–320.
+    minimap_size: int = 160
     
     # Faction settings (advanced)
     faction_counts: Dict[str, int] = field(default_factory=lambda: {
@@ -140,6 +144,7 @@ class OverworldConfig:
             # Time settings
             time_data = data.get("time", {})
             config.movement_cost_base = time_data.get("movement_cost_base", config.movement_cost_base)
+            config.road_movement_multiplier = time_data.get("road_movement_multiplier", config.road_movement_multiplier)
             config.terrain_costs = time_data.get("terrain_costs", config.terrain_costs)
             
             # Starting location
@@ -157,6 +162,10 @@ class OverworldConfig:
             # Exploration settings
             exploration_data = data.get("exploration", {})
             config.memory_timeout_hours = exploration_data.get("memory_timeout_hours", config.memory_timeout_hours)
+            
+            # UI settings (minimap, etc.)
+            ui_data = data.get("ui", {})
+            config.minimap_size = ui_data.get("minimap_size", config.minimap_size)
             
             # Zoom settings
             zoom_data = data.get("zoom", {})
@@ -208,6 +217,7 @@ class OverworldConfig:
                 },
                 "time": {
                     "movement_cost_base": self.movement_cost_base,
+                    "road_movement_multiplier": self.road_movement_multiplier,
                     "terrain_costs": self.terrain_costs,
                 },
                 "starting_location": {
@@ -220,6 +230,9 @@ class OverworldConfig:
                 },
                 "exploration": {
                     "memory_timeout_hours": self.memory_timeout_hours,
+                },
+                "ui": {
+                    "minimap_size": self.minimap_size,
                 },
                 "zoom": {
                     "default_index": self.default_zoom_index,
@@ -255,6 +268,7 @@ class OverworldConfig:
             "max_level": self.max_level,
             "level_per_distance": self.level_per_distance,
             "movement_cost_base": self.movement_cost_base,
+            "road_movement_multiplier": self.road_movement_multiplier,
             "terrain_costs": self.terrain_costs,
             "starting_location_type": self.starting_location_type,
             "starting_location_x": self.starting_location_x,

@@ -305,6 +305,16 @@ class BattleCombat:
         setattr(target.entity, "hp", max(0, current_hp - damage))
         is_kill = was_alive and getattr(target.entity, "hp", 0) <= 0
         
+        # Quest progress: kill objectives
+        if is_kill and target.side == "enemy":
+            arch_id = getattr(target.entity, "archetype_id", None)
+            if arch_id and hasattr(self.scene, "game") and self.scene.game is not None:
+                try:
+                    from systems.quests import update_quest_progress
+                    update_quest_progress(self.scene.game, "kill", target_id=arch_id, amount=1)
+                except Exception:
+                    pass
+        
         # Update health bar target for smooth animation
         new_hp_ratio = getattr(target.entity, "hp", 0) / target.max_hp if target.max_hp > 0 else 0.0
         self.scene.visual_effects.set_health_bar_target(target, new_hp_ratio)

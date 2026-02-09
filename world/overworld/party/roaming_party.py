@@ -10,9 +10,9 @@ import random
 import math
 
 if TYPE_CHECKING:
-    from .map import OverworldMap
+    from ..map import OverworldMap
     from .party_types import PartyType
-    from ..poi.base import PointOfInterest
+    from ...poi.base import PointOfInterest
 
 
 @dataclass
@@ -55,6 +55,7 @@ class RoamingParty:
     # Special properties
     gold: int = 0  # Gold this party carries (for merchants, bandits, etc.)
     items: List[str] = field(default_factory=list)  # Items this party has
+    xp: int = 0  # Experience (hunt XP for natural creatures; scales power in party_power; include when serializing parties for save/load)
     
     # Faction
     faction_id: Optional[str] = None  # Which faction this party belongs to
@@ -227,6 +228,8 @@ def _generate_party_name(party_type: "PartyType") -> str:
         "wolf": ["{} Pack", "{} Hunters", "{} Pack", "{} Pack"],
         "bear": ["{} Pack", "{} Bears", "{} Pack", "{} Pack"],
         "deer": ["{} Herd", "{} Deer", "{} Herd", "{} Herd"],
+        "rabbit": ["{} Warren", "{} Rabbits", "{} Group", "{} Warren"],
+        "fox": ["{} Pack", "{} Fox", "{} Hunters", "{} Pack"],
         "bird": ["{} Flock", "{} Birds", "{} Flock", "{} Flock"],
         "ranger": ["{} Patrol", "{} Rangers", "{} Scouts", "{} Trackers"],
         "cultist": ["{} Gathering", "{} Cult", "{} Sect", "{} Circle"],

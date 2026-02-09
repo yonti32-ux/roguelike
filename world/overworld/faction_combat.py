@@ -7,8 +7,7 @@ Handles faction relations, combat initiation checks, and allied party support.
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .roaming_party import RoamingParty
-    from .party_types import PartyType
+    from .party import RoamingParty, PartyType
     from engine.core.game import Game
 
 
@@ -35,7 +34,7 @@ def should_initiate_combat(
         - should_fight: True if combat should happen
         - reason: Explanation for the decision
     """
-    from .battle_conversion import get_effective_alignment
+    from .party.battle_conversion import get_effective_alignment
     
     # Get effective alignment (considers faction relations)
     effective_alignment = get_effective_alignment(party, party_type, game, player_faction)
@@ -113,7 +112,7 @@ def get_allied_parties_for_battle(
         if nearby_party.in_combat:
             continue
         
-        from .party_types import get_party_type
+        from .party import get_party_type
         nearby_party_type = get_party_type(nearby_party.party_type_id)
         if not nearby_party_type:
             continue

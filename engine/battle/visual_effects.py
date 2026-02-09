@@ -168,6 +168,55 @@ class ShockwaveEffect:
         return int(200 * (1.0 - progress))
 
 
+class ShieldBarrierEffect:
+    """
+    A shield-barrier effect for the Guard skill: a shield shape that raises
+    in front of the unit, then holds and fades. Distinct from orbital orbs.
+    """
+    
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        color: Tuple[int, int, int] = (80, 140, 220),
+        size: float = 28.0,
+        lifetime: float = 1.2,
+        raise_time: float = 0.2,
+    ):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.size = size
+        self.lifetime = lifetime
+        self.max_lifetime = lifetime
+        self.raise_time = raise_time
+        self.elapsed = 0.0
+    
+    def update(self, dt: float) -> bool:
+        """Update shield barrier. Returns False if effect should be removed."""
+        self.elapsed += dt
+        self.lifetime -= dt
+        return self.lifetime > 0
+    
+    def get_scale(self) -> float:
+        """Scale from 0 to 1 during raise, then 1."""
+        if self.raise_time <= 0:
+            return 1.0
+        if self.elapsed >= self.raise_time:
+            return 1.0
+        return self.elapsed / self.raise_time
+    
+    def get_alpha(self) -> int:
+        """Fade in during raise, hold, then fade out in last 40% of lifetime."""
+        ratio = self.lifetime / self.max_lifetime if self.max_lifetime > 0 else 0.0
+        if ratio > 0.6:
+            return 220  # Full visibility after raise
+        if ratio > 0.2:
+            # Linear fade out in middle segment
+            return int(220 * (ratio - 0.2) / 0.4)
+        return int(220 * ratio / 0.2)  # Fade out at end
+
+
 class VisualEffectsManager:
     """Manages all visual effects for the battle scene."""
     
@@ -193,10 +242,11 @@ class VisualEffectsManager:
         # Movement trails
         self.movement_trails: List[Dict] = []
         
-        # Skill effects (orbital glows, auras, shockwaves)
+        # Skill effects (orbital glows, auras, shockwaves, shield barriers)
         self.orbital_glows: List[OrbitalGlow] = []
         self.auras: List[AuraEffect] = []
         self.shockwaves: List[ShockwaveEffect] = []
+        self.shield_barriers: List[ShieldBarrierEffect] = []
     
     def add_screen_shake(self, intensity: float, duration: float = 0.3) -> None:
         """Add screen shake effect."""
@@ -261,8 +311,9 @@ class VisualEffectsManager:
         """Add skill visual effects based on skill type (replaces old particle system)."""
         # Map skill IDs to effect types
         skill_effect_map = {
+            # Guard - dedicated shield barrier (distinct from other defensive skills)
+            "guard": "shield_barrier",
             # Defensive skills - orbital glow
-            "guard": "orbital_glow_blue",
             "nimble_step": "orbital_glow_green",
             "shield_wall": "orbital_glow_blue",
             "magic_shield": "orbital_glow_purple",
@@ -321,7 +372,17 @@ class VisualEffectsManager:
         effect_type = skill_effect_map.get(skill_type, "shockwave_default")
         
         # Create appropriate effect based on type
-        if effect_type.startswith("orbital_glow"):
+        if effect_type == "shield_barrier":
+            barrier = ShieldBarrierEffect(
+                x=x,
+                y=y,
+                color=(80, 140, 220),
+                size=28.0,
+                lifetime=1.2,
+                raise_time=0.2,
+            )
+            self.shield_barriers.append(barrier)
+        elif effect_type.startswith("orbital_glow"):
             color_map = {
                 "orbital_glow_blue": (100, 150, 255),
                 "orbital_glow_green": (100, 255, 150),
@@ -334,7 +395,7 @@ class VisualEffectsManager:
                 y=y,
                 color=color,
                 radius=35.0,
-                num_orbs=4 if skill_type == "guard" else 3,
+                num_orbs=3,
                 lifetime=1.5,
                 rotation_speed=3.0,
             )
@@ -474,6 +535,7 @@ class VisualEffectsManager:
         self.orbital_glows = [g for g in self.orbital_glows if g.update(dt)]
         self.auras = [a for a in self.auras if a.update(dt)]
         self.shockwaves = [s for s in self.shockwaves if s.update(dt)]
+        self.shield_barriers = [b for b in self.shield_barriers if b.update(dt)]
     
     def get_shake_offset(self) -> Tuple[float, float]:
         """Get current screen shake offset."""
@@ -534,7 +596,34 @@ class VisualEffectsManager:
             surface.blit(flash_surf, (0, 0))
     
     def draw_skill_effects(self, surface: pygame.Surface) -> None:
-        """Draw all skill visual effects (orbital glows, auras, shockwaves)."""
+        """Draw all skill visual effects (orbital glows, auras, shockwaves, shield barriers)."""
+        # Draw shield barriers (Guard skill) - distinct shield shape that raises and fades
+        for barrier in self.shield_barriers:
+            alpha = barrier.get_alpha()
+            if alpha <= 0:
+                continue
+            scale = barrier.get_scale()
+            s = barrier.size * scale
+            cx, cy = int(barrier.x), int(barrier.y)
+            # Shield polygon in local coords (centered); then we offset by (cx, cy)
+            local_points = [
+                (0, -s),
+                (-s, -s * 0.4),
+                (-s, s * 0.4),
+                (0, s),
+                (s, s * 0.4),
+                (s, -s * 0.4),
+            ]
+            w = int(s * 2.5)
+            h = int(s * 2.5)
+            barrier_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+            ox, oy = w // 2, h // 2
+            screen_points = [(ox + int(p[0]), oy + int(p[1])) for p in local_points]
+            color_with_alpha = (*barrier.color, alpha)
+            outline_rgba = (min(255, barrier.color[0] + 60), min(255, barrier.color[1] + 70), min(255, barrier.color[2] + 50), alpha)
+            pygame.draw.polygon(barrier_surf, color_with_alpha, screen_points)
+            pygame.draw.polygon(barrier_surf, outline_rgba, screen_points, width=2)
+            surface.blit(barrier_surf, (cx - w // 2, cy - h // 2))
         # Draw orbital glows
         for glow in self.orbital_glows:
             alpha = glow.get_alpha()
@@ -635,4 +724,5 @@ class VisualEffectsManager:
         self.orbital_glows.clear()
         self.auras.clear()
         self.shockwaves.clear()
+        self.shield_barriers.clear()
 

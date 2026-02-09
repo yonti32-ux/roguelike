@@ -29,6 +29,7 @@ class DungeonPOI(PointOfInterest):
         name: Optional[str] = None,
         floor_count: int = 5,
         faction_id: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize a dungeon POI.
@@ -40,8 +41,9 @@ class DungeonPOI(PointOfInterest):
             name: Display name
             floor_count: Number of floors in this dungeon
             faction_id: Optional faction that controls this POI
+            **kwargs: Passed to base (e.g. is_temporary, source_quest_id)
         """
-        super().__init__(poi_id, "dungeon", position, level, name, faction_id=faction_id)
+        super().__init__(poi_id, "dungeon", position, level, name, faction_id=faction_id, **kwargs)
         self.floor_count = floor_count
         self.cleared_floors: Set[int] = set()
         
@@ -61,6 +63,13 @@ class DungeonPOI(PointOfInterest):
         """
         # Store reference to this POI
         game.current_poi = self
+        
+        # Quest progress: "explore" objective for this POI
+        try:
+            from systems.quests import update_quest_progress
+            update_quest_progress(game, "explore", poi_id=self.poi_id, amount=1)
+        except Exception:
+            pass
         
         # Determine which floor to load
         # For now, start at floor 1, or continue from highest cleared floor + 1
@@ -190,8 +199,9 @@ class VillagePOI(PointOfInterest):
         level: int = 1,
         name: Optional[str] = None,
         faction_id: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(poi_id, "village", position, level, name, faction_id=faction_id)
+        super().__init__(poi_id, "village", position, level, name, faction_id=faction_id, **kwargs)
         self.buildings: list[str] = ["shop", "inn"]
         self.merchants: list[str] = ["general_merchant"]
     
@@ -306,8 +316,9 @@ class TownPOI(PointOfInterest):
         level: int = 1,
         name: Optional[str] = None,
         faction_id: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(poi_id, "town", position, level, name, faction_id=faction_id)
+        super().__init__(poi_id, "town", position, level, name, faction_id=faction_id, **kwargs)
         self.buildings: list[str] = ["shop", "inn", "blacksmith", "library", "market", "tavern", "town_hall"]
         self.merchants: list[str] = ["general_merchant", "weapon_merchant", "armor_merchant"]
     
@@ -421,8 +432,9 @@ class CampPOI(PointOfInterest):
         level: int = 1,
         name: Optional[str] = None,
         faction_id: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(poi_id, "camp", position, level, name, faction_id=faction_id)
+        super().__init__(poi_id, "camp", position, level, name, faction_id=faction_id, **kwargs)
         # Future: mark hostile / destroyed in serialized state
         self.is_hostile: bool = False
         self.is_destroyed: bool = False
@@ -430,6 +442,13 @@ class CampPOI(PointOfInterest):
     def enter(self, game: "Game") -> None:
         """Enter the camp and load a simple camp map."""
         game.current_poi = self
+
+        # Quest progress: "explore" objective for this POI
+        try:
+            from systems.quests import update_quest_progress
+            update_quest_progress(game, "explore", poi_id=self.poi_id, amount=1)
+        except Exception:
+            pass
 
         # If the camp has been destroyed/cleared, just show a simple message for now
         if getattr(self, "is_destroyed", False):

@@ -27,6 +27,12 @@ class PointOfInterest:
         level: int = 1,
         name: Optional[str] = None,
         faction_id: Optional[str] = None,
+        *,
+        is_temporary: bool = False,
+        source_quest_id: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        expires_at_hours: Optional[float] = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize a POI.
@@ -38,6 +44,11 @@ class PointOfInterest:
             level: Difficulty/level rating
             name: Display name (if None, generates from type)
             faction_id: Optional faction that controls this POI
+            is_temporary: If True, POI can be removed when quest/event ends
+            source_quest_id: Quest that spawned this POI (if any)
+            source_event_id: Random event that spawned this POI (if any)
+            expires_at_hours: Game time (hours) after which POI expires (optional)
+            **kwargs: Ignored (for subclass compatibility)
         """
         self.poi_id = poi_id
         self.poi_type = poi_type
@@ -52,6 +63,12 @@ class PointOfInterest:
         self.discovered: bool = False
         self.cleared: bool = False
         self.state: Dict[str, Any] = {}
+        
+        # Temporary POI support (quests, random events)
+        self.is_temporary = is_temporary
+        self.source_quest_id = source_quest_id
+        self.source_event_id = source_event_id
+        self.expires_at_hours = expires_at_hours
     
     def can_enter(self, game: "Game") -> bool:
         """

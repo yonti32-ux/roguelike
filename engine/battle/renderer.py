@@ -438,6 +438,22 @@ class BattleRenderer:
             # HP bar
             self.draw_hp_bar(surface, rect, unit, is_player=True)
 
+            # Guard stance: shield icon on unit (distinct from HUD "G")
+            if self.scene._has_status(unit, "guard"):
+                shield_x = rect.right - 14
+                shield_y = rect.y + 2
+                shield_size = 10
+                guard_shield_points = [
+                    (shield_x + shield_size // 2, shield_y),
+                    (shield_x, shield_y + shield_size // 4),
+                    (shield_x, shield_y + shield_size * 3 // 4),
+                    (shield_x + shield_size // 2, shield_y + shield_size),
+                    (shield_x + shield_size, shield_y + shield_size * 3 // 4),
+                    (shield_x + shield_size, shield_y + shield_size // 4),
+                ]
+                pygame.draw.polygon(surface, (100, 160, 255), guard_shield_points)
+                pygame.draw.polygon(surface, (70, 130, 220), guard_shield_points, width=1)
+
             # Status icons above the HP bar (horizontal layout, going upward)
             icon_y = rect.y - 18
             _draw_status_indicators(
@@ -588,6 +604,22 @@ class BattleRenderer:
 
             # HP bar
             self.draw_hp_bar(surface, rect, unit, is_player=False)
+
+            # Guard stance: shield icon on unit (distinct from HUD "G")
+            if self.scene._has_status(unit, "guard"):
+                shield_x = rect.right - 14
+                shield_y = rect.y + 2
+                shield_size = 10
+                guard_shield_points = [
+                    (shield_x + shield_size // 2, shield_y),
+                    (shield_x, shield_y + shield_size // 4),
+                    (shield_x, shield_y + shield_size * 3 // 4),
+                    (shield_x + shield_size // 2, shield_y + shield_size),
+                    (shield_x + shield_size, shield_y + shield_size * 3 // 4),
+                    (shield_x + shield_size, shield_y + shield_size // 4),
+                ]
+                pygame.draw.polygon(surface, (100, 160, 255), guard_shield_points)
+                pygame.draw.polygon(surface, (70, 130, 220), guard_shield_points, width=1)
 
             # Status icons (horizontal layout, going upward)
             icon_y = rect.y - 18

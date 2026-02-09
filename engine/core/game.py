@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from world.overworld.config import OverworldConfig
     from world.poi.base import PointOfInterest
     from world.time.time_system import TimeSystem
-    from world.overworld.roaming_party import RoamingParty
+    from world.overworld.party import RoamingParty
 
 from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
 from world.mapgen import generate_floor
@@ -470,6 +470,7 @@ class Game:
             nearby_pois = self.overworld_map.get_pois_in_range(start_x, start_y, radius=config.sight_radius)
             for poi in nearby_pois:
                 poi.discover()
+                self.overworld_map.record_discovery(poi)
             
             # Initialize roaming parties
             if self.overworld_map.party_manager is not None:
@@ -525,6 +526,13 @@ class Game:
         prev = getattr(self, "mode", None)
         self.mode = GameMode.OVERWORLD
         self.active_screen = None
+        # Clean up expired temporary POIs (quest/event POIs with time limit)
+        if getattr(self, "overworld_map", None) and getattr(self, "time_system", None):
+            try:
+                current_hours = self.time_system.get_total_hours()
+                self.overworld_map.remove_expired_temporary_pois(current_hours)
+            except Exception:
+                pass
         if telemetry is not None:
             telemetry.log("mode_change", frm=prev, to=self.mode)
     
@@ -1066,7 +1074,7 @@ class Game:
         allied_parties = []
         if context_party is not None:
             from world.overworld.faction_combat import get_allied_parties_for_battle
-            from world.overworld.party_types import get_party_type
+            from world.overworld.party import get_party_type
             
             player_faction = getattr(self, 'player_faction', None)
             enemy_party_type = get_party_type(context_party.party_type_id)
@@ -1115,8 +1123,8 @@ class Game:
         if not self.battle_scene:
             return
         
-        from world.overworld.battle_conversion import allied_party_to_battle_units
-        from world.overworld.party_types import get_party_type
+        from world.overworld.party import allied_party_to_battle_units
+        from world.overworld.party import get_party_type
         from engine.battle.types import BattleUnit
         
         player_level = 1
@@ -1312,7 +1320,7 @@ class Game:
         - Distribute loot (gold, items)
         - Update faction relations (if applicable)
         """
-        from world.overworld.party_types import get_party_type
+        from world.overworld.party import get_party_type
         
         party_type = get_party_type(party.party_type_id)
         if not party_type:
@@ -1369,7 +1377,7 @@ class Game:
                 current_relation = self.overworld_map.faction_manager.get_relation(
                     player_faction, party.faction_id
                 )
-                from world.overworld.party_power import get_party_power
+                from world.overworld.party import get_party_power
                 power = get_party_power(party, party_type)
                 decrease = 5 + max(0, int(power / 12))
                 new_relation = max(-100, current_relation - decrease)
@@ -1483,13 +1491,30 @@ class Game:
                     if not party_survived:
                         if self.overworld_map and self.overworld_map.party_manager:
                             self.overworld_map.party_manager.remove_party(ally_party.party_id)
-                            from world.overworld.party_types import get_party_type
+                            from world.overworld.party import get_party_type
                             party_type = get_party_type(ally_party.party_type_id)
                             if party_type:
                                 self.add_message(f"{party_type.name} party was lost in battle.")
                     else:
                         # Party survived - mark as no longer in combat
                         ally_party.in_combat = False
+            
+            # 4b) If we were in a hostile camp and just won, mark camp cleared/destroyed
+            if not context_party and self.current_poi is not None:
+                try:
+                    from world.poi.types import CampPOI
+                    if isinstance(self.current_poi, CampPOI) and getattr(self.current_poi, "is_hostile", False):
+                        self.current_poi.is_destroyed = True
+                        self.current_poi.cleared = True
+                        messages.append(f"You have cleared {self.current_poi.name}!")
+                        # Remove temporary event POI from overworld when cleared
+                        if getattr(self.current_poi, "is_temporary", False) and getattr(self.current_poi, "source_event_id", None):
+                            if getattr(self, "overworld_map", None) is not None:
+                                poi_id = self.current_poi.poi_id
+                                self.overworld_map.remove_poi(poi_id)
+                                messages.append("The camp has been removed from the map.")
+                except Exception:
+                    pass
             
             # 5) Go back to overworld (if we came from overworld)
             if context_party:

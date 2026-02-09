@@ -8,8 +8,7 @@ import pygame
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.overworld.roaming_party import RoamingParty
-    from world.overworld.party_types import PartyType
+    from world.overworld.party import RoamingParty, PartyType
     from engine.core.game import Game
 
 
@@ -65,7 +64,7 @@ class PartyInteractionScene:
     
     def _action_talk(self) -> None:
         """Talk to the party."""
-        from world.overworld.party_player_interactions import (
+        from world.overworld.party import (
             get_party_information,
             get_party_warning,
             get_party_request,
@@ -160,7 +159,7 @@ class PartyInteractionScene:
     def _action_attack(self) -> None:
         """Attack the party and trigger combat."""
         try:
-            from world.overworld.battle_conversion import party_to_battle_enemies
+            from world.overworld.party import party_to_battle_enemies
             from world.overworld.faction_combat import should_initiate_combat
             
             # Check faction relations before combat
@@ -314,7 +313,7 @@ class PartyInteractionScene:
         if self.party.gold > 0:
             info_lines.append(f"Gold: {self.party.gold}")
         if getattr(self.party_type, "can_attack", False) or getattr(self.party_type, "can_be_attacked", False):
-            from world.overworld.party_power import get_party_power, get_power_display_string
+            from world.overworld.party import get_party_power, get_power_display_string
             power = get_party_power(self.party, self.party_type)
             info_lines.append(f"Threat: {get_power_display_string(power)}")
         

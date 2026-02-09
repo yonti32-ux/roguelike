@@ -9,10 +9,10 @@ from dataclasses import dataclass, field
 import random
 
 if TYPE_CHECKING:
-    from .map import OverworldMap
+    from ..map import OverworldMap
     from .roaming_party import RoamingParty
-    from .party_types import PartyType
-    from ..poi.base import PointOfInterest
+    from .party_types import PartyType, SpawnCategory
+    from ...poi.base import PointOfInterest
 
 
 @dataclass
@@ -99,6 +99,7 @@ class PartyManager:
         player_level: int = 1,
         avoid_position: Optional[Tuple[int, int]] = None,
         min_distance: int = 10,
+        spawn_category: Optional["SpawnCategory"] = None,  # WILDLIFE, HUMANOID, UNDEAD; None = all
     ) -> Optional["RoamingParty"]:
         """
         Spawn a random party based on spawn weights.
@@ -107,16 +108,24 @@ class PartyManager:
             player_level: Current player level (for filtering)
             avoid_position: Position to avoid spawning near (e.g., player position)
             min_distance: Minimum distance from avoid_position
+            spawn_category: If set, only spawn from this pool (WILDLIFE, HUMANOID, UNDEAD).
+                None = use all types (default).
         
         Returns:
             The spawned party, or None if spawning failed
         """
-        from .party_types import all_party_types
+        from .party_types import all_party_types, party_types_for_spawn_category, SpawnCategory
         from .party_power import get_spawn_weight_modifier_for_level
+
+        # Choose type pool: all types or filtered by category
+        if spawn_category is not None:
+            candidate_types = party_types_for_spawn_category(spawn_category)
+        else:
+            candidate_types = all_party_types()
 
         # Get all valid party types for this level (min_level/max_level)
         valid_types = []
-        for party_type in all_party_types():
+        for party_type in candidate_types:
             if (player_level >= party_type.min_level and
                     player_level <= party_type.max_level):
                 # Scale weight by level: stronger types become more likely as player levels up

@@ -281,6 +281,7 @@ def accept_quest(game: "Game", quest_id: str) -> bool:
 def turn_in_quest(game: "Game", quest_id: str) -> bool:
     """
     Turn in a completed quest.
+    Removes any temporary POIs that were created for this quest.
     
     Args:
         game: Game instance
@@ -293,4 +294,16 @@ def turn_in_quest(game: "Game", quest_id: str) -> bool:
         return False
     
     quest = game.active_quests[quest_id]
-    return quest.turn_in(game)
+    ok = quest.turn_in(game)
+    if ok and getattr(game, "overworld_map", None) is not None:
+        # Remove temporary POIs that were spawned for this quest
+        for obj in getattr(quest, "objectives", []):
+            poi_id = getattr(obj, "poi_id", None)
+            if not poi_id:
+                continue
+            poi = game.overworld_map.pois.get(poi_id)
+            if poi is None:
+                continue
+            if getattr(poi, "is_temporary", False) and getattr(poi, "source_quest_id", None) == quest_id:
+                game.overworld_map.remove_poi(poi_id)
+    return ok

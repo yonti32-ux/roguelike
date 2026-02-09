@@ -7,7 +7,7 @@ Manages all factions, their relations, and faction-based queries.
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.overworld.roaming_party import RoamingParty
+    from world.overworld.party import RoamingParty
     from world.poi.base import PointOfInterest
     from systems.factions import Faction
 

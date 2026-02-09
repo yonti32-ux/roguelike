@@ -11,7 +11,7 @@ import random
 if TYPE_CHECKING:
     from .roaming_party import RoamingParty
     from .party_types import PartyType
-    from .map import OverworldMap
+    from ..map import OverworldMap
     from engine.core.game import Game
 
 

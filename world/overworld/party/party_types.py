@@ -28,6 +28,17 @@ class PartyBehavior(Enum):
     FLEE = "flee"                   # Flee from threats
 
 
+class SpawnCategory(Enum):
+    """
+    Spawn pool for modular spawning. Used to filter or weight spawns by
+    category (e.g. wildlife-only areas, humanoid-only, undead zones).
+    """
+    ALL = "all"           # Appears in any pool when category filter is used
+    WILDLIFE = "wildlife" # Animals, prey, natural creatures
+    HUMANOID = "humanoid" # People, bandits, orcs, goblins, etc.
+    UNDEAD = "undead"     # Skeletons, zombies, ghouls, wraiths, necromancers
+
+
 @dataclass
 class PartyType:
     """
@@ -65,6 +76,7 @@ class PartyType:
     spawn_weight: float = 1.0  # Relative spawn probability
     min_level: int = 1  # Minimum player level to spawn
     max_level: int = 100  # Maximum player level to spawn
+    spawn_category: SpawnCategory = SpawnCategory.ALL  # Pool for filtered spawns (wildlife / humanoid / undead)
     
     # Special properties
     can_trade: bool = False  # Can player trade with this party?
@@ -79,6 +91,10 @@ class PartyType:
     faction_id: Optional[str] = None  # Which faction this party belongs to
     can_join_battle: bool = False  # Can this party fight in battles?
     battle_unit_template: Optional[str] = None  # Template for battle units (enemy archetype ID)
+
+    # Natural / wildlife (for hunt mechanic)
+    is_natural_creature: bool = False  # Animal/wildlife; can gain hunt XP from killing prey
+    is_prey: bool = False  # Prey species; being killed counts as a successful hunt for the killer
 
 
 # Registry of party types
@@ -101,6 +117,17 @@ def get_party_type(party_id: str) -> Optional[PartyType]:
 def all_party_types() -> List[PartyType]:
     """Get all registered party types."""
     return list(_PARTY_TYPES.values())
+
+
+def party_types_for_spawn_category(category: SpawnCategory) -> List[PartyType]:
+    """
+    Get party types that belong to a spawn category (for modular spawn pools).
+    Returns types where spawn_category == category or spawn_category == ALL.
+    """
+    return [
+        pt for pt in _PARTY_TYPES.values()
+        if pt.spawn_category == category or pt.spawn_category == SpawnCategory.ALL
+    ]
 
 
 # ============================================================================
@@ -228,7 +255,7 @@ WOLF_PACK = register_party_type(
         name="Wolf Pack",
         description="A pack of wolves hunting in the wilds.",
         alignment=PartyAlignment.HOSTILE,
-        enemy_types={"merchant", "villager"},
+        enemy_types={"merchant", "villager", "deer"},
         behavior=PartyBehavior.HUNT,
         speed=1.5,
         sight_range=10,
@@ -241,6 +268,7 @@ WOLF_PACK = register_party_type(
         avoids_poi_types=["town", "village"],
         battle_unit_template="wolf",  # Use wolf archetype
         can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -469,6 +497,7 @@ BEAR_PACK = register_party_type(
         avoids_poi_types=["town", "village"],
         battle_unit_template="bear",  # Use bear archetype
         can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -490,6 +519,7 @@ DEER_HERD = register_party_type(
         min_level=1,
         max_level=35,  # Early wilderness; less common later
         avoids_poi_types=["town", "village"],
+        is_prey=True,
         # No battle_unit_template - they flee rather than fight
     )
 )
@@ -510,6 +540,51 @@ BIRD_FLOCK = register_party_type(
         icon="b",
         spawn_weight=2.0,
         # No battle_unit_template - they don't fight
+    )
+)
+
+RABBIT_HERD = register_party_type(
+    PartyType(
+        id="rabbit",
+        name="Rabbit Warren",
+        description="A group of rabbits foraging in the grass.",
+        alignment=PartyAlignment.NEUTRAL,
+        behavior=PartyBehavior.WANDER,
+        speed=1.5,
+        sight_range=6,
+        can_attack=False,
+        can_be_attacked=True,
+        combat_strength=1,
+        color=(240, 220, 180),  # Light tan
+        icon="r",
+        spawn_weight=2.0,
+        min_level=1,
+        max_level=30,
+        avoids_poi_types=["town", "village"],
+        is_prey=True,
+    )
+)
+
+FOX_PACK = register_party_type(
+    PartyType(
+        id="fox",
+        name="Fox Pack",
+        description="A fox or small pack hunting small game.",
+        alignment=PartyAlignment.NEUTRAL,
+        enemy_types={"deer", "rabbit"},
+        behavior=PartyBehavior.HUNT,
+        speed=1.4,
+        sight_range=8,
+        can_attack=True,
+        can_be_attacked=True,
+        combat_strength=1,
+        color=(220, 120, 60),  # Rust/orange
+        icon="f",
+        spawn_weight=1.2,
+        avoids_poi_types=["town", "village"],
+        battle_unit_template="wolf",  # Use wolf as stand-in for fox
+        can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -633,7 +708,7 @@ MERCHANT_PARTY.ally_types = {"guard", "villager", "ranger", "knight"}
 VILLAGER_PARTY.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
 VILLAGER_PARTY.ally_types = {"guard", "merchant", "ranger", "trader", "pilgrim", "knight"}
 
-RANGER_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
+RANGER_PATROL.enemy_types = {"bandit", "monster", "wolf", "fox", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton", "bear"}
 RANGER_PATROL.ally_types = {"guard", "merchant", "villager", "adventurer", "scout", "knight"}
 
 KNIGHT_PATROL.enemy_types = {"bandit", "monster", "wolf", "cultist", "orc", "goblin", "bandit_rogue", "monster_brute", "skeleton"}
@@ -645,8 +720,9 @@ BANDIT_ROGUE.enemy_types = {"guard", "merchant", "villager", "ranger", "trader",
 MONSTER_PACK.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
 MONSTER_BRUTE.enemy_types = {"guard", "merchant", "villager", "ranger", "trader", "knight"}
 
-WOLF_PACK.enemy_types = {"merchant", "villager", "pilgrim"}
-BEAR_PACK.enemy_types = {"merchant", "villager", "pilgrim", "deer"}
+WOLF_PACK.enemy_types = {"merchant", "villager", "pilgrim", "deer", "rabbit"}
+BEAR_PACK.enemy_types = {"merchant", "villager", "pilgrim", "deer", "rabbit"}
+FOX_PACK.enemy_types = {"deer", "rabbit"}
 
 CULTIST_GATHERING.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
 ORC_RAIDING_PARTY.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "noble", "knight"}
@@ -878,6 +954,7 @@ GIANT_SPIDER = register_party_type(
         avoids_poi_types=["town", "village"],
         battle_unit_template="spider_scout",  # Use spider archetype
         can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -899,6 +976,7 @@ BOAR_HERD = register_party_type(
         avoids_poi_types=["town", "village"],
         battle_unit_template="wild_boar",  # Use wild_boar archetype
         can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -920,6 +998,7 @@ DIRE_WOLF = register_party_type(
         avoids_poi_types=["town", "village"],
         battle_unit_template="dire_wolf",  # Use dire_wolf archetype
         can_join_battle=True,
+        is_natural_creature=True,
     )
 )
 
@@ -1051,9 +1130,9 @@ MAGE_CABAL.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
 WARLOCK_COVEN.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
 NECROMANCER_CULT.enemy_types = {"guard", "ranger", "adventurer", "scout", "knight"}
 
-GIANT_SPIDER.enemy_types = {"merchant", "villager", "pilgrim"}
-BOAR_HERD.enemy_types = {"merchant", "villager", "pilgrim"}
-DIRE_WOLF.enemy_types = {"merchant", "villager", "pilgrim", "deer"}
+GIANT_SPIDER.enemy_types = {"merchant", "villager", "pilgrim", "deer", "rabbit"}
+BOAR_HERD.enemy_types = {"merchant", "villager", "pilgrim", "deer", "rabbit"}
+DIRE_WOLF.enemy_types = {"merchant", "villager", "pilgrim", "deer", "rabbit"}
 
 TROLL_BAND.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "knight"}
 OGRE_WARBAND.enemy_types = {"merchant", "villager", "guard", "ranger", "trader", "noble", "knight"}
@@ -1065,7 +1144,7 @@ GOBLIN_SHAMAN_CULT.enemy_types = {"merchant", "villager", "guard", "ranger"}
 # Update existing party enemy lists to include new types
 GUARD_PATROL.enemy_types.update({
     "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "mage", "warlock", "necromancer",
-    "spider", "boar", "dire_wolf", "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
+    "spider", "boar", "dire_wolf", "fox", "troll", "ogre", "demon", "rat_swarm", "goblin_shaman"
 })
 MERCHANT_PARTY.enemy_types.update({
     "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "spider", "boar", "dire_wolf",
@@ -1083,3 +1162,27 @@ KNIGHT_PATROL.enemy_types.update({
     "thief", "assassin", "raider", "ghoul", "zombie", "wraith", "mage", "warlock", "necromancer",
     "troll", "ogre", "demon", "goblin_shaman"
 })
+
+# Spawn categories for modular spawn pools (wildlife / humanoid / undead)
+WILDLIFE_TYPES = {
+    WOLF_PACK, BEAR_PACK, DEER_HERD, BIRD_FLOCK, RABBIT_HERD, FOX_PACK,
+    GIANT_SPIDER, BOAR_HERD, DIRE_WOLF, RAT_SWARM,
+}
+UNDEAD_TYPES = {
+    SKELETON_WARBAND, GHOUL_PACK, ZOMBIE_HORDE, WRAITH_PACK, NECROMANCER_CULT,
+}
+for pt in WILDLIFE_TYPES:
+    pt.spawn_category = SpawnCategory.WILDLIFE
+for pt in UNDEAD_TYPES:
+    pt.spawn_category = SpawnCategory.UNDEAD
+# All others remain HUMANOID (set explicitly so ALL is reserved for cross-pool types)
+HUMANOID_TYPES = {
+    MERCHANT_PARTY, VILLAGER_PARTY, GUARD_PATROL, BANDIT_PARTY, MONSTER_PACK,
+    ADVENTURER_PARTY, NOBLE_ENTOURAGE, RANGER_PATROL, CULTIST_GATHERING,
+    ORC_RAIDING_PARTY, TRADER_CARAVAN, SCOUT_PARTY, GOBLIN_WARBAND,
+    PILGRIM_GROUP, BANDIT_ROGUE, MONSTER_BRUTE, KNIGHT_PATROL, MERCENARY_COMPANY,
+    THIEF_GANG, ASSASSIN_CREW, RAIDER_BAND, MAGE_CABAL, WARLOCK_COVEN,
+    TROLL_BAND, OGRE_WARBAND, DEMON_PACK, GOBLIN_SHAMAN_CULT,
+}
+for pt in HUMANOID_TYPES:
+    pt.spawn_category = SpawnCategory.HUMANOID

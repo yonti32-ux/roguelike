@@ -8,8 +8,7 @@ import pygame
 from typing import Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from world.overworld.party_manager import BattleState
-    from world.overworld.roaming_party import RoamingParty
+    from world.overworld.party import BattleState, RoamingParty
     from engine.core.game import Game
 
 
@@ -98,7 +97,7 @@ class BattleJoinScene:
         screen.blit(desc_surface, (box_x + 20, box_y + 80))
         
         # Party information
-        from world.overworld.party_types import get_party_type
+        from world.overworld.party import get_party_type
         
         y_offset = box_y + 120
         

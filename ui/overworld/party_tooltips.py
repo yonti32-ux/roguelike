@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Optional
 from ui.tooltip import TooltipData
 
 if TYPE_CHECKING:
-    from world.overworld.roaming_party import RoamingParty
-    from world.overworld.party_types import PartyType
+    from world.overworld.party import RoamingParty, PartyType
     from engine.core.game import Game
 
 
@@ -73,7 +72,7 @@ def create_party_tooltip_data(
     
     # Combat / threat (dynamic power rating)
     if party_type.can_attack or party_type.can_be_attacked:
-        from world.overworld.party_power import get_party_power, get_power_display_string
+        from world.overworld.party import get_party_power, get_power_display_string
         power = get_party_power(party, party_type)
         lines.append(f"Threat: {get_power_display_string(power)}")
         if party_type.can_be_attacked:

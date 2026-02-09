@@ -21,11 +21,31 @@ from ui.screen_constants import (
 
 if TYPE_CHECKING:
     from engine.core.game import Game
-    from world.overworld.roaming_party import RoamingParty
+    from world.overworld.party import RoamingParty
 
 
 # Base overworld tile size (before zoom)
 BASE_OVERWORLD_TILE_SIZE = 16  # Pixels per overworld tile at 100% zoom
+
+# Quest marker: color and ring for POIs that are active quest objectives
+QUEST_MARKER_COLOR = (255, 220, 100)  # Gold/amber
+QUEST_MARKER_RING_COLOR = (255, 255, 200)
+
+
+def _is_poi_quest_target(poi, game: "Game") -> bool:
+    """True if any active quest has an objective targeting this POI."""
+    try:
+        from systems.quests import QuestStatus
+        active = getattr(game, "active_quests", None) or {}
+        for quest in active.values():
+            if getattr(quest, "status", None) != QuestStatus.ACTIVE:
+                continue
+            for obj in getattr(quest, "objectives", []):
+                if getattr(obj, "poi_id", None) == poi.poi_id:
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 def draw_overworld(game: "Game") -> None:
@@ -239,8 +259,11 @@ def draw_overworld(game: "Game") -> None:
                 pygame.draw.circle(screen, (100, 100, 100), (screen_x, screen_y), marker_radius)
             continue
         
-        # Get color (already defined above)
+        # Get color (already defined above); use quest marker color if this POI is an active quest target
         color = poi_colors.get(poi.poi_type, (150, 150, 150))
+        is_quest_target = _is_poi_quest_target(poi, game)
+        if is_quest_target:
+            color = QUEST_MARKER_COLOR
         
         # Calculate radius based on zoom and state
         base_radius = 4
@@ -263,6 +286,11 @@ def draw_overworld(game: "Game") -> None:
             # Normal size - scale with zoom
             radius = max(2, int(base_radius * zoom))
             pygame.draw.circle(screen, color, (screen_x, screen_y), radius)
+        
+        # Quest marker: thin outer ring for POIs that are active quest objectives
+        if is_quest_target:
+            ring_radius = radius + max(2, int(2 * zoom))
+            pygame.draw.circle(screen, QUEST_MARKER_RING_COLOR, (screen_x, screen_y), ring_radius, max(1, int(1 * zoom)))
         
         # Draw level indicator for dungeons (scale font with zoom)
         if poi.poi_type == "dungeon":
@@ -343,6 +371,10 @@ def draw_overworld(game: "Game") -> None:
             player_x, player_y, mouse_x, mouse_y, config, current_time, explored_tiles
         )
     
+    # Draw minimap (toggle with M; single source of truth for visibility)
+    if getattr(game, "show_minimap", True):
+        _draw_minimap(game, screen, config, current_time, explored_tiles, timeout_hours)
+    
     # Draw UI overlay
     _draw_overworld_ui(game, screen)
     
@@ -355,7 +387,7 @@ def draw_overworld(game: "Game") -> None:
         # Priority: party tooltip over POI tooltip
         if hovered_party is not None:
             from ui.overworld.party_tooltips import create_party_tooltip_data
-            from world.overworld.party_types import get_party_type
+            from world.overworld.party import get_party_type
             
             party_type = get_party_type(hovered_party.party_type_id)
             if party_type:
@@ -377,6 +409,10 @@ def draw_overworld(game: "Game") -> None:
         else:
             # Clear tooltip if not hovering over anything
             game.tooltip.current_tooltip = None
+    
+    # Discovery log / codex overlay (L key)
+    if getattr(game, "show_discovery_log", False):
+        _draw_discovery_log(game, screen)
     
     # Overworld tutorial overlay
     if getattr(game, "show_overworld_tutorial", False):
@@ -408,8 +444,8 @@ def _draw_roaming_parties(
     Returns:
         The party being hovered over, or None
     """
-    from world.overworld.party_types import get_party_type
-    from world.overworld.roaming_party import RoamingParty
+    from world.overworld.party import get_party_type
+    from world.overworld.party import RoamingParty
     
     party_manager = game.overworld_map.party_manager
     if party_manager is None:
@@ -622,6 +658,141 @@ def _draw_battle_indicators(
             screen.blit(exclamation, exclamation_rect)
 
 
+# Minimap: default size (overridden by config.minimap_size), bounds, margin
+MINIMAP_SIZE_DEFAULT = 160
+MINIMAP_SIZE_MIN = 64
+MINIMAP_SIZE_MAX = 320
+MINIMAP_MARGIN = 10
+
+# Discovery log panel
+DISCOVERY_LOG_PANEL_WIDTH = 380
+DISCOVERY_LOG_PANEL_MAX_HEIGHT = 400
+DISCOVERY_LOG_LINE_HEIGHT = 22
+DISCOVERY_LOG_MARGIN = 12
+
+
+def _draw_minimap(
+    game: "Game",
+    screen: pygame.Surface,
+    config,
+    current_time: Optional[float],
+    explored_tiles: dict,
+    timeout_hours: float,
+) -> None:
+    """Draw a small corner minimap: terrain, explored fog, discovered POIs, player."""
+    overworld_map = game.overworld_map
+    if overworld_map is None:
+        return
+    size = getattr(config, "minimap_size", MINIMAP_SIZE_DEFAULT)
+    size = max(MINIMAP_SIZE_MIN, min(MINIMAP_SIZE_MAX, size))
+    w, h = overworld_map.width, overworld_map.height
+    player_x, player_y = overworld_map.get_player_position()
+    # Bottom-right corner, above help panel
+    screen_w, screen_h = screen.get_size()
+    mm_x = screen_w - size - MINIMAP_MARGIN
+    mm_y = screen_h - size - MINIMAP_MARGIN - 50  # Above help strip
+    mm_y = max(MINIMAP_MARGIN, mm_y)
+    
+    # Build minimap surface (one pixel per tile sample)
+    surf = pygame.Surface((size, size))
+    for py in range(size):
+        for px in range(size):
+            tx = min(w - 1, (px * w) // size)
+            ty = min(h - 1, (py * h) // size)
+            tile = overworld_map.get_tile(tx, ty)
+            if tile is None:
+                color = (40, 40, 40)
+            else:
+                color = tile.color
+            # Fog: dim if not explored or expired
+            tile_pos = (tx, ty)
+            if tile_pos not in explored_tiles:
+                color = tuple(int(c * 0.2) for c in color)
+            elif current_time is not None:
+                last_seen = explored_tiles.get(tile_pos, 0.0)
+                if current_time - last_seen > timeout_hours:
+                    color = tuple(int(c * 0.35) for c in color)
+            else:
+                color = tuple(color)
+            surf.set_at((px, py), color)
+    
+    # POI dots (discovered only)
+    poi_colors = {"dungeon": (200, 50, 50), "village": (50, 200, 50), "town": (50, 50, 200), "camp": (200, 200, 50)}
+    for poi in overworld_map.get_all_pois():
+        if not poi.discovered:
+            continue
+        mx = (poi.position[0] * size) // w
+        my = (poi.position[1] * size) // h
+        mx = max(0, min(size - 1, mx))
+        my = max(0, min(size - 1, my))
+        dot = poi_colors.get(poi.poi_type, (150, 150, 150))
+        pygame.draw.circle(surf, dot, (mx, my), max(1, size // 96))
+    
+    # Player dot
+    px = (player_x * size) // w
+    py = (player_y * size) // h
+    px = max(0, min(size - 1, px))
+    py = max(0, min(size - 1, py))
+    pygame.draw.circle(surf, (255, 255, 0), (px, py), max(2, size // 48))
+    
+    # Border and panel background
+    panel = pygame.Surface((size + 4, size + 4), pygame.SRCALPHA)
+    panel.fill(COLOR_BG_PANEL)
+    pygame.draw.rect(panel, COLOR_BORDER_BRIGHT, (0, 0, size + 4, size + 4), 2)
+    screen.blit(panel, (mm_x - 2, mm_y - 2))
+    screen.blit(surf, (mm_x, mm_y))
+
+
+def _draw_discovery_log(game: "Game", screen: pygame.Surface) -> None:
+    """Draw the discovery log (codex) overlay: list of discovered POIs with name, type, level, cleared."""
+    if game.overworld_map is None:
+        return
+    log = getattr(game.overworld_map, "discovery_log", [])
+    if not hasattr(game, "_overworld_ui_font"):
+        game._overworld_ui_font = pygame.font.Font(None, 24)
+    font = game._overworld_ui_font
+    font_title = pygame.font.Font(None, 28)
+    
+    # Resolve cleared state: use current POI if on map, else use stored
+    def get_cleared(entry: dict) -> bool:
+        poi = game.overworld_map.pois.get(entry.get("poi_id"))
+        return poi.cleared if poi else entry.get("cleared", False)
+    
+    title_surf = font_title.render("Discovery Log (L to close)", True, COLOR_TEXT)
+    panel_content_h = DISCOVERY_LOG_LINE_HEIGHT * max(1, len(log)) + 40
+    panel_h = min(DISCOVERY_LOG_PANEL_MAX_HEIGHT, panel_content_h + 40)
+    panel_w = DISCOVERY_LOG_PANEL_WIDTH
+    screen_w, screen_h = screen.get_size()
+    panel_x = (screen_w - panel_w) // 2
+    panel_y = (screen_h - panel_h) // 2
+    
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    panel.fill(COLOR_BG_PANEL)
+    pygame.draw.rect(panel, COLOR_BORDER_BRIGHT, (0, 0, panel_w, panel_h), 2)
+    screen.blit(panel, (panel_x, panel_y))
+    screen.blit(title_surf, (panel_x + DISCOVERY_LOG_MARGIN, panel_y + 8))
+    
+    scroll = getattr(game, "discovery_log_scroll_offset", 0)
+    visible_lines = (panel_h - 50) // DISCOVERY_LOG_LINE_HEIGHT
+    y_start = panel_y + 36
+    for i, entry in enumerate(log):
+        line_y = y_start + i * DISCOVERY_LOG_LINE_HEIGHT - scroll
+        if line_y < y_start - DISCOVERY_LOG_LINE_HEIGHT or line_y > panel_y + panel_h - 10:
+            continue
+        name = entry.get("name", "?")
+        poi_type = entry.get("poi_type", "?")
+        level = entry.get("level", 1)
+        cleared = get_cleared(entry)
+        status = "Cleared" if cleared else "Active"
+        text = f"{name} — {poi_type.title()} Lv.{level} ({status})"
+        surf = font.render(text, True, COLOR_TEXT)
+        screen.blit(surf, (panel_x + DISCOVERY_LOG_MARGIN, line_y))
+    
+    if not log:
+        empty_surf = font.render("No locations discovered yet.", True, COLOR_SUBTITLE)
+        screen.blit(empty_surf, (panel_x + DISCOVERY_LOG_MARGIN, y_start))
+
+
 def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
     """Draw UI overlay (time, position, etc.) with polished panels (OPTIMIZED with caching)."""
     # PERFORMANCE: Cache UI font
@@ -708,7 +879,7 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
     # Bottom instructions panel (static - cache it)
     help_cache_key = "help_panel"
     if help_cache_key not in game._overworld_ui_cache:
-        help_text = "WASD: Move | E: Enter POI | +/-: Zoom | 0: Reset Zoom | Hover: POI Info | I: Inventory | C: Character | H: Tutorial"
+        help_text = "WASD: Move | E: Enter | M: Minimap | +/-: Zoom | 0: Reset | I: Inventory | C: Character | L: Discovery Log | H: Tutorial"
         help_surface = font.render(help_text, True, COLOR_TEXT)
         help_panel_width = help_surface.get_width() + 24
         help_panel_height = 40

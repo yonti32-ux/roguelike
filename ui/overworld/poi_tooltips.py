@@ -59,6 +59,29 @@ def create_poi_tooltip_data(poi: "PointOfInterest", game: Optional["Game"] = Non
             color_name = alignment_colors.get(alignment, "Unknown")
             lines.append(f"Faction: {faction.name} ({color_name})")
     
+    # Temporary POI / quest objective indicator
+    if getattr(poi, "is_temporary", False):
+        if getattr(poi, "source_quest_id", None):
+            lines.append("Temporary (Quest)")
+        else:
+            lines.append("Temporary (Event)")
+    elif game and getattr(game, "active_quests", None):
+        # Show "Quest objective" if an active quest targets this POI
+        try:
+            from systems.quests import QuestStatus
+            for quest in game.active_quests.values():
+                if getattr(quest, "status", None) != QuestStatus.ACTIVE:
+                    continue
+                for obj in getattr(quest, "objectives", []):
+                    if getattr(obj, "poi_id", None) == poi.poi_id:
+                        lines.append("Quest objective")
+                        break
+                else:
+                    continue
+                break
+        except Exception:
+            pass
+
     # POI-specific information (uses extensibility method)
     poi_specific_lines = poi.get_tooltip_lines(game)
     lines.extend(poi_specific_lines)

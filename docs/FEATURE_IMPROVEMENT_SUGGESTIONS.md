@@ -66,7 +66,47 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 2. Quest System Enhancements (High Impact, High Effort)
+## 2. Battle / Combat Improvements
+
+### Current State
+- Turn-based grid combat with skills, statuses, and terrain (cover, hazard, obstacle)
+- Skill-specific cast effects (orbital glows, shockwaves, auras); Guard has a dedicated shield-barrier cast effect and a shield icon on units with guard status
+- AI profiles, targeting, movement, and combat log
+
+### Suggested Improvements
+
+#### 2.1 Skill & Status Visual Variety (Partially Done)
+- **Done**: Guard skill uses a distinct shield-barrier cast effect and a shield icon on the unit while guarding.
+- **Ideas**: Unique cast/impact visuals per skill family (e.g. different shockwave shapes or colors for physical vs magic), brief “impact” flash on hit, and subtle “under guard” aura or border on the unit tile.
+
+#### 2.2 Combat Feedback & Juice
+- **Screen shake** on big hits/crits (already present; tune intensity by damage/type).
+- **Hit stop**: Short pause (0.05–0.1s) on crit or killing blow.
+- **Floating text**: Different colors/sizes for normal, crit, heal, block, “Guarded!” when guard absorbs damage.
+- **Sound**: Distinct sounds for guard, block, miss, and different damage types (optional if audio is in scope).
+
+#### 2.3 Tactical Clarity
+- **Threat/aggro indicator**: Show which enemy is targeting which ally (e.g. arrow or highlight).
+- **Damage preview**: When hovering a skill on a target, show “Estimated damage: X–Y” or “Reduced by Guard”.
+- **Status tooltips**: Hover on status icons (G, W, •, etc.) to see name and remaining duration.
+- **Turn order**: Optional turn-order bar or list so players can plan around who acts next.
+
+#### 2.4 Depth & Variety
+- **Combo / follow-up**: Certain skills could grant “combo point” or enable a stronger follow-up if used in sequence.
+- **Environment interaction**: Pushing enemies into hazards, destroying obstacles, or creating temporary cover.
+- **Morale or stamina pacing**: Tension mechanics (e.g. stamina drain over time, or “last stand” at low HP) to make long fights feel more dynamic.
+- **Boss phases**: Bosses change behavior or gain new abilities at HP thresholds (e.g. 50%, 25%).
+
+#### 2.5 Balance & Progression
+- **Guard tuning**: Guard already reduces damage; consider rank-based duration or extra “counter” chance when guarding.
+- **Enemy variety**: More enemies that punish passive play (e.g. DoT if you don’t move) or reward positioning (backstab, flanking).
+- **Rewards per turn**: Optional “speed bonus” (e.g. finish in under N turns for extra loot) to encourage aggressive play.
+
+**Reference**: Battle scene in `engine/battle/`, skills in `systems/skills.py`, visuals in `engine/battle/visual_effects.py` and `engine/battle/renderer.py`.
+
+---
+
+## 3. Quest System Enhancements (High Impact, High Effort)
 
 ### Current State
 - Basic quest structure with objectives and rewards
@@ -117,7 +157,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 3. Economy System Enhancements (Medium Impact, Medium Effort)
+## 4. Economy System Enhancements (Medium Impact, Medium Effort)
 
 ### Current State
 - Dynamic pricing based on stats/rarity
@@ -167,7 +207,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 4. Combat System Enhancements (Medium Impact, Medium Effort)
+## 5. Combat System Enhancements (Medium Impact, Medium Effort)
 
 ### Current State
 - Turn-based combat with skills
@@ -221,7 +261,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 5. Party/Companion System Enhancements (Medium Impact, Medium Effort)
+## 6. Party/Companion System Enhancements (Medium Impact, Medium Effort)
 
 ### Current State
 - Companion recruitment
@@ -273,7 +313,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 6. Inventory System Enhancements (Low Impact, Low Effort)
+## 7. Inventory System Enhancements (Low Impact, Low Effort)
 
 ### Current State
 - Full inventory system with filtering/sorting
@@ -312,7 +352,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 7. Status Effect System Enhancements (Medium Impact, Low Effort)
+## 8. Status Effect System Enhancements (Medium Impact, Low Effort)
 
 ### Current State
 - Basic status effects (buffs/debuffs)
@@ -351,7 +391,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 8. UI/UX Improvements (High Impact, Variable Effort)
+## 9. UI/UX Improvements (High Impact, Variable Effort)
 
 ### Current State
 - Good fullscreen screens for inventory/character/shop
@@ -402,7 +442,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 9. Progression System Enhancements (Medium Impact, Medium Effort)
+## 10. Progression System Enhancements (Medium Impact, Medium Effort)
 
 ### Current State
 - Level system with XP
@@ -454,7 +494,7 @@ This document provides suggestions for uplifting and enhancing existing features
 
 ---
 
-## 10. Name Generation System Enhancements (Low Impact, Low Effort)
+## 11. Name Generation System Enhancements (Low Impact, Low Effort)
 
 ### Current State
 - Name generation for various entities

@@ -4,12 +4,12 @@ Overworld map container.
 Manages the overworld map, player position, explored tiles, and POIs.
 """
 
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from .terrain import TerrainType, TERRAIN_GRASS
 
 if TYPE_CHECKING:
     from ..poi.base import PointOfInterest
-    from .party_manager import PartyManager
+    from .party import PartyManager
     from .road_manager import RoadManager
     from world.time.time_system import TimeSystem
 
@@ -59,7 +59,7 @@ class OverworldMap:
         self.pois: Dict[str, "PointOfInterest"] = {}
         
         # Roaming parties
-        from .party_manager import PartyManager
+        from .party import PartyManager
         self.party_manager: Optional["PartyManager"] = PartyManager(self)
         
         # Faction manager (use world seed for deterministic generation)
@@ -69,6 +69,9 @@ class OverworldMap:
         
         # Road manager (initialized during generation)
         self.road_manager: Optional["RoadManager"] = None
+        
+        # Discovery log: persistent list of discovered POIs for codex (poi_id, name, poi_type, level, cleared)
+        self.discovery_log: List[Dict[str, Any]] = []
         
         # Mark starting position as explored (with no timestamp - will be updated when player moves)
         # Using a very old timestamp so it will expire quickly if time system isn't available
@@ -144,15 +147,18 @@ class OverworldMap:
                 # This handles cases where time isn't provided
                 self.explored_tiles[(x, y)] = -999999.0
     
-    def is_explored(self, x: int, y: int, current_time: Optional[float] = None, timeout_hours: float = 2.0) -> bool:
+    def is_explored(self, x: int, y: int, current_time: Optional[float] = None, timeout_hours: float = 12.0) -> bool:
         """
         Check if a tile has been explored and is still visible (within timeout).
+        
+        Callers should pass OverworldConfig.memory_timeout_hours for consistency.
+        Default 12.0 matches config default (single source of truth: config file).
         
         Args:
             x: Tile X coordinate
             y: Tile Y coordinate
             current_time: Current time in hours. If None, uses old behavior (always visible once explored).
-            timeout_hours: Hours after which explored tiles fade out. Default 2.0 hours.
+            timeout_hours: Hours after which explored tiles fade out. Use config.memory_timeout_hours.
         
         Returns:
             True if tile was explored and is still within timeout period
@@ -225,6 +231,55 @@ class OverworldMap:
     def add_poi(self, poi: "PointOfInterest") -> None:  # type: ignore
         """Add a POI to the map."""
         self.pois[poi.poi_id] = poi
+    
+    def record_discovery(self, poi: "PointOfInterest") -> None:  # type: ignore
+        """Record a POI in the discovery log (codex). Add or update by poi_id."""
+        entry = {
+            "poi_id": poi.poi_id,
+            "name": poi.name,
+            "poi_type": poi.poi_type,
+            "level": poi.level,
+            "cleared": poi.cleared,
+        }
+        for i, existing in enumerate(self.discovery_log):
+            if existing.get("poi_id") == poi.poi_id:
+                self.discovery_log[i] = entry
+                return
+        self.discovery_log.append(entry)
+    
+    def remove_poi(self, poi_id: str) -> bool:
+        """
+        Remove a POI from the map by ID.
+        Used for temporary POIs when quest/event completes or expires.
+        
+        Returns:
+            True if a POI was removed, False if no POI had that ID.
+        """
+        if poi_id in self.pois:
+            del self.pois[poi_id]
+            return True
+        return False
+    
+    def remove_expired_temporary_pois(self, current_time_hours: float) -> int:
+        """
+        Remove temporary POIs that have passed their expires_at_hours.
+        Call when entering overworld (e.g. from game.enter_overworld_mode).
+        
+        Returns:
+            Number of POIs removed.
+        """
+        to_remove = []
+        for poi_id, poi in list(self.pois.items()):
+            if not getattr(poi, "is_temporary", False):
+                continue
+            expires = getattr(poi, "expires_at_hours", None)
+            if expires is None:
+                continue
+            if current_time_hours >= expires:
+                to_remove.append(poi_id)
+        for poi_id in to_remove:
+            self.remove_poi(poi_id)
+        return len(to_remove)
     
     def get_poi_at(self, x: int, y: int) -> Optional["PointOfInterest"]:  # type: ignore
         """

@@ -11,10 +11,10 @@ import math
 from .party_types import PartyBehavior
 
 if TYPE_CHECKING:
-    from .map import OverworldMap
+    from ..map import OverworldMap
     from .party_types import PartyType
     from .roaming_party import RoamingParty
-    from ..poi.base import PointOfInterest
+    from ...poi.base import PointOfInterest
 
 
 def _handle_party_interaction(
@@ -68,13 +68,20 @@ def _handle_party_interaction(
         _handle_ally_interaction(party, party_type, other_party, other_party_type, overworld_map, all_parties)
         return
     
+    # Hunt mechanic: natural creature adjacent to prey = instant hunt (prey doesn't fight back)
+    if (is_enemy and
+        getattr(party_type, "is_natural_creature", False) and
+        getattr(other_party_type, "is_prey", False)):
+        _resolve_hunt(party, party_type, other_party, other_party_type, overworld_map)
+        return
+
     # Both parties must be able to attack for combat
     if not (party_type.can_attack and other_party_type.can_attack):
         return
-    
+
     if not is_enemy:
         return  # Not enemies, no combat interaction
-    
+
     # Start a multi-turn battle instead of instant resolution
     _start_party_battle(party, other_party, overworld_map)
 
@@ -134,6 +141,32 @@ def _handle_ally_interaction(
             # Move together away from enemy
             _make_party_flee(party, nearby_enemy, overworld_map)
             _make_party_flee(other_party, nearby_enemy, overworld_map)
+
+
+def _resolve_hunt(
+    hunter: "RoamingParty",
+    hunter_type: "PartyType",
+    prey: "RoamingParty",
+    prey_type: "PartyType",
+    overworld_map: "OverworldMap",
+) -> None:
+    """
+    Resolve an instant hunt: natural creature kills prey (no battle).
+    Hunter gains hunt XP; prey is removed. Later can add loot/drops.
+    """
+    from .party_power import get_party_power
+
+    # Grant hunt XP based on prey strength/size (scaled for future use)
+    base_xp = 8
+    prey_power = get_party_power(prey, prey_type)
+    xp_gain = base_xp + max(0, int(prey_power / 5)) + random.randint(0, 6)
+    hunter.xp = getattr(hunter, "xp", 0) + xp_gain
+
+    if hasattr(overworld_map, "party_manager") and overworld_map.party_manager:
+        overworld_map.party_manager.remove_party(prey.party_id)
+
+    hunter.clear_target()
+    hunter.behavior_state = "idle"
 
 
 def _start_party_battle(
@@ -251,20 +284,32 @@ def _update_party_battle(
         else:
             winner = party
             loser = target_party
-        
+
+        winner_type = get_party_type(winner.party_type_id)
+        loser_type = get_party_type(loser.party_type_id)
+        # Hunt mechanic: natural creature that wins vs prey gains hunt XP
+        if (winner_type and loser_type and
+                getattr(winner_type, "is_natural_creature", False) and
+                getattr(loser_type, "is_prey", False)):
+            from .party_power import get_party_power
+            base_xp = 8
+            prey_power = get_party_power(loser, loser_type)
+            xp_gain = base_xp + max(0, int(prey_power / 5)) + random.randint(0, 6)
+            winner.xp = getattr(winner, "xp", 0) + xp_gain
+
         # Remove loser
         overworld_map.party_manager.remove_party(loser.party_id)
-        
+
         # Winner gains gold
         if loser.gold > 0:
             gold_gained = min(loser.gold, random.randint(1, loser.gold))
             winner.gold += gold_gained
-        
+
         # Clean up
         winner.in_combat = False
         winner.combat_target_id = None
         winner.behavior_state = "idle"
-        
+
         # Remove battle
         if battle.battle_id in overworld_map.party_manager.active_battles:
             del overworld_map.party_manager.active_battles[battle.battle_id]
@@ -629,7 +674,7 @@ def get_travel_target(
     If party has a destination, move towards it.
     Otherwise, pick a new destination POI.
     """
-    from ..poi.base import PointOfInterest
+    from ...poi.base import PointOfInterest
     
     # If we have a destination and haven't reached it, continue
     if party.destination_poi_id:
@@ -693,6 +738,49 @@ def get_travel_target(
     return target_poi.position
 
 
+def _do_one_movement_step(
+    party: "RoamingParty",
+    party_type: "PartyType",
+    overworld_map: "OverworldMap",
+    current_time: float,
+) -> bool:
+    """
+    Execute one step of movement toward the party's target.
+    Returns True if the party moved, False if no target or move blocked.
+    """
+    if party.is_at_target() or party.target_x is None or party.target_y is None:
+        return False
+
+    dx = party.target_x - party.x
+    dy = party.target_y - party.y
+
+    # Normalize to one step
+    if abs(dx) > 1 or abs(dy) > 1:
+        if abs(dx) > abs(dy):
+            dx = 1 if dx > 0 else -1
+            dy = 0
+        else:
+            dx = 0
+            dy = 1 if dy > 0 else -1
+
+    new_x = party.x + dx
+    new_y = party.y + dy
+
+    if not overworld_map.in_bounds(new_x, new_y) or not overworld_map.is_walkable(new_x, new_y):
+        party.failed_move_count = getattr(party, "failed_move_count", 0) + 1
+        if party.failed_move_count >= 5:
+            party.clear_target()
+            party.failed_move_count = 0
+        return False
+
+    party.set_position(new_x, new_y)
+    party.record_move(current_time)
+    party.failed_move_count = 0
+    if party.is_at_target():
+        party.clear_target()
+    return True
+
+
 def update_party_ai(
     party: "RoamingParty",
     party_type: "PartyType",
@@ -703,8 +791,9 @@ def update_party_ai(
     """
     Update party AI - movement and behavior.
     
-    For turn-based movement, parties move once per player move.
-    Speed affects how often they move (faster parties move more often).
+    For turn-based movement, parties move once per player move (or skip for slow parties).
+    Option B: parties with speed > 1.0 have a chance to move twice per player move,
+    so fast parties can catch slow ones and the player.
     
     Args:
         party: The party to update
@@ -760,6 +849,30 @@ def update_party_ai(
                     party.following_party_id = None
                     party.behavior_state = "idle"
                     party.clear_target()
+
+    # Prey flee: if this party is prey, flee from any nearby natural predator (within sight)
+    if getattr(party_type, "is_prey", False):
+        from .party_types import get_party_type
+        nearby_predator = None
+        for other_party in all_parties:
+            if other_party.party_id == party.party_id:
+                continue
+            dist = party.distance_to_party(other_party)
+            if dist > party_type.sight_range:
+                continue
+            other_type = get_party_type(other_party.party_type_id)
+            if not other_type:
+                continue
+            if (getattr(other_type, "is_natural_creature", False) and
+                    party.party_type_id in other_type.enemy_types):
+                if (nearby_predator is None or
+                        dist < party.distance_to_party(nearby_predator)):
+                    nearby_predator = other_party
+        if nearby_predator is not None:
+            _make_party_flee(party, nearby_predator, overworld_map)
+            party.behavior_state = "fleeing"
+            # Still do one movement step below so prey actually moves away
+            # (target already set by _make_party_flee)
     
     # Check for nearby enemies and allies
     nearby_enemy = None
@@ -844,39 +957,12 @@ def update_party_ai(
         if target:
             party.set_target(target[0], target[1])
     
-    # Move towards target
-    if not party.is_at_target() and party.target_x is not None and party.target_y is not None:
-        # Simple movement: move one step towards target
-        dx = party.target_x - party.x
-        dy = party.target_y - party.y
-        
-        # Normalize to one step
-        if abs(dx) > 1 or abs(dy) > 1:
-            if abs(dx) > abs(dy):
-                dx = 1 if dx > 0 else -1
-                dy = 0
-            else:
-                dx = 0
-                dy = 1 if dy > 0 else -1
-        
-        new_x = party.x + dx
-        new_y = party.y + dy
-        
-        # Check if valid move
-        if (overworld_map.in_bounds(new_x, new_y) and
-            overworld_map.is_walkable(new_x, new_y)):
-            party.set_position(new_x, new_y)
-            party.record_move(current_time)
-            
-            # If reached target, clear it
-            if party.is_at_target():
-                party.clear_target()
-        else:
-            # Move blocked - increment failed move count
-            party.failed_move_count = getattr(party, 'failed_move_count', 0) + 1
-            
-            # If stuck for too many moves (e.g., 5), clear target to pick a new one
-            if party.failed_move_count >= 5:
-                party.clear_target()
-                party.failed_move_count = 0
+    # Option B: fast parties (speed > 1.0) get a chance to move twice per player move
+    num_moves = 1
+    if party_type.speed > 1.0 and random.random() < min(1.0, party_type.speed - 1.0):
+        num_moves = 2
+
+    for _ in range(num_moves):
+        if not _do_one_movement_step(party, party_type, overworld_map, current_time):
+            break
 
