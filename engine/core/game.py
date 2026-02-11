@@ -879,6 +879,7 @@ class Game:
 
         # Initial FOV on this floor (centered on player spawn)
         self.update_fov()
+        self._last_fov_tile = self.current_map.world_to_tile(*self.player.rect.center)
 
     def try_change_floor(self, delta: int) -> None:
         """
@@ -1020,7 +1021,8 @@ class Game:
     def start_battle_from_overworld(
         self,
         enemies: List[Enemy],
-        context_party: Optional["RoamingParty"] = None
+        context_party: Optional["RoamingParty"] = None,
+        allied_parties: Optional[List["RoamingParty"]] = None,
     ) -> None:
         """
         Start a battle from the overworld with a list of enemies.
@@ -1030,6 +1032,8 @@ class Game:
         Args:
             enemies: List of Enemy entities to fight
             context_party: Optional party that triggered this battle (for post-combat updates)
+            allied_parties: Optional list of allied parties to add as player-side units
+                (e.g. when joining an existing battle; otherwise auto-discovered via faction combat)
         """
         # Ensure player exists - create one if needed (overworld might not have player entity)
         if self.player is None:
@@ -1071,22 +1075,23 @@ class Game:
         companions_for_battle = list(party_list) if party_list else None
         
         # Check for allied parties that should join the battle
-        allied_parties = []
-        if context_party is not None:
-            from world.overworld.faction_combat import get_allied_parties_for_battle
-            from world.overworld.party import get_party_type
-            
-            player_faction = getattr(self, 'player_faction', None)
-            enemy_party_type = get_party_type(context_party.party_type_id)
-            
-            if enemy_party_type:
-                allied_parties = get_allied_parties_for_battle(
-                    party=context_party,
-                    party_type=enemy_party_type,
-                    game=self,
-                    player_faction=player_faction,
-                    radius=2  # 2 tile radius for allies to join
-                )
+        if allied_parties is None:
+            allied_parties = []
+            if context_party is not None:
+                from world.overworld.faction_combat import get_allied_parties_for_battle
+                from world.overworld.party import get_party_type
+                
+                player_faction = getattr(self, 'player_faction', None)
+                enemy_party_type = get_party_type(context_party.party_type_id)
+                
+                if enemy_party_type:
+                    allied_parties = get_allied_parties_for_battle(
+                        party=context_party,
+                        party_type=enemy_party_type,
+                        game=self,
+                        player_faction=player_faction,
+                        radius=2  # 2 tile radius for allies to join
+                    )
         
         # Create battle scene
         self.battle_scene = BattleScene(
@@ -1646,8 +1651,13 @@ class Game:
 
             # Exploration is handled by the controller...
             self.exploration.update(dt)
-            # ...and after movement, we always refresh FOV around the player.
-            self.update_fov()
+            # Refresh FOV only when player tile changes (avoids per-frame raycasting)
+            if self.player is not None and self.current_map is not None:
+                tx, ty = self.current_map.world_to_tile(*self.player.rect.center)
+                last_tile = getattr(self, "_last_fov_tile", (None, None))
+                if (tx, ty) != last_tile:
+                    self._last_fov_tile = (tx, ty)
+                    self.update_fov()
             # Update exploration camera to follow the player and stay in-bounds.
             self._center_camera_on_player()
             self._clamp_camera_to_map()

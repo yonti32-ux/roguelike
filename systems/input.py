@@ -30,6 +30,10 @@ class InputAction(str, Enum):
     TOGGLE_INVENTORY = "toggle_inventory"
     TOGGLE_CHARACTER_SHEET = "toggle_character_sheet"
     TOGGLE_QUEST_SCREEN = "toggle_quest_screen"
+
+    # Overworld: pass time
+    REST = "rest"  # Short rest: pass time, partial heal
+    CAMP = "camp"   # Camp: pass more time, full heal
     TOGGLE_BATTLE_LOG = "toggle_battle_log"
     TOGGLE_EXPLORATION_LOG = "toggle_exploration_log"
 

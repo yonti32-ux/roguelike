@@ -44,6 +44,11 @@ class OverworldConfig:
     # Time settings
     movement_cost_base: float = 1.0
     road_movement_multiplier: float = 0.7  # Moving on a road costs 70% of terrain time (faster travel)
+    # Rest (R): short break, passes time, partial heal
+    rest_hours: float = 4.0
+    rest_heal_ratio: float = 0.25  # Heal 25% of max HP
+    # Camp (T): set up camp, passes more time, full heal
+    camp_hours: float = 8.0
     terrain_costs: Dict[str, float] = field(default_factory=lambda: {
         "grass": 1.0,
         "forest": 1.5,
@@ -59,6 +64,13 @@ class OverworldConfig:
     # Sight/exploration settings
     sight_radius: int = 8
     memory_timeout_hours: float = 12.0  # Single source of truth: how long explored tiles stay visible after leaving (fog of war). Used by map renderer and overlays.
+    
+    # Party spawn settings (tunable without code changes)
+    party_spawn_interval: int = 15  # Spawn new parties every N player moves
+    party_max_parties: int = 100  # Max roaming parties on map
+    party_spawn_count_min: int = 2  # Min parties per spawn batch
+    party_spawn_count_max: int = 5  # Max parties per spawn batch
+    party_initial_spawn_min_distance: int = 10  # Min distance from player for initial spawns
     
     # Zoom settings
     default_zoom_index: int = 1  # Index into zoom levels (1 = 75% default)
@@ -145,6 +157,9 @@ class OverworldConfig:
             time_data = data.get("time", {})
             config.movement_cost_base = time_data.get("movement_cost_base", config.movement_cost_base)
             config.road_movement_multiplier = time_data.get("road_movement_multiplier", config.road_movement_multiplier)
+            config.rest_hours = time_data.get("rest_hours", config.rest_hours)
+            config.rest_heal_ratio = time_data.get("rest_heal_ratio", config.rest_heal_ratio)
+            config.camp_hours = time_data.get("camp_hours", config.camp_hours)
             config.terrain_costs = time_data.get("terrain_costs", config.terrain_costs)
             
             # Starting location
@@ -162,6 +177,14 @@ class OverworldConfig:
             # Exploration settings
             exploration_data = data.get("exploration", {})
             config.memory_timeout_hours = exploration_data.get("memory_timeout_hours", config.memory_timeout_hours)
+            
+            # Party spawn settings
+            parties_data = data.get("parties", {})
+            config.party_spawn_interval = parties_data.get("spawn_interval", config.party_spawn_interval)
+            config.party_max_parties = parties_data.get("max_parties", config.party_max_parties)
+            config.party_spawn_count_min = parties_data.get("spawn_count_min", config.party_spawn_count_min)
+            config.party_spawn_count_max = parties_data.get("spawn_count_max", config.party_spawn_count_max)
+            config.party_initial_spawn_min_distance = parties_data.get("initial_spawn_min_distance", config.party_initial_spawn_min_distance)
             
             # UI settings (minimap, etc.)
             ui_data = data.get("ui", {})
@@ -218,6 +241,9 @@ class OverworldConfig:
                 "time": {
                     "movement_cost_base": self.movement_cost_base,
                     "road_movement_multiplier": self.road_movement_multiplier,
+                    "rest_hours": self.rest_hours,
+                    "rest_heal_ratio": self.rest_heal_ratio,
+                    "camp_hours": self.camp_hours,
                     "terrain_costs": self.terrain_costs,
                 },
                 "starting_location": {
@@ -230,6 +256,13 @@ class OverworldConfig:
                 },
                 "exploration": {
                     "memory_timeout_hours": self.memory_timeout_hours,
+                },
+                "parties": {
+                    "spawn_interval": self.party_spawn_interval,
+                    "max_parties": self.party_max_parties,
+                    "spawn_count_min": self.party_spawn_count_min,
+                    "spawn_count_max": self.party_spawn_count_max,
+                    "initial_spawn_min_distance": self.party_initial_spawn_min_distance,
                 },
                 "ui": {
                     "minimap_size": self.minimap_size,

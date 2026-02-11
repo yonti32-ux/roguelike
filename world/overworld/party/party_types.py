@@ -76,7 +76,7 @@ class PartyType:
     spawn_weight: float = 1.0  # Relative spawn probability
     min_level: int = 1  # Minimum player level to spawn
     max_level: int = 100  # Maximum player level to spawn
-    spawn_category: SpawnCategory = SpawnCategory.ALL  # Pool for filtered spawns (wildlife / humanoid / undead)
+    spawn_category: SpawnCategory = SpawnCategory.ALL  # WILDLIFE / HUMANOID / UNDEAD; ALL = appears in any pool when filter used
     
     # Special properties
     can_trade: bool = False  # Can player trade with this party?
@@ -123,7 +123,10 @@ def party_types_for_spawn_category(category: SpawnCategory) -> List[PartyType]:
     """
     Get party types that belong to a spawn category (for modular spawn pools).
     Returns types where spawn_category == category or spawn_category == ALL.
+    When category is ALL, returns all registered types (same as all_party_types()).
     """
+    if category == SpawnCategory.ALL:
+        return list(_PARTY_TYPES.values())
     return [
         pt for pt in _PARTY_TYPES.values()
         if pt.spawn_category == category or pt.spawn_category == SpawnCategory.ALL
@@ -1164,25 +1167,26 @@ KNIGHT_PATROL.enemy_types.update({
 })
 
 # Spawn categories for modular spawn pools (wildlife / humanoid / undead)
-WILDLIFE_TYPES = {
+# Use tuples: PartyType is not hashable (has mutable fields)
+WILDLIFE_TYPES = (
     WOLF_PACK, BEAR_PACK, DEER_HERD, BIRD_FLOCK, RABBIT_HERD, FOX_PACK,
     GIANT_SPIDER, BOAR_HERD, DIRE_WOLF, RAT_SWARM,
-}
-UNDEAD_TYPES = {
+)
+UNDEAD_TYPES = (
     SKELETON_WARBAND, GHOUL_PACK, ZOMBIE_HORDE, WRAITH_PACK, NECROMANCER_CULT,
-}
+)
 for pt in WILDLIFE_TYPES:
     pt.spawn_category = SpawnCategory.WILDLIFE
 for pt in UNDEAD_TYPES:
     pt.spawn_category = SpawnCategory.UNDEAD
 # All others remain HUMANOID (set explicitly so ALL is reserved for cross-pool types)
-HUMANOID_TYPES = {
+HUMANOID_TYPES = (
     MERCHANT_PARTY, VILLAGER_PARTY, GUARD_PATROL, BANDIT_PARTY, MONSTER_PACK,
     ADVENTURER_PARTY, NOBLE_ENTOURAGE, RANGER_PATROL, CULTIST_GATHERING,
     ORC_RAIDING_PARTY, TRADER_CARAVAN, SCOUT_PARTY, GOBLIN_WARBAND,
     PILGRIM_GROUP, BANDIT_ROGUE, MONSTER_BRUTE, KNIGHT_PATROL, MERCENARY_COMPANY,
     THIEF_GANG, ASSASSIN_CREW, RAIDER_BAND, MAGE_CABAL, WARLOCK_COVEN,
     TROLL_BAND, OGRE_WARBAND, DEMON_PACK, GOBLIN_SHAMAN_CULT,
-}
+)
 for pt in HUMANOID_TYPES:
     pt.spawn_category = SpawnCategory.HUMANOID

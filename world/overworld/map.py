@@ -57,6 +57,8 @@ class OverworldMap:
         
         # POIs stored by ID
         self.pois: Dict[str, "PointOfInterest"] = {}
+        # Spatial index: (x, y) -> POI for O(1) get_poi_at
+        self._pois_by_position: Dict[Tuple[int, int], "PointOfInterest"] = {}
         
         # Roaming parties
         from .party import PartyManager
@@ -72,6 +74,8 @@ class OverworldMap:
         
         # Discovery log: persistent list of discovered POIs for codex (poi_id, name, poi_type, level, cleared)
         self.discovery_log: List[Dict[str, Any]] = []
+        # Index for O(1) record_discovery update: poi_id -> index in discovery_log
+        self._discovery_index: Dict[str, int] = {}
         
         # Mark starting position as explored (with no timestamp - will be updated when player moves)
         # Using a very old timestamp so it will expire quickly if time system isn't available
@@ -231,6 +235,8 @@ class OverworldMap:
     def add_poi(self, poi: "PointOfInterest") -> None:  # type: ignore
         """Add a POI to the map."""
         self.pois[poi.poi_id] = poi
+        pos = (poi.position[0], poi.position[1])
+        self._pois_by_position[pos] = poi
     
     def record_discovery(self, poi: "PointOfInterest") -> None:  # type: ignore
         """Record a POI in the discovery log (codex). Add or update by poi_id."""
@@ -241,10 +247,11 @@ class OverworldMap:
             "level": poi.level,
             "cleared": poi.cleared,
         }
-        for i, existing in enumerate(self.discovery_log):
-            if existing.get("poi_id") == poi.poi_id:
-                self.discovery_log[i] = entry
-                return
+        idx = self._discovery_index.get(poi.poi_id)
+        if idx is not None:
+            self.discovery_log[idx] = entry
+            return
+        self._discovery_index[poi.poi_id] = len(self.discovery_log)
         self.discovery_log.append(entry)
     
     def remove_poi(self, poi_id: str) -> bool:
@@ -256,6 +263,9 @@ class OverworldMap:
             True if a POI was removed, False if no POI had that ID.
         """
         if poi_id in self.pois:
+            poi = self.pois[poi_id]
+            pos = (poi.position[0], poi.position[1])
+            self._pois_by_position.pop(pos, None)
             del self.pois[poi_id]
             return True
         return False
@@ -292,10 +302,7 @@ class OverworldMap:
         Returns:
             PointOfInterest at that position, or None
         """
-        for poi in self.pois.values():
-            if poi.position == (x, y):
-                return poi
-        return None
+        return self._pois_by_position.get((x, y))
     
     def get_pois_in_range(
         self,

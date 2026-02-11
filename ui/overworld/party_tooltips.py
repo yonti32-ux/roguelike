@@ -2,6 +2,9 @@
 Party tooltip utilities.
 
 Creates tooltip data for roaming parties on the overworld.
+Uses get_effective_alignment when game is provided so tooltips reflect
+faction relations (e.g. friendly party may appear hostile if player has
+poor faction reputation).
 """
 
 from typing import TYPE_CHECKING, Optional
@@ -20,6 +23,10 @@ def create_party_tooltip_data(
     """
     Create tooltip data for a roaming party.
     
+    When game is provided, uses effective alignment (faction-aware) so tooltip
+    text stays in sync with join-battle logic. Base alignment shown in parentheses
+    when it differs from effective alignment.
+    
     Args:
         party: The RoamingParty to create a tooltip for
         party_type: The PartyType definition
@@ -28,13 +35,31 @@ def create_party_tooltip_data(
     Returns:
         TooltipData with party information
     """
-    # Title with alignment indicator
+    # Get effective alignment (faction-aware) when game is available
+    effective_alignment = party_type.alignment.value
+    alignment_source = ""
+    if game is not None:
+        try:
+            from world.overworld.party import get_effective_alignment
+            player_faction = getattr(game, "player_faction_id", None) or getattr(
+                getattr(game, "hero_stats", None), "faction_id", None
+            )
+            effective_alignment = get_effective_alignment(
+                party, party_type, game, player_faction
+            )
+            # Note when effective differs from base (faction relations)
+            if effective_alignment != party_type.alignment.value and party.faction_id:
+                alignment_source = " (faction)"
+        except Exception:
+            pass
+    
+    # Title with effective alignment indicator
     alignment_indicators = {
         "friendly": "✓",
         "neutral": "○",
         "hostile": "✗",
     }
-    indicator = alignment_indicators.get(party_type.alignment.value, "?")
+    indicator = alignment_indicators.get(effective_alignment, "?")
     title = f"{party_type.name} {indicator}"
     
     lines = []
@@ -42,14 +67,17 @@ def create_party_tooltip_data(
     # Description
     lines.append(party_type.description)
     
-    # Alignment
+    # Alignment: show effective alignment; append base if different (faction)
     alignment_labels = {
         "friendly": "Friendly",
         "neutral": "Neutral",
         "hostile": "Hostile",
     }
-    alignment_label = alignment_labels.get(party_type.alignment.value, "Unknown")
-    lines.append(f"Alignment: {alignment_label}")
+    alignment_label = alignment_labels.get(effective_alignment, "Unknown")
+    if alignment_source:
+        lines.append(f"Alignment: {alignment_label}{alignment_source}")
+    else:
+        lines.append(f"Alignment: {alignment_label}")
     
     # Faction (if applicable)
     if party.faction_id:

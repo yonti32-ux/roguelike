@@ -26,6 +26,29 @@ class TileSpriteType(Enum):
     WALL = "wall"
     UP_STAIRS = "up_stairs"
     DOWN_STAIRS = "down_stairs"
+    # Village tiles
+    VILLAGE_PATH = "village_path"
+    VILLAGE_PLAZA = "village_plaza"
+    VILLAGE_GRASS = "village_grass"
+    VILLAGE_BUILDING_FLOOR = "village_building_floor"
+    VILLAGE_BUILDING_WALL = "village_building_wall"
+    VILLAGE_ENTRANCE = "village_entrance"
+    VILLAGE_TREE = "village_tree"
+    VILLAGE_WELL = "village_well"
+    VILLAGE_BENCH = "village_bench"
+    # Town tiles
+    TOWN_COBBLESTONE = "town_cobblestone"
+    TOWN_PLAZA = "town_plaza"
+    TOWN_GRASS = "town_grass"
+    TOWN_MARKET = "town_market"
+    TOWN_STONE_FLOOR = "town_stone_floor"
+    TOWN_WOODEN_FLOOR = "town_wooden_floor"
+    TOWN_STONE_WALL = "town_stone_wall"
+    TOWN_WOODEN_WALL = "town_wooden_wall"
+    TOWN_ENTRANCE = "town_entrance"
+    TOWN_FOUNTAIN = "town_fountain"
+    TOWN_MARKET_STALL = "town_market_stall"
+    TOWN_BENCH = "town_bench"
 
 
 class SpriteRegistry:
@@ -55,6 +78,29 @@ class SpriteRegistry:
             TileSpriteType.WALL: "wall",
             TileSpriteType.UP_STAIRS: "up_stairs",
             TileSpriteType.DOWN_STAIRS: "down_stairs",
+            # Village
+            TileSpriteType.VILLAGE_PATH: "village_path",
+            TileSpriteType.VILLAGE_PLAZA: "village_plaza",
+            TileSpriteType.VILLAGE_GRASS: "village_grass",
+            TileSpriteType.VILLAGE_BUILDING_FLOOR: "village_building_floor",
+            TileSpriteType.VILLAGE_BUILDING_WALL: "village_building_wall",
+            TileSpriteType.VILLAGE_ENTRANCE: "village_entrance",
+            TileSpriteType.VILLAGE_TREE: "village_tree",
+            TileSpriteType.VILLAGE_WELL: "village_well",
+            TileSpriteType.VILLAGE_BENCH: "village_bench",
+            # Town
+            TileSpriteType.TOWN_COBBLESTONE: "town_cobblestone",
+            TileSpriteType.TOWN_PLAZA: "town_plaza",
+            TileSpriteType.TOWN_GRASS: "town_grass",
+            TileSpriteType.TOWN_MARKET: "town_market",
+            TileSpriteType.TOWN_STONE_FLOOR: "town_stone_floor",
+            TileSpriteType.TOWN_WOODEN_FLOOR: "town_wooden_floor",
+            TileSpriteType.TOWN_STONE_WALL: "town_stone_wall",
+            TileSpriteType.TOWN_WOODEN_WALL: "town_wooden_wall",
+            TileSpriteType.TOWN_ENTRANCE: "town_entrance",
+            TileSpriteType.TOWN_FOUNTAIN: "town_fountain",
+            TileSpriteType.TOWN_MARKET_STALL: "town_market_stall",
+            TileSpriteType.TOWN_BENCH: "town_bench",
         }
         
         # Item ID to sprite ID mappings (populated from item data)

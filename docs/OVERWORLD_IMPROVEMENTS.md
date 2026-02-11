@@ -13,10 +13,27 @@ This document suggests improvements to the overworld and its related systems, ba
 | **Exploration** | Sight radius, `explored_tiles` with timestamp; tiles fade after `memory_timeout_hours` |
 | **POIs** | Permanent + temporary (quest/event); add/remove; discover on enter/sight; cleared/destroyed state |
 | **Roads** | Generated (town–town, village–village, etc.), rendered; **not used for movement cost** |
-| **Parties** | Roaming parties, spawn on timer, AI (pathfinding, party-vs-party combat), faction alignment, join battle (J); **speed** = move probability per player move (capped at 1.0) |
+| **Parties** | Roaming parties, spawn on timer, AI (pathfinding, party-vs-party combat, hunt/prey flee), faction alignment, join battle (J); **speed** = move probability per player move (capped at 1.0); **spawn categories** (WILDLIFE / HUMANOID / UNDEAD) for modular spawns |
 | **Factions** | FactionManager, relations, territory (chunk-based, optional overlay) |
 | **Random events** | Cooldown + chance per move; spawn temp POIs (hostile camp, merchant, ruins); expiry; max 3 at once |
 | **Quests** | Elder/town quests; real or temp POIs; quest map markers (gold + ring); turn-in removes temp POI |
+
+---
+
+## Done Overworld Improvements (summary)
+
+Implemented and in use:
+
+| # | Improvement | Where |
+|---|-------------|--------|
+| 1.1 | Road movement cost | `OverworldConfig.road_movement_multiplier`; `try_move()` applies it when on road |
+| 1.4 B | Multiple moves per turn for fast parties | `party_ai.update_party_ai()`: speed &gt; 1.0 → chance of 2 moves |
+| 2.1 | Exploration timeout from config | `OverworldConfig.memory_timeout_hours`; single source for fog-of-war fade |
+| 2.2 | Minimap | Toggle **M**; 96×96 corner map, terrain + POIs + player |
+| 2.3 | Discovery log / codex | **L**; scrollable list of discovered POIs with cleared state |
+| 3.4 | Hunt mechanic (natural parties) | Prey (deer, rabbit) + predators (wolf, bear, fox, etc.); instant hunt → hunt XP; XP scales power |
+| 3.4 | Prey flee | Prey flee from nearby natural predators within sight |
+| 3.5 | Spawn categories (modular spawn pools) | `SpawnCategory` (WILDLIFE / HUMANOID / UNDEAD); `spawn_random_party(spawn_category=...)`; `party_types_for_spawn_category()` |
 
 ---
 
@@ -176,16 +193,14 @@ Implemented in `party_ai.py`: `_do_one_movement_step()` does one step; `update_p
 
 ### 3.5 Spawn categories (modular spawn pools) ✅ Done
 
-**Implemented**: Party types have a **spawn category** (`SpawnCategory`: `ALL`, `WILDLIFE`, `HUMANOID`, `UNDEAD`). `PartyManager.spawn_random_party(..., spawn_category=SpawnCategory.WILDLIFE)` spawns only from that pool; `spawn_category=None` (default) uses all types (unchanged behavior). Helpers: `party_types_for_spawn_category(category)`.
+**Implemented**: Party types have a **spawn category** (`SpawnCategory`: `ALL`, `WILDLIFE`, `HUMANOID`, `UNDEAD`). `PartyManager.spawn_random_party(..., spawn_category=SpawnCategory.WILDLIFE)` spawns only from that pool; `spawn_category=None` (default) uses all types (unchanged behavior). Helper: `party_types_for_spawn_category(category)` (when category is `ALL`, returns all types).
 
 - **WILDLIFE**: deer, rabbit, bird, wolf, bear, fox, dire_wolf, spider, boar, rat_swarm.
 - **UNDEAD**: skeleton, ghoul, zombie, wraith, necromancer_cult.
 - **HUMANOID**: everyone else (merchant, bandit, guard, orc, goblin, etc.).
 - **ALL**: reserved for types that should appear in any filtered pool; currently unused.
 
-Use for biome/region spawns later (e.g. forest = mostly wildlife, road = humanoid, ruins = undead).
-
-**Status**: Implemented.
+Use for biome/region spawns later (e.g. forest = mostly wildlife, road = humanoid, ruins = undead). See **Done Overworld Improvements** above.
 
 ---
 
@@ -310,10 +325,13 @@ If you implement regions (5.1), include region IDs and names in save so that “
 | **Done** | Exploration timeout from config (2.1) | Medium | — |
 | **Done** | Minimap (2.2) | High | — |
 | **Done** | Discovery log / codex (2.3) | Medium | — |
-| **Quick wins** | Quest distance / nearest objective HUD (6.1) | Medium | Low |
-| | Party alignment in tooltips (3.1) | Medium | Low |
+| **Done** | Hunt mechanic + prey flee (3.4) | Medium | — |
+| **Done** | Spawn categories / modular spawn pools (3.5) | Medium | — |
+| **Quick wins** | Quest distance / nearest objective HUD (6.1) | Medium | Low | ✅ Done |
+| | Party alignment in tooltips (3.1) | Medium | Low | ✅ Done |
+| | Party spawn config (3.2) | Low | Low | ✅ Done |
+| | Time preview on hover (6.2) | Medium | Low–Medium | ✅ Done |
 | **Medium** | More event types (4.1) | Medium | Medium |
-| | Time preview on hover (6.2) | Medium | Low–Medium |
 | **Larger** | Regions (5.1) | High | Medium–High |
 | | Escort / meet-at-POI quests (3.3) | High | Medium–High |
 
@@ -321,8 +339,8 @@ If you implement regions (5.1), include region IDs and names in save so that “
 
 ## Implementation Order Suggestion
 
-1. **Phase 1 (balance + quick)**: Option B + roads + 2.1 + 2.2 + 2.3 are done. Next: 3.1 party tooltip alignment, 6.1 nearest quest HUD. Optional: 1.4 time-based party movement later for full time/road tie-in.
-2. **Phase 2 (polish)**: 4.1 more events, 4.2 event placement rules, 6.2 time preview.
-3. **Phase 3 (depth)**: 5.1 regions (if desired), 3.3 escort quests, 1.3 time of day (optional).
+1. **Phase 1 (balance + quick)**: Option B + roads + 2.1 + 2.2 + 2.3 + 3.4 (hunt + prey flee) + 3.5 (spawn categories) are done. Also done: 3.1 party tooltip alignment, 6.1 nearest quest HUD, 3.2 party spawn config, 6.2 time preview. Optional: 1.4 time-based party movement later for full time/road tie-in.
+2. **Phase 2 (polish)**: 4.1 more events, 4.2 event placement rules.
+3. **Phase 3 (depth)**: 5.1 regions (if desired), 3.3 escort quests, 1.3 time of day (optional). Use spawn categories (3.5) for biome/region-specific spawns.
 
 This keeps the overworld feel consistent with your existing quest/event/POI design and makes roads and exploration more meaningful without large rewrites.

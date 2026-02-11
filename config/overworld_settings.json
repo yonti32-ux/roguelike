@@ -48,7 +48,10 @@
     "max_road_length": 200,
     "smooth_roads": true,
     "connect_villages": false,
-    "avoid_terrain": ["water", "mountain"],
+    "avoid_terrain": [
+      "water",
+      "mountain"
+    ],
     "road_types": {
       "town_to_town": "highway",
       "town_to_village": "cobblestone",
@@ -60,6 +63,12 @@
       "show_borders": true,
       "border_width": 1
     }
+  },
+  "parties": {
+    "spawn_interval": 15,
+    "max_parties": 100,
+    "spawn_count_min": 2,
+    "spawn_count_max": 5,
+    "initial_spawn_min_distance": 10
   }
 }
-

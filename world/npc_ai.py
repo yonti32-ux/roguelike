@@ -14,10 +14,11 @@ if TYPE_CHECKING:
     from engine.core.game import Game
 
 # Patrol settings for NPCs (slower and more relaxed than enemies)
-NPC_PATROL_RADIUS_TILES = 5.0  # NPCs can wander 5 tiles from spawn
-NPC_PATROL_SPEED_FACTOR = 0.3  # NPCs move slower than enemies
-NPC_PATROL_PAUSE_MIN = 1.0  # Minimum pause time at patrol point (seconds)
-NPC_PATROL_PAUSE_MAX = 3.0  # Maximum pause time at patrol point (seconds)
+NPC_PATROL_RADIUS_TILES = 6.0  # Wandering villagers/citizens: roam 6 tiles from spawn
+NPC_PATROL_RADIUS_BUILDING = 3.0  # Building NPCs: stay near their establishment
+NPC_PATROL_SPEED_FACTOR = 0.5  # Movement visibility (was 0.3)
+NPC_PATROL_PAUSE_MIN = 0.8  # Minimum pause at patrol point (seconds)
+NPC_PATROL_PAUSE_MAX = 2.5  # Maximum pause at patrol point (seconds)
 
 
 def _ensure_npc_ai_fields(npc) -> None:
@@ -120,16 +121,26 @@ def _move_npc_towards(
     # Completely blocked - can't move
 
 
+def _get_patrol_radius(npc) -> float:
+    """Return patrol radius in tiles based on NPC type."""
+    npc_type = getattr(npc, "npc_type", "")
+    if npc_type in ("villager", "citizen"):
+        return NPC_PATROL_RADIUS_TILES
+    # Building NPCs (merchant, innkeeper, elder, etc.) roam near their post
+    return NPC_PATROL_RADIUS_BUILDING
+
+
 def _choose_new_patrol_target(npc, game: "Game") -> None:
     """
-    Pick a random walkable tile within PATROL_RADIUS_TILES of the home position.
+    Pick a random walkable tile within patrol radius of the home position.
     """
     if game.current_map is None:
         npc.ai_patrol_target = None
         return
     
     home_x, home_y = npc.ai_home_pos
-    radius_px = NPC_PATROL_RADIUS_TILES * TILE_SIZE
+    radius_tiles = _get_patrol_radius(npc)
+    radius_px = radius_tiles * TILE_SIZE
     
     for _ in range(8):  # try a few times to find something walkable
         angle = random.random() * 2.0 * math.pi
@@ -193,18 +204,23 @@ def update_npc_ai(npc, game: "Game", dt: float) -> None:
     """
     Update NPC wandering behavior.
     
-    NPCs will wander around their spawn position in a relaxed manner.
-    They don't chase or fight - just peaceful wandering.
+    Wandering villagers/citizens roam the streets. Building NPCs (merchant,
+    innkeeper, elder, etc.) walk around near their establishment.
     """
     _ensure_npc_ai_fields(npc)
     
     if game.current_map is None:
         return
     
-    # Only wandering citizens/villagers should wander (not building NPCs)
-    # Building NPCs stay in their buildings
     npc_type = getattr(npc, "npc_type", "")
-    if npc_type not in ("villager", "citizen"):
+    
+    # All village/town NPCs can roam: wanderers roam wide, building NPCs stay near post
+    wander_types = (
+        "villager", "citizen",  # Free roam
+        "merchant", "innkeeper", "recruiter", "elder", "mayor",  # Near building
+        "blacksmith", "librarian",  # Town building NPCs
+    )
+    if npc_type not in wander_types:
         return
     
     # Update patrol/wandering behavior

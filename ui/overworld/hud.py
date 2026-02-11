@@ -31,6 +31,31 @@ BASE_OVERWORLD_TILE_SIZE = 16  # Pixels per overworld tile at 100% zoom
 QUEST_MARKER_COLOR = (255, 220, 100)  # Gold/amber
 QUEST_MARKER_RING_COLOR = (255, 255, 200)
 
+# POI type colors (shared by markers, minimap, etc.)
+POI_COLORS = {
+    "dungeon": (200, 50, 50),
+    "village": (50, 200, 50),
+    "town": (50, 50, 200),
+    "camp": (200, 200, 50),
+}
+
+
+def _get_movement_cost_hours(tile_x: int, tile_y: int, overworld_map, config) -> Optional[float]:
+    """
+    Compute movement cost in hours for moving to (tile_x, tile_y).
+    Uses same logic as try_move: terrain cost × road multiplier.
+    Returns None if tile is unwalkable.
+    """
+    if overworld_map is None or not overworld_map.is_walkable(tile_x, tile_y):
+        return None
+    tile = overworld_map.get_tile(tile_x, tile_y)
+    if not tile:
+        return None
+    cost = config.terrain_costs.get(tile.id, config.movement_cost_base)
+    if getattr(overworld_map, "road_manager", None) and overworld_map.road_manager.has_road_at(tile_x, tile_y):
+        cost *= config.road_movement_multiplier
+    return cost * config.movement_cost_base
+
 
 def _is_poi_quest_target(poi, game: "Game") -> bool:
     """True if any active quest has an objective targeting this POI."""
@@ -46,6 +71,50 @@ def _is_poi_quest_target(poi, game: "Game") -> bool:
     except Exception:
         pass
     return False
+
+
+def _get_nearest_quest_target(game: "Game") -> Optional[Tuple[str, int]]:
+    """
+    Get the nearest quest objective POI and its distance (Chebyshev) from player.
+    
+    Returns:
+        (poi_name, distance_tiles) or None if no active POI objectives
+    """
+    if game.overworld_map is None:
+        return None
+    try:
+        from systems.quests import QuestStatus
+        active = getattr(game, "active_quests", None) or {}
+        poi_ids = set()
+        for quest in active.values():
+            if getattr(quest, "status", None) != QuestStatus.ACTIVE:
+                continue
+            for obj in getattr(quest, "objectives", []):
+                poi_id = getattr(obj, "poi_id", None)
+                if poi_id:
+                    is_complete = obj.is_complete() if hasattr(obj, "is_complete") else False
+                    if not is_complete:
+                        poi_ids.add(poi_id)
+        if not poi_ids:
+            return None
+        player_x, player_y = game.overworld_map.get_player_position()
+        nearest = None
+        nearest_dist = float("inf")
+        for poi_id in poi_ids:
+            poi = game.overworld_map.pois.get(poi_id)
+            if not poi or not getattr(poi, "discovered", True):
+                continue
+            dx = abs(poi.position[0] - player_x)
+            dy = abs(poi.position[1] - player_y)
+            dist = max(dx, dy)
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest = poi.name
+        if nearest is not None:
+            return (nearest, int(nearest_dist))
+    except Exception:
+        pass
+    return None
 
 
 def draw_overworld(game: "Game") -> None:
@@ -221,13 +290,7 @@ def draw_overworld(game: "Game") -> None:
         if start_x <= poi.position[0] < end_x and start_y <= poi.position[1] < end_y
     ]
     
-    # OPTIMIZATION: Pre-calculate POI colors dict (avoid lookup in loop)
-    poi_colors = {
-        "dungeon": (200, 50, 50),
-        "village": (50, 200, 50),
-        "town": (50, 50, 200),
-        "camp": (200, 200, 50),
-    }
+    # OPTIMIZATION: Use module-level POI_COLORS constant
     
     # Draw POI markers and detect hover (only visible ones)
     hovered_poi = None
@@ -259,8 +322,8 @@ def draw_overworld(game: "Game") -> None:
                 pygame.draw.circle(screen, (100, 100, 100), (screen_x, screen_y), marker_radius)
             continue
         
-        # Get color (already defined above); use quest marker color if this POI is an active quest target
-        color = poi_colors.get(poi.poi_type, (150, 150, 150))
+        # Get color; use quest marker color if this POI is an active quest target
+        color = POI_COLORS.get(poi.poi_type, (150, 150, 150))
         is_quest_target = _is_poi_quest_target(poi, game)
         if is_quest_target:
             color = QUEST_MARKER_COLOR
@@ -375,12 +438,18 @@ def draw_overworld(game: "Game") -> None:
     if getattr(game, "show_minimap", True):
         _draw_minimap(game, screen, config, current_time, explored_tiles, timeout_hours)
     
+    # OPTIMIZATION: Compute nearest quest once per frame (used by UI and tooltips)
+    nearest_quest = _get_nearest_quest_target(game)
+    
     # Draw UI overlay
-    _draw_overworld_ui(game, screen)
+    _draw_overworld_ui(game, screen, nearest_quest=nearest_quest)
     
     # Draw message log
     if hasattr(game, "last_message") and game.last_message:
         _draw_message(game, screen)
+    
+    # Draw travel time preview when hovering over adjacent walkable tile
+    _draw_travel_time_preview(game, screen, start_x, start_y, tile_size, player_x, player_y, mouse_x, mouse_y, config)
     
     # Draw tooltips if hovering
     if hasattr(game, "tooltip") and game.tooltip:
@@ -514,6 +583,18 @@ def _draw_roaming_parties(
         
         # Use party type color
         color = party_type.color
+        
+        # Hostile indicator: red outline for effective hostile parties (faction-aware)
+        try:
+            from world.overworld.party import get_effective_alignment
+            player_faction = getattr(game, "player_faction_id", None) or getattr(
+                getattr(game, "hero_stats", None), "faction_id", None
+            )
+            effective = get_effective_alignment(party, party_type, game, player_faction)
+            if effective == "hostile":
+                pygame.draw.circle(screen, (220, 50, 50), (screen_x, screen_y), base_radius + max(1, int(2 * zoom)), max(1, int(1 * zoom)))
+        except Exception:
+            pass
         
         # Highlight if hovering
         if hovered_party == party:
@@ -693,47 +774,57 @@ def _draw_minimap(
     mm_y = screen_h - size - MINIMAP_MARGIN - 50  # Above help strip
     mm_y = max(MINIMAP_MARGIN, mm_y)
     
-    # Build minimap surface (one pixel per tile sample)
-    surf = pygame.Surface((size, size))
-    for py in range(size):
-        for px in range(size):
-            tx = min(w - 1, (px * w) // size)
-            ty = min(h - 1, (py * h) // size)
-            tile = overworld_map.get_tile(tx, ty)
-            if tile is None:
-                color = (40, 40, 40)
-            else:
-                color = tile.color
-            # Fog: dim if not explored or expired
-            tile_pos = (tx, ty)
-            if tile_pos not in explored_tiles:
-                color = tuple(int(c * 0.2) for c in color)
-            elif current_time is not None:
-                last_seen = explored_tiles.get(tile_pos, 0.0)
-                if current_time - last_seen > timeout_hours:
-                    color = tuple(int(c * 0.35) for c in color)
-            else:
-                color = tuple(color)
-            surf.set_at((px, py), color)
-    
-    # POI dots (discovered only)
-    poi_colors = {"dungeon": (200, 50, 50), "village": (50, 200, 50), "town": (50, 50, 200), "camp": (200, 200, 50)}
-    for poi in overworld_map.get_all_pois():
-        if not poi.discovered:
-            continue
-        mx = (poi.position[0] * size) // w
-        my = (poi.position[1] * size) // h
-        mx = max(0, min(size - 1, mx))
-        my = max(0, min(size - 1, my))
-        dot = poi_colors.get(poi.poi_type, (150, 150, 150))
-        pygame.draw.circle(surf, dot, (mx, my), max(1, size // 96))
-    
-    # Player dot
-    px = (player_x * size) // w
-    py = (player_y * size) // h
-    px = max(0, min(size - 1, px))
-    py = max(0, min(size - 1, py))
-    pygame.draw.circle(surf, (255, 255, 0), (px, py), max(2, size // 48))
+    # OPTIMIZATION: Cache minimap surface; invalidate when player position or time changes
+    cache_key = (player_x, player_y, size, int(current_time) if current_time is not None else -999)
+    if not hasattr(game, "_minimap_cache"):
+        game._minimap_cache = {}
+    if cache_key in game._minimap_cache:
+        surf = game._minimap_cache[cache_key]
+    else:
+        # Limit cache size (keep last 5 - player rarely revisits exact position)
+        if len(game._minimap_cache) >= 5:
+            game._minimap_cache.clear()
+        surf = pygame.Surface((size, size))
+        for py in range(size):
+            for px in range(size):
+                tx = min(w - 1, (px * w) // size)
+                ty = min(h - 1, (py * h) // size)
+                tile = overworld_map.get_tile(tx, ty)
+                if tile is None:
+                    color = (40, 40, 40)
+                else:
+                    color = tile.color
+                # Fog: dim if not explored or expired
+                tile_pos = (tx, ty)
+                if tile_pos not in explored_tiles:
+                    color = tuple(int(c * 0.2) for c in color)
+                elif current_time is not None:
+                    last_seen = explored_tiles.get(tile_pos, 0.0)
+                    if current_time - last_seen > timeout_hours:
+                        color = tuple(int(c * 0.35) for c in color)
+                else:
+                    color = tuple(color)
+                surf.set_at((px, py), color)
+        
+        # POI dots (discovered only)
+        for poi in overworld_map.get_all_pois():
+            if not poi.discovered:
+                continue
+            mx = (poi.position[0] * size) // w
+            my = (poi.position[1] * size) // h
+            mx = max(0, min(size - 1, mx))
+            my = max(0, min(size - 1, my))
+            dot = POI_COLORS.get(poi.poi_type, (150, 150, 150))
+            pygame.draw.circle(surf, dot, (mx, my), max(1, size // 96))
+        
+        # Player dot
+        px_mm = (player_x * size) // w
+        py_mm = (player_y * size) // h
+        px_mm = max(0, min(size - 1, px_mm))
+        py_mm = max(0, min(size - 1, py_mm))
+        pygame.draw.circle(surf, (255, 255, 0), (px_mm, py_mm), max(2, size // 48))
+        
+        game._minimap_cache[cache_key] = surf
     
     # Border and panel background
     panel = pygame.Surface((size + 4, size + 4), pygame.SRCALPHA)
@@ -793,7 +884,7 @@ def _draw_discovery_log(game: "Game", screen: pygame.Surface) -> None:
         screen.blit(empty_surf, (panel_x + DISCOVERY_LOG_MARGIN, y_start))
 
 
-def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
+def _draw_overworld_ui(game: "Game", screen: pygame.Surface, nearest_quest: Optional[Tuple[str, int]] = None) -> None:
     """Draw UI overlay (time, position, etc.) with polished panels (OPTIMIZED with caching)."""
     # PERFORMANCE: Cache UI font
     if not hasattr(game, "_overworld_ui_font"):
@@ -811,9 +902,9 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
         cache_items = list(game._overworld_ui_cache.items())
         game._overworld_ui_cache = dict(cache_items[-MAX_UI_CACHE_SIZE:])
     
-    # Top-left info panel
-    info_panel_width = 250
-    info_panel_height = 80
+    # Top-left info panel (expand if showing quest distance); nearest_quest passed from draw_overworld
+    info_panel_height = 100 if nearest_quest is not None else 80
+    info_panel_width = 280
     info_panel_x = 10
     info_panel_y = 10
     
@@ -847,6 +938,16 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
             game._overworld_ui_cache[pos_cache_key] = font.render(pos_text, True, COLOR_TEXT)
         pos_surface = game._overworld_ui_cache[pos_cache_key]
         screen.blit(pos_surface, (info_panel_x + 12, info_panel_y + 40))
+        
+        # Nearest quest objective (when there are active POI objectives)
+        if nearest_quest is not None:
+            name, dist = nearest_quest
+            quest_text = f"Nearest: {name} — {dist} tiles"
+            quest_cache_key = f"quest_{name}_{dist}"
+            if quest_cache_key not in game._overworld_ui_cache:
+                game._overworld_ui_cache[quest_cache_key] = font.render(quest_text, True, (255, 220, 100))
+            quest_surface = game._overworld_ui_cache[quest_cache_key]
+            screen.blit(quest_surface, (info_panel_x + 12, info_panel_y + 58))
     
     # Top-right zoom panel
     if hasattr(game, "overworld_zoom"):
@@ -879,7 +980,7 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
     # Bottom instructions panel (static - cache it)
     help_cache_key = "help_panel"
     if help_cache_key not in game._overworld_ui_cache:
-        help_text = "WASD: Move | E: Enter | M: Minimap | +/-: Zoom | 0: Reset | I: Inventory | C: Character | L: Discovery Log | H: Tutorial"
+        help_text = "WASD: Move | E: Enter | R: Rest | T: Camp | M: Minimap | +/-: Zoom | 0: Reset | I: Inventory | C: Character | L: Discovery Log | H: Tutorial"
         help_surface = font.render(help_text, True, COLOR_TEXT)
         help_panel_width = help_surface.get_width() + 24
         help_panel_height = 40
@@ -895,6 +996,49 @@ def _draw_overworld_ui(game: "Game", screen: pygame.Surface) -> None:
     help_panel_y = screen.get_height() - help_panel_height - 10
     screen.blit(help_panel, (help_panel_x, help_panel_y))
     screen.blit(help_surface, (help_panel_x + 12, help_panel_y + 10))
+
+
+def _draw_travel_time_preview(
+    game: "Game",
+    screen: pygame.Surface,
+    start_x: int,
+    start_y: int,
+    tile_size: int,
+    player_x: int,
+    player_y: int,
+    mouse_x: int,
+    mouse_y: int,
+    config,
+) -> None:
+    """
+    Show "~X h" travel time when hovering over an adjacent walkable tile.
+    Uses same cost logic as try_move.
+    """
+    if game.overworld_map is None or game.time_system is None:
+        return
+    hover_tile_x = start_x + mouse_x // tile_size
+    hover_tile_y = start_y + mouse_y // tile_size
+    dx = abs(hover_tile_x - player_x)
+    dy = abs(hover_tile_y - player_y)
+    if max(dx, dy) != 1:
+        return  # Only for adjacent tiles
+    cost = _get_movement_cost_hours(hover_tile_x, hover_tile_y, game.overworld_map, config)
+    if cost is None:
+        return
+    if cost >= 1:
+        text = f"~{int(cost)} h"
+    else:
+        text = f"~{round(cost, 1)} h"
+    if not hasattr(game, "_overworld_ui_font"):
+        game._overworld_ui_font = pygame.font.Font(None, 24)
+    font = game._overworld_ui_font
+    surf = font.render(text, True, (200, 220, 255))
+    # Draw near cursor, offset so it doesn't overlap
+    px, py = mouse_x + 12, mouse_y - 8
+    screen_w, screen_h = screen.get_size()
+    px = min(px, screen_w - surf.get_width() - 4)
+    py = max(4, min(py, screen_h - surf.get_height() - 4))
+    screen.blit(surf, (px, py))
 
 
 def _draw_message(game: "Game", screen: pygame.Surface) -> None:

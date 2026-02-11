@@ -255,13 +255,21 @@ def main() -> None:
                         continue
                     telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
                 elif menu_choice == "new_game":
+                    # Overworld config (same as initial new game flow)
+                    from engine.scenes.overworld_config_scene import OverworldConfigScene
+                    config_scene = OverworldConfigScene(screen)
+                    overworld_config = config_scene.run()
+                    if overworld_config is None:
+                        running = False
+                        continue
+                    # Character creation
                     creation_scene = CharacterCreationScene(screen)
                     result = creation_scene.run()
                     if result is None:
                         running = False
                         continue
                     selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
-                    game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id)
+                    game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id, overworld_config=overworld_config)
                     # Apply stat distribution
                     if stat_distribution:
                         game.hero_stats.stat_distribution = stat_distribution

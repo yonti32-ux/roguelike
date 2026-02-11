@@ -102,9 +102,9 @@ def open_recruitment(game: "Game", recruiter_id: Optional[str] = None) -> None:
         game: Game instance
         recruiter_id: Optional recruiter ID (for future use)
     """
-    # Check if we're in a village
-    if game.current_poi is None or game.current_poi.poi_type != "village":
-        game.add_message("You can only recruit companions in villages.")
+    # Check if we're in a village or town
+    if game.current_poi is None or game.current_poi.poi_type not in ("village", "town"):
+        game.add_message("You can only recruit companions in villages and towns.")
         return
     
     # Get available companions from village state
@@ -141,7 +141,7 @@ def recruit_companion(
     Returns:
         True if recruitment was successful, False otherwise
     """
-    if game.current_poi is None or game.current_poi.poi_type != "village":
+    if game.current_poi is None or game.current_poi.poi_type not in ("village", "town"):
         return False
     
     # Get available companions
@@ -198,9 +198,9 @@ def open_quest_screen(game: "Game", elder_id: Optional[str] = None) -> None:
         game: Game instance
         elder_id: Optional elder NPC ID
     """
-    # Check if we're in a village
-    if game.current_poi is None or game.current_poi.poi_type != "village":
-        game.add_message("You can only receive quests in villages.")
+    # Check if we're in a village or town
+    if game.current_poi is None or game.current_poi.poi_type not in ("village", "town"):
+        game.add_message("You can only receive quests in villages and towns.")
         return
     
     # Initialize quests if needed

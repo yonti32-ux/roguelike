@@ -406,6 +406,42 @@ class ExplorationController:
     # Internal helpers
     # ---------------------------------------------------------------------
 
+    def _collect_nearby_interactables(self) -> dict:
+        """
+        Single pass over entities to find nearest interactable of each type.
+        Returns dict with keys: chest, event, merchant, trap, village_npc.
+        """
+        result = {"chest": None, "event": None, "merchant": None, "trap": None, "village_npc": None}
+        best_sq = {k: float("inf") for k in result}
+        game = self.game
+        if game.current_map is None or game.player is None:
+            return result
+
+        px, py = game.player.rect.center
+        r_half_sq = (TILE_SIZE // 2) ** 2
+        r_full_sq = TILE_SIZE * TILE_SIZE
+
+        for entity in getattr(game.current_map, "entities", []):
+            ex, ey = entity.rect.center
+            dx = ex - px
+            dy = ey - py
+            dist_sq = dx * dx + dy * dy
+
+            if isinstance(entity, Chest) and dist_sq <= r_half_sq and dist_sq < best_sq["chest"]:
+                result["chest"], best_sq["chest"] = entity, dist_sq
+            elif isinstance(entity, EventNode) and dist_sq <= r_half_sq and dist_sq < best_sq["event"]:
+                result["event"], best_sq["event"] = entity, dist_sq
+            elif isinstance(entity, Merchant) and dist_sq <= r_full_sq and dist_sq < best_sq["merchant"]:
+                result["merchant"], best_sq["merchant"] = entity, dist_sq
+            elif isinstance(entity, Trap) and dist_sq <= r_half_sq and dist_sq < best_sq["trap"]:
+                result["trap"], best_sq["trap"] = entity, dist_sq
+            elif VillageNPC is not None and isinstance(entity, VillageNPC) and dist_sq <= r_full_sq and dist_sq < best_sq["village_npc"]:
+                result["village_npc"], best_sq["village_npc"] = entity, dist_sq
+            elif TownNPC is not None and isinstance(entity, TownNPC) and dist_sq <= r_full_sq and dist_sq < best_sq["village_npc"]:
+                result["village_npc"], best_sq["village_npc"] = entity, dist_sq
+
+        return result
+
     def _handle_shop_key(self, event: pygame.event.Event) -> None:
         """
         Handle key presses while the shop overlay is open.
@@ -546,10 +582,11 @@ class ExplorationController:
         """
         return self._find_chest_near_player(max_distance_px=max_distance_px)
 
-    def try_open_chest(self) -> None:
+    def try_open_chest(self, chest: Optional[Chest] = None) -> None:
         """
         Attempt to open a chest near the player when pressing the interaction key.
         Uses systems.loot.roll_chest_loot to determine rewards.
+        Optionally accepts a pre-found chest to avoid redundant entity search.
         """
         game = self.game
 
@@ -560,7 +597,8 @@ class ExplorationController:
         if game.current_map is None or game.player is None or game.inventory is None:
             return
 
-        chest = self._find_chest_near_player(max_distance_px=TILE_SIZE // 2)
+        if chest is None:
+            chest = self._find_chest_near_player(max_distance_px=TILE_SIZE // 2)
         if chest is None:
             # Soft feedback, doesn't spam too hard
             game.last_message = "There is nothing here to open."
@@ -1274,33 +1312,31 @@ class ExplorationController:
         if game.show_inventory or game.show_character_sheet or getattr(game, "show_skill_screen", False):
             return
 
+        # Single pass to find all nearby interactables (avoids 5 entity iterations)
+        nearby = self._collect_nearby_interactables()
+
         # 1) Chest takes priority (so loot remains intuitive)
-        chest = self._find_chest_near_player(max_distance_px=TILE_SIZE // 2)
-        if chest is not None:
-            self.try_open_chest()
+        if nearby["chest"] is not None:
+            self.try_open_chest(chest=nearby["chest"])
             return
 
         # 2) Try event nodes
-        node = self._find_event_near_player(max_distance_px=TILE_SIZE // 2)
-        if node is not None:
-            self._trigger_event_node(node)
+        if nearby["event"] is not None:
+            self._trigger_event_node(nearby["event"])
             return
 
         # 3) Village NPC interaction (check before merchant, as village NPCs are more specific)
-        if VillageNPC is not None:
-            village_npc = self._find_village_npc_near_player(max_distance_px=TILE_SIZE)
-            if village_npc is not None:
-                self._interact_with_village_npc(village_npc)
-                return
+        if nearby["village_npc"] is not None:
+            self._interact_with_village_npc(nearby["village_npc"])
+            return
         
         # 4) Merchant interaction (must be near a merchant entity)
-        merchant = self._find_merchant_near_player(max_distance_px=TILE_SIZE)
-        if merchant is not None:
+        if nearby["merchant"] is not None:
             self._open_shop()
             return
 
         # 5) Try trap detection/disarming
-        trap = self._find_trap_near_player(max_distance_px=TILE_SIZE // 2)
+        trap = nearby["trap"]
         if trap is not None:
             if trap.triggered or trap.disarmed:
                 game.last_message = "The trap has already been triggered or disarmed."

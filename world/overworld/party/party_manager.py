@@ -40,28 +40,61 @@ class PartyManager:
     - Updating party AI
     - Party interactions
     - Rendering parties
+    
+    Spawn settings (spawn_interval, max_parties, etc.) are loaded from
+    OverworldConfig.parties / overworld_settings.json for tuning without code changes.
     """
     
     def __init__(self, overworld_map: "OverworldMap"):
-        """Initialize party manager."""
+        """Initialize party manager. Loads spawn settings from OverworldConfig."""
         self.overworld_map = overworld_map
         self.parties: Dict[str, "RoamingParty"] = {}
         self.current_time: float = 0.0
         self.spawn_timer: int = 0
-        self.spawn_interval: int = 15  # Spawn new parties every 15 player moves (more frequent)
-        self.max_parties: int = 100  # Increased max parties on map (more active world)
+        # Load from config (allows tuning via overworld_settings.json)
+        self._load_spawn_config()
         
         # Track ongoing battles
         self.active_battles: Dict[str, "BattleState"] = {}  # Key: battle_id, Value: BattleState
+        # Spatial index: (x, y) -> RoamingParty for O(1) get_party_at (invalidated when parties move)
+        self._parties_by_position: Dict[Tuple[int, int], "RoamingParty"] = {}
+        self._position_index_valid: bool = False
+    
+    def _rebuild_position_index(self) -> None:
+        """Rebuild spatial index after parties have moved."""
+        self._parties_by_position.clear()
+        for party in self.parties.values():
+            pos = (party.x, party.y)
+            self._parties_by_position[pos] = party
+        self._position_index_valid = True
+    
+    def _load_spawn_config(self) -> None:
+        """Load spawn settings from OverworldConfig."""
+        try:
+            from world.overworld import OverworldConfig
+            config = OverworldConfig.load()
+            self.spawn_interval = config.party_spawn_interval
+            self.max_parties = config.party_max_parties
+            self.spawn_count_min = getattr(config, "party_spawn_count_min", 2)
+            self.spawn_count_max = getattr(config, "party_spawn_count_max", 5)
+            self.initial_spawn_min_distance = getattr(config, "party_initial_spawn_min_distance", 10)
+        except Exception:
+            self.spawn_interval = 15
+            self.max_parties = 100
+            self.spawn_count_min = 2
+            self.spawn_count_max = 5
+            self.initial_spawn_min_distance = 10
     
     def add_party(self, party: "RoamingParty") -> None:
         """Add a party to the manager."""
         self.parties[party.party_id] = party
+        self._position_index_valid = False
     
     def remove_party(self, party_id: str) -> None:
         """Remove a party from the manager."""
         if party_id in self.parties:
             del self.parties[party_id]
+            self._position_index_valid = False
     
     def get_party(self, party_id: str) -> Optional["RoamingParty"]:
         """Get a party by ID."""
@@ -69,10 +102,9 @@ class PartyManager:
     
     def get_party_at(self, x: int, y: int) -> Optional["RoamingParty"]:
         """Get party at a specific position."""
-        for party in self.parties.values():
-            if party.x == x and party.y == y:
-                return party
-        return None
+        if not self._position_index_valid:
+            self._rebuild_position_index()
+        return self._parties_by_position.get((x, y))
     
     def get_parties_in_range(
         self,
@@ -117,7 +149,7 @@ class PartyManager:
         from .party_types import all_party_types, party_types_for_spawn_category, SpawnCategory
         from .party_power import get_spawn_weight_modifier_for_level
 
-        # Choose type pool: all types or filtered by category
+        # Choose type pool: all types (default) or filtered by category for modular spawns
         if spawn_category is not None:
             candidate_types = party_types_for_spawn_category(spawn_category)
         else:
@@ -255,6 +287,7 @@ class PartyManager:
             player_level: Current player level
             player_position: Player's position (to avoid spawning too close)
         """
+        min_dist = getattr(self, "initial_spawn_min_distance", 10)
         # Spawn more parties for a more active world
         target_count = min(count * 2, self.max_parties)  # Double the requested count
         
@@ -263,7 +296,7 @@ class PartyManager:
             party = self.spawn_random_party(
                 player_level=player_level,
                 avoid_position=player_position,
-                min_distance=10,  # Spawn farther from player
+                min_distance=min_dist,
             )
             if party:
                 spawned += 1
@@ -313,12 +346,13 @@ class PartyManager:
         # Update active battles
         self._update_battles()
         
-        # Spawn new parties more frequently (every N player moves)
+        # Spawn new parties (every N player moves)
         self.spawn_timer += 1
+        spawn_min = getattr(self, "spawn_count_min", 2)
+        spawn_max = getattr(self, "spawn_count_max", 5)
         if (self.spawn_timer >= self.spawn_interval and
             len(self.parties) < self.max_parties):
-            # Spawn 2-5 parties at once (more active world)
-            spawn_count = random.randint(2, 5)
+            spawn_count = random.randint(spawn_min, spawn_max)
             for _ in range(spawn_count):
                 if len(self.parties) >= self.max_parties:
                     break
@@ -328,6 +362,9 @@ class PartyManager:
                     min_distance=15,  # Slightly closer for more interaction
                 )
             self.spawn_timer = 0
+        
+        # Rebuild spatial index after all parties have moved (for get_party_at)
+        self._position_index_valid = False
     
     def update(self, dt: float, player_level: int = 1, player_position: Optional[Tuple[int, int]] = None) -> None:
         """
@@ -440,6 +477,8 @@ class PartyManager:
         """Clear all parties and battles."""
         self.parties.clear()
         self.active_battles.clear()
+        self._parties_by_position.clear()
+        self._position_index_valid = False
         self.current_time = 0.0
         self.spawn_timer = 0.0
 

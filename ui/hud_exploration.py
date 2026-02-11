@@ -172,12 +172,40 @@ def _gather_context_hints(game: "Game", game_map, player) -> List[str]:
     elif game_map.down_stairs is not None and (tx, ty) == game_map.down_stairs:
         hints.append("On stairs down – press '.' to descend.")
 
-    # Village exit points
-    from world.poi.types import VillagePOI
-    if game.current_poi is not None and isinstance(game.current_poi, VillagePOI):
-        exit_tiles = getattr(game_map, "village_exit_tiles", None)
+    # Village/Town exit points
+    from world.poi.types import VillagePOI, TownPOI
+    if game.current_poi is not None:
+        if isinstance(game.current_poi, VillagePOI):
+            exit_tiles = getattr(game_map, "village_exit_tiles", None)
+        elif isinstance(game.current_poi, TownPOI):
+            exit_tiles = getattr(game_map, "town_exit_tiles", None)
+        else:
+            exit_tiles = None
         if exit_tiles is not None and (tx, ty) in exit_tiles:
-            hints.append("Village exit – press E to return to overworld.")
+            loc_type = "Village" if isinstance(game.current_poi, VillagePOI) else "Town"
+            hints.append(f"{loc_type} exit – press E to return to overworld.")
+
+    # Building labels (near entrance in village/town)
+    building_labels = {
+        "shop": "Shop – Merchant",
+        "inn": "Inn – Rest",
+        "tavern": "Tavern – Recruit",
+        "town_hall": "Town Hall – Quests",
+        "blacksmith": "Blacksmith – Upgrades",
+        "library": "Library – Skill Books",
+        "market": "Market – Goods",
+        "house": "House",
+    }
+    buildings = getattr(game_map, "village_buildings", None) or getattr(game_map, "town_buildings", None)
+    if buildings is not None:
+        for b in buildings:
+            ex, ey = getattr(b, "entrance_x", None), getattr(b, "entrance_y", None)
+            if ex is not None and ey is not None:
+                dist = abs(tx - ex) + abs(ty - ey)
+                if dist <= 1:
+                    label = building_labels.get(b.building_type, b.building_type.replace("_", " ").title())
+                    if label != "House":  # Skip non-interactive houses
+                        hints.append(f"{label} – press E to enter.")
 
     # Room tag
     room = game_map.get_room_at(tx, ty)

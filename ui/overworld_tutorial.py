@@ -82,7 +82,7 @@ def draw_overworld_tutorial(surface: pygame.Surface, font: pygame.font.Font, gam
     
     # Section: Interaction
     y += line_height + 5  # Section title
-    y += line_height * 6  # 6 interactions
+    y += line_height * 8  # 8 interactions
     y += section_spacing - line_height
     
     # Section: Roaming Parties
@@ -251,6 +251,8 @@ def draw_overworld_tutorial(surface: pygame.Surface, font: pygame.font.Font, gam
     interactions = [
         "• E: Enter POI when standing directly on it",
         "• E: Interact with roaming parties when adjacent or on same tile",
+        "• R: Rest — pass 4 hours, recover partial HP",
+        "• T: Camp — pass 8 hours, fully restore HP",
         "• I: Open/close inventory",
         "• C: Open/close character sheet",
         "• J: Open/close quest screen (journal)",

@@ -17,6 +17,8 @@ from .tiles import (
     BUILDING_WALL_TILE,
     BUILDING_ENTRANCE_TILE,
     TREE_TILE,
+    WELL_TILE,
+    BENCH_TILE,
 )
 from .buildings import Building, place_buildings
 from .npcs import VillageNPC, create_npc_for_building
@@ -156,8 +158,12 @@ def generate_village(
     # Do this before decorative elements so trees don't block exits
     exit_tiles = _place_village_exits(tiles, map_width, map_height, plaza_center_x, plaza_center_y)
     
-    # Add decorative elements: trees, rocks, etc.
-    _place_decorative_elements(tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
+    # Add decorative elements: well, benches, trees
+    _place_decorative_elements(
+        tiles, map_width, map_height, buildings,
+        plaza_x, plaza_y, plaza_w, plaza_h,
+        plaza_center_x, plaza_center_y,
+    )
     
     # Add some wandering villagers outside buildings
     _add_wandering_villagers(npcs, tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
@@ -353,11 +359,39 @@ def _place_decorative_elements(
     plaza_y: int,
     plaza_w: int,
     plaza_h: int,
+    plaza_center_x: int,
+    plaza_center_y: int,
 ) -> None:
     """
     Place trees and other decorative elements around the village.
-    Avoids paths, buildings, and plaza.
+    Also places well and benches in plaza. Avoids paths, buildings for trees.
     """
+    # Place plaza decorations (well and benches) on plaza tiles only
+    plaza_tiles = []
+    for dy in range(plaza_h):
+        for dx in range(plaza_w):
+            tx = plaza_x + dx
+            ty = plaza_y + dy
+            if 0 <= tx < map_width and 0 <= ty < map_height and tiles[ty][tx] == VILLAGE_PLAZA_TILE:
+                plaza_tiles.append((tx, ty))
+    if plaza_tiles:
+        # Place well - pick tile nearest to center but not exact center (path junction)
+        def dist_to_center(pos):
+            return (pos[0] - plaza_center_x) ** 2 + (pos[1] - plaza_center_y) ** 2
+        # Prefer tiles 1-2 steps from center for well
+        candidates = [p for p in plaza_tiles if 4 <= dist_to_center(p) <= 25]
+        if candidates:
+            well_pos = min(candidates, key=dist_to_center)
+            tiles[well_pos[1]][well_pos[0]] = WELL_TILE
+            plaza_tiles = [p for p in plaza_tiles if p != well_pos]
+        # Place benches
+        num_benches = min(random.randint(2, 4), len(plaza_tiles))
+        for _ in range(num_benches):
+            if plaza_tiles:
+                bench_pos = random.choice(plaza_tiles)
+                tiles[bench_pos[1]][bench_pos[0]] = BENCH_TILE
+                plaza_tiles.remove(bench_pos)
+
     # Calculate safe areas (don't place trees here)
     safe_tiles = set()
     
@@ -516,8 +550,8 @@ def _add_wandering_villagers(
     """
     from .npcs import create_wandering_villager
     
-    # Number of wandering villagers: 2-4
-    num_villagers = random.randint(2, 4)
+    # Number of wandering villagers: 4-7 (roam the streets)
+    num_villagers = random.randint(4, 7)
     
     valid_positions = []
     

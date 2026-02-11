@@ -351,7 +351,68 @@ class GameMap:
                     elif tile == DOWN_STAIRS_TILE:
                         tile_type = TileSpriteType.DOWN_STAIRS
                     else:
-                        tile_type = TileSpriteType.FLOOR  # Default fallback
+                        # Village and town tiles
+                        try:
+                            from world.village.tiles import (
+                                VILLAGE_PATH_TILE, VILLAGE_PLAZA_TILE, VILLAGE_GRASS_TILE,
+                                BUILDING_FLOOR_TILE as VILLAGE_FLOOR_TILE,
+                                BUILDING_WALL_TILE as VILLAGE_WALL_TILE,
+                                BUILDING_ENTRANCE_TILE as VILLAGE_ENTRANCE_TILE,
+                                TREE_TILE, WELL_TILE, BENCH_TILE as VILLAGE_BENCH_TILE,
+                            )
+                            from world.town.tiles import (
+                                TOWN_COBBLESTONE_TILE, TOWN_PLAZA_TILE, TOWN_GRASS_TILE,
+                                TOWN_MARKET_TILE, STONE_FLOOR_TILE, WOODEN_FLOOR_TILE,
+                                STONE_WALL_TILE, WOODEN_WALL_TILE,
+                                BUILDING_ENTRANCE_TILE as TOWN_ENTRANCE_TILE,
+                                FOUNTAIN_TILE, MARKET_STALL_TILE, BENCH_TILE as TOWN_BENCH_TILE,
+                            )
+                            if tile == VILLAGE_PATH_TILE:
+                                tile_type = TileSpriteType.VILLAGE_PATH
+                            elif tile == VILLAGE_PLAZA_TILE:
+                                tile_type = TileSpriteType.VILLAGE_PLAZA
+                            elif tile == VILLAGE_GRASS_TILE:
+                                tile_type = TileSpriteType.VILLAGE_GRASS
+                            elif tile == VILLAGE_FLOOR_TILE:
+                                tile_type = TileSpriteType.VILLAGE_BUILDING_FLOOR
+                            elif tile == VILLAGE_WALL_TILE:
+                                tile_type = TileSpriteType.VILLAGE_BUILDING_WALL
+                            elif tile == VILLAGE_ENTRANCE_TILE:
+                                tile_type = TileSpriteType.VILLAGE_ENTRANCE
+                            elif tile == TREE_TILE:
+                                tile_type = TileSpriteType.VILLAGE_TREE
+                            elif tile == WELL_TILE:
+                                tile_type = TileSpriteType.VILLAGE_WELL
+                            elif tile == VILLAGE_BENCH_TILE:
+                                tile_type = TileSpriteType.VILLAGE_BENCH
+                            elif tile == TOWN_COBBLESTONE_TILE:
+                                tile_type = TileSpriteType.TOWN_COBBLESTONE
+                            elif tile == TOWN_PLAZA_TILE:
+                                tile_type = TileSpriteType.TOWN_PLAZA
+                            elif tile == TOWN_GRASS_TILE:
+                                tile_type = TileSpriteType.TOWN_GRASS
+                            elif tile == TOWN_MARKET_TILE:
+                                tile_type = TileSpriteType.TOWN_MARKET
+                            elif tile == STONE_FLOOR_TILE:
+                                tile_type = TileSpriteType.TOWN_STONE_FLOOR
+                            elif tile == WOODEN_FLOOR_TILE:
+                                tile_type = TileSpriteType.TOWN_WOODEN_FLOOR
+                            elif tile == STONE_WALL_TILE:
+                                tile_type = TileSpriteType.TOWN_STONE_WALL
+                            elif tile == WOODEN_WALL_TILE:
+                                tile_type = TileSpriteType.TOWN_WOODEN_WALL
+                            elif tile == TOWN_ENTRANCE_TILE:
+                                tile_type = TileSpriteType.TOWN_ENTRANCE
+                            elif tile == FOUNTAIN_TILE:
+                                tile_type = TileSpriteType.TOWN_FOUNTAIN
+                            elif tile == MARKET_STALL_TILE:
+                                tile_type = TileSpriteType.TOWN_MARKET_STALL
+                            elif tile == TOWN_BENCH_TILE:
+                                tile_type = TileSpriteType.TOWN_BENCH
+                            else:
+                                tile_type = TileSpriteType.FLOOR
+                        except ImportError:
+                            tile_type = TileSpriteType.FLOOR
                     
                     sprite_id = registry.get_tile_sprite_id(tile_type)
                     base_color = tile.color

@@ -7,6 +7,14 @@ Handles input and movement for the overworld map.
 from typing import TYPE_CHECKING
 import pygame
 
+# POI type display labels (shared to avoid duplication)
+POI_TYPE_LABELS = {
+    "dungeon": "Dungeon",
+    "village": "Village",
+    "town": "Town",
+    "camp": "Camp",
+}
+
 from systems.input import InputAction
 
 if TYPE_CHECKING:
@@ -199,6 +207,22 @@ class OverworldController:
             game.show_minimap = not getattr(game, "show_minimap", True)
             return
         
+        # Rest (R) - short break: pass time, partial heal
+        if input_manager is not None and input_manager.event_matches_action(InputAction.REST, event):
+            self._do_rest()
+            return
+        if input_manager is None and event.key == pygame.K_r:
+            self._do_rest()
+            return
+
+        # Camp (T) - set up camp: pass more time, full heal
+        if input_manager is not None and input_manager.event_matches_action(InputAction.CAMP, event):
+            self._do_camp()
+            return
+        if input_manager is None and event.key == pygame.K_t:
+            self._do_camp()
+            return
+
         # Toggle discovery log / codex (L key)
         if event.key == pygame.K_l:
             game.show_discovery_log = not getattr(game, "show_discovery_log", False)
@@ -330,9 +354,11 @@ class OverworldController:
         if not game.overworld_map.is_walkable(new_x, new_y):
             return
         
-        # Get sight radius from config
-        from world.overworld import OverworldConfig
-        config = OverworldConfig.load()
+        # Get sight radius from config (use cached config to avoid loading on every move)
+        if not hasattr(game, "_overworld_config_cache"):
+            from world.overworld import OverworldConfig
+            game._overworld_config_cache = OverworldConfig.load()
+        config = game._overworld_config_cache
         sight_radius = config.sight_radius
         
         # Get current time for exploration tracking
@@ -370,13 +396,7 @@ class OverworldController:
                     poi.discover()
                     game.overworld_map.record_discovery(poi)
                     # Better discovery message with type, level, and faction
-                    type_labels = {
-                        "dungeon": "Dungeon",
-                        "village": "Village",
-                        "town": "Town",
-                        "camp": "Camp",
-                    }
-                    type_label = type_labels.get(poi.poi_type, "Location")
+                    type_label = POI_TYPE_LABELS.get(poi.poi_type, "Location")
                     
                     # Add faction info if available
                     faction_info = ""
@@ -396,6 +416,67 @@ class OverworldController:
             except Exception:
                 pass
     
+    def _do_rest(self) -> None:
+        """Rest briefly: pass time, heal partially."""
+        self._pass_time_with_heal(is_camp=False)
+
+    def _do_camp(self) -> None:
+        """Set up camp: pass more time, full heal."""
+        self._pass_time_with_heal(is_camp=True)
+
+    def _pass_time_with_heal(self, is_camp: bool) -> None:
+        """
+        Pass time in overworld. Advances clock, heals player, optionally ticks parties.
+
+        Args:
+            is_camp: If True, camp (longer, full heal). If False, rest (shorter, partial heal).
+        """
+        game = self.game
+        if game.overworld_map is None or game.time_system is None:
+            return
+
+        if not hasattr(game, "_overworld_config_cache"):
+            from world.overworld import OverworldConfig
+            game._overworld_config_cache = OverworldConfig.load()
+        config = game._overworld_config_cache
+
+        if is_camp:
+            hours = config.camp_hours
+            full_heal = True
+        else:
+            hours = config.rest_hours
+            full_heal = False
+
+        # Advance time
+        game.time_system.add_time(hours)
+
+        # Heal player
+        if game.player is not None and hasattr(game.player, "hp"):
+            max_hp = getattr(game.player, "max_hp", getattr(game.hero_stats, "max_hp", 30))
+            if full_heal:
+                game.player.hp = max_hp
+            else:
+                heal_amount = max(1, int(max_hp * config.rest_heal_ratio))
+                game.player.hp = min(max_hp, game.player.hp + heal_amount)
+
+        # Tick party world (parties move, spawn, etc.) proportionally to time passed
+        num_ticks = max(1, int(hours))
+        if game.overworld_map.party_manager is not None:
+            player_level = getattr(game.hero_stats, "level", 1) if hasattr(game, "hero_stats") else 1
+            player_x, player_y = game.overworld_map.get_player_position()
+            for _ in range(num_ticks):
+                game.overworld_map.party_manager.update_on_player_move(
+                    player_level=player_level,
+                    player_position=(player_x, player_y),
+                )
+
+        # Message
+        action_name = "Camp" if is_camp else "Rest"
+        if is_camp:
+            game.add_message(f"You make camp and rest for {int(hours)} hours. You feel fully restored.")
+        else:
+            game.add_message(f"You take a short rest for {int(hours)} hours, recovering some strength.")
+
     def try_enter_poi(self) -> None:
         """Attempt to enter a POI at the player's current position."""
         game = self.game
@@ -425,13 +506,7 @@ class OverworldController:
             poi.discover()
             game.overworld_map.record_discovery(poi)
             # Better discovery message
-            type_labels = {
-                "dungeon": "Dungeon",
-                "village": "Village",
-                "town": "Town",
-                "camp": "Camp",
-            }
-            type_label = type_labels.get(poi.poi_type, "Location")
+            type_label = POI_TYPE_LABELS.get(poi.poi_type, "Location")
             game.add_message(f"You discover {poi.name} - A {type_label} (Level {poi.level}). Press E again to enter.")
             return
         
@@ -593,23 +668,11 @@ class OverworldController:
             self.game.add_message("Unable to join battle.")
             return
         
-        # Add allies if available
-        allies = []
-        if ally_party:
-            ally_party_type = get_party_type(ally_party.party_type_id)
-            if ally_party_type and ally_party_type.can_join_battle:
-                # Convert ally party to battle allies
-                from world.overworld.party import allied_party_to_battle_units
-                allies = allied_party_to_battle_units(
-                    party=ally_party,
-                    party_type=ally_party_type,
-                    game=self.game,
-                    player_level=player_level
-                )
-        
-        # Start battle
+        # Start battle (pass ally party so they join as player-side units)
         self.game.add_message(f"You join the battle on {ally_party.party_name if ally_party else 'your own'} side!")
-        self.game.start_battle_from_overworld(enemies, allies=allies, context_party=enemy_party)
+        ally_party_type = get_party_type(ally_party.party_type_id) if ally_party else None
+        allied_parties_for_battle = [ally_party] if ally_party and ally_party_type and ally_party_type.can_join_battle else []
+        self.game.start_battle_from_overworld(enemies, context_party=enemy_party, allied_parties=allied_parties_for_battle)
         
         # Remove battle from active battles (battle is now player-controlled)
         if hasattr(self.game.overworld_map.party_manager, 'active_battles'):

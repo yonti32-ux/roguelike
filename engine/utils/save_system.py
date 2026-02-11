@@ -820,6 +820,12 @@ def _deserialize_overworld(data: Dict[str, Any]):
     
     # Discovery log (codex)
     overworld.discovery_log = list(data.get("discovery_log", []))
+    # Rebuild discovery index for O(1) record_discovery updates
+    overworld._discovery_index = {
+        entry.get("poi_id"): i
+        for i, entry in enumerate(overworld.discovery_log)
+        if entry.get("poi_id")
+    }
     
     # Restore player position (this will also explore tiles in sight radius,
     # but we've already restored the explored tiles, so we won't lose any)

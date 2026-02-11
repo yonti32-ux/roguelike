@@ -24,6 +24,7 @@ from .tiles import (
     BUILDING_ENTRANCE_TILE,
     FOUNTAIN_TILE,
     MARKET_STALL_TILE,
+    BENCH_TILE,
 )
 from .buildings import Building, place_buildings
 from .npcs import TownNPC, create_npc_for_building
@@ -182,8 +183,12 @@ def generate_town(
     # Place exit points on all edges of the map
     exit_tiles = _place_town_exits(tiles, map_width, map_height, plaza_center_x, plaza_center_y)
     
-    # Add decorative elements: fountains, market stalls, etc.
-    _place_decorative_elements(tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
+    # Add decorative elements: benches, fountains, etc.
+    _place_decorative_elements(
+        tiles, map_width, map_height, buildings,
+        plaza_x, plaza_y, plaza_w, plaza_h,
+        plaza_center_x, plaza_center_y,
+    )
     
     # Add some wandering citizens outside buildings
     _add_wandering_citizens(npcs, tiles, map_width, map_height, buildings, plaza_x, plaza_y, plaza_w, plaza_h)
@@ -397,11 +402,29 @@ def _place_decorative_elements(
     plaza_y: int,
     plaza_w: int,
     plaza_h: int,
+    plaza_center_x: int,
+    plaza_center_y: int,
 ) -> None:
     """
-    Place decorative elements around the town: fountains, market stalls, etc.
-    Avoids paths, buildings, and plaza.
+    Place decorative elements around the town: benches in plaza, fountains, etc.
+    Avoids paths, buildings for other decorations.
     """
+    # Place benches in plaza (only on plaza tiles, not on fountain)
+    plaza_tiles = []
+    for dy in range(plaza_h):
+        for dx in range(plaza_w):
+            tx = plaza_x + dx
+            ty = plaza_y + dy
+            if 0 <= tx < map_width and 0 <= ty < map_height and tiles[ty][tx] == TOWN_PLAZA_TILE:
+                plaza_tiles.append((tx, ty))
+    if plaza_tiles:
+        num_benches = min(random.randint(4, 8), len(plaza_tiles))
+        for _ in range(num_benches):
+            if plaza_tiles:
+                bench_pos = random.choice(plaza_tiles)
+                tiles[bench_pos[1]][bench_pos[0]] = BENCH_TILE
+                plaza_tiles.remove(bench_pos)
+
     # Calculate safe areas (don't place decorations here)
     safe_tiles = set()
     
@@ -553,8 +576,8 @@ def _add_wandering_citizens(
     """
     from .npcs import create_wandering_citizen
     
-    # Number of wandering citizens: 6-12 (more than villages, towns are busier)
-    num_citizens = random.randint(6, 12)
+    # Number of wandering citizens: 10-16 (towns are busy - people walk the streets)
+    num_citizens = random.randint(10, 16)
     
     valid_positions = []
     
