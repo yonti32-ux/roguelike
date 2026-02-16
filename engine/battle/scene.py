@@ -154,8 +154,8 @@ class BattleScene:
         # Scale cell size based on screen resolution if game reference is available
         if self.game is not None and hasattr(self.game, 'screen'):
             screen_w, screen_h = self.game.screen.get_size()
-            from settings import WINDOW_WIDTH, WINDOW_HEIGHT
-            resolution_scale = min(screen_w / WINDOW_WIDTH, screen_h / WINDOW_HEIGHT)
+            from settings import DESIGN_WIDTH, DESIGN_HEIGHT
+            resolution_scale = min(screen_w / DESIGN_WIDTH, screen_h / DESIGN_HEIGHT)
             if resolution_scale > 1.0:
                 # Scale battle cells more aggressively to keep battle visible
                 cell_scale = min(1.0 + (resolution_scale - 1.0) * 0.6, 2.5)

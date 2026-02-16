@@ -2,7 +2,7 @@ import random
 import math
 from typing import List, Tuple, Dict, Any
 
-from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TILE_SIZE
+from settings import TILE_SIZE
 from world.tiles import (
     Tile,
     FLOOR_TILE,
@@ -82,8 +82,10 @@ def generate_floor(
 
     # --- Decide overall map dimensions in tiles, based on depth ---
     gen_config = load_generation_config()
-    base_tiles_x = WINDOW_WIDTH // TILE_SIZE
-    base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
+    from engine.core.config import get_display_resolution
+    res_w, res_h = get_display_resolution()
+    base_tiles_x = res_w // TILE_SIZE
+    base_tiles_y = res_h // TILE_SIZE
     base_area = base_tiles_x * base_tiles_y
 
     # Progressive scaling: use config-based scaling rules

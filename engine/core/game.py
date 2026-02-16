@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from world.time.time_system import TimeSystem
     from world.overworld.party import RoamingParty
 
-from settings import COLOR_BG, TILE_SIZE, WINDOW_WIDTH, WINDOW_HEIGHT
+from settings import COLOR_BG, TILE_SIZE
 from world.mapgen import generate_floor
 from world.game_map import GameMap
 from world.entities import Player, Enemy, Merchant
@@ -40,9 +40,6 @@ from systems.inventory import Inventory, get_item_def
 from systems.loot import roll_battle_loot
 from systems.party import CompanionState
 
-from ui.hud_exploration import (
-    draw_exploration_ui,
-)
 from ui.screens import (
     BaseScreen,
     InventoryScreen,
@@ -253,75 +250,51 @@ class Game:
         self.ui_screen_manager.inventory_cursor = value
 
     def __init__(self, screen: pygame.Surface, hero_class_id: str = "warrior", hero_background_id: Optional[str] = None, overworld_config: Optional["OverworldConfig"] = None) -> None:
+        self._init_core_state(screen)
+        self._init_ui_components()
+        self._init_game_state()
+        self._init_managers(screen)
+        self._init_debug(screen)
+        self._init_sprites()
+
+        init_hero_for_class(self, hero_class_id, hero_background_id=hero_background_id)
+        self._init_starting_consumables()
+        self._init_controllers()
+        self._init_overworld(overworld_config)
+        self._init_mode_handlers()
+
+    def _init_core_state(self, screen: pygame.Surface) -> None:
+        """Screen, input, hero/inventory/party, floor manager, map/player."""
         self.screen = screen
-
-        # Logical input manager (actions -> keys/buttons).
-        # For Phase 1 this is wired but not yet *used* by game logic.
         self.input_manager = create_default_input_manager()
-
-
-        # Hero progression for this run (will be set in _init_hero_for_class)
         self.hero_stats = HeroStats()
-
-        # Inventory & equipment (also set in _init_hero_for_class)
         self.inventory: Inventory = Inventory()
-        # Note: show_inventory managed by ui_screen_manager (see property below)
-
-        # Consumable items live in the same inventory list but have slot
-        # "consumable". All gameplay effects are driven by systems.consumables.
-
-        # Party / companions: runtime CompanionState objects
         self.party: List[CompanionState] = []
-
-        # Floor management
         self.floor_manager = FloorManager(starting_floor=1)
-
-        # Active map and player
         self.current_map: Optional[GameMap] = None
         self.player: Optional[Player] = None
 
-        # UI scaling - calculate based on screen size
+    def _init_ui_components(self) -> None:
+        """UI scaling, font, tooltip, screen overlays, inventory/recruitment state."""
         screen_w, screen_h = self.screen.get_size()
         from ui.ui_scaling import get_ui_scale, get_scaled_font
         self.ui_scale = get_ui_scale(screen_w, screen_h)
-        
-        # Simple UI font (scaled)
         self.ui_font = get_scaled_font("consolas", 20, self.ui_scale)
 
-        # --- Last battle log (for viewing in exploration) ---
         self.last_battle_log: List[str] = []
-        # Note: UI state managed by ui_screen_manager (see properties below)
-        
-        # --- Recruitment screen overlay ---
         self.show_recruitment: bool = False
         self.recruitment_cursor: int = 0
         self.available_companions: list = []
+        self.inventory_page_size: int = 20
 
-        # Inventory list paging / scrolling
-        self.inventory_page_size: int = 20  # More items visible in fullscreen
-        # Note: inventory_scroll_offset, inventory_cursor managed by ui_screen_manager
-        
-        # Inventory enhancements: filtering, sorting, search
         from ui.inventory_enhancements import FilterMode, SortMode
         self.inventory_filter: FilterMode = FilterMode.ALL
         self.inventory_sort: SortMode = SortMode.DEFAULT
         self.inventory_search: str = ""
-        
-        # Tooltip system
+
         from ui.tooltip import Tooltip
         self.tooltip = Tooltip()
-        
-        # Initialize sprite system (with fallback to color-based rendering)
-        from ..sprites.init_sprites import init_game_sprites
-        try:
-            init_game_sprites()
-        except Exception as e:
-            print(f"Warning: Sprite system initialization failed: {e}")
-            print("Falling back to color-based rendering.")
 
-        # Note: show_exploration_log managed by ui_screen_manager (see property below)
-
-        # Inventory / character sheet / shop / skill screen / recruitment overlays as screen objects.
         self.inventory_screen = InventoryScreen()
         self.character_sheet_screen = CharacterSheetScreen()
         self.shop_screen = ShopScreen()
@@ -331,84 +304,70 @@ class Game:
         self.recruitment_screen = RecruitmentScreen()
         from ui.village.quest_screen import QuestScreen
         self.quest_screen = QuestScreen()
-
-        # Currently active full-screen UI overlay (if any).
-        # Used for perk choices, inventory, character sheet, shop, etc.
         self.active_screen: Optional[BaseScreen] = None
 
-        # Mode handling
-        self.mode: str = GameMode.OVERWORLD  # Start in overworld mode
+    def _init_game_state(self) -> None:
+        """Mode, overworld state, confirmation dialog, message log, flags."""
+        self.mode: str = GameMode.OVERWORLD
         self.battle_scene: Optional[BattleScene] = None
-        
-        # Overworld system
         self.overworld_map: Optional["OverworldMap"] = None
         self.current_poi: Optional["PointOfInterest"] = None
         self.time_system: Optional["TimeSystem"] = None
-        
-        # Confirmation dialog state
+
         self.pending_overworld_confirmation: bool = False
         self.confirmation_message: str = ""
         self.confirmation_action: Optional[callable] = None
-
-        # XP from the current battle (set when we start it)
         self.pending_battle_xp: int = 0
 
-        # Exploration message history + backing store for last_message
         self.message_log = MessageLog(max_size=60)
-
-        # Short grace window after battles where enemies don't auto-engage
         self.post_battle_grace: float = 0.0
-
-        # Floor intro pause: enemies wait until the player makes the first move
         self.awaiting_floor_start: bool = True
 
-        # Camera & zoom management
-        self.camera_manager = CameraManager(screen)
-        
-        # UI screen and overlay management
-        self.ui_screen_manager = UIScreenManager()
-
-        # Debug flags
         self.debug_reveal_map: bool = False
-        
-        # Debug console
-        try:
-            from ..utils.debug_console import DebugConsole
-            self.debug_console = DebugConsole(screen)
-            # Register with error handler
-            from ..utils.error_handler import set_debug_console
-            set_debug_console(self.debug_console)
-        except Exception:
-            # If debug console fails to initialize, continue without it
-            self.debug_console = None
-
-        # Display mode
         self.fullscreen: bool = False
-
-        # Reload flag for in-game loading (set by load handler, checked by main loop)
         self._reload_slot: Optional[int] = None
-
-        # Pause menu state
         self.paused: bool = False
         self._return_to_main_menu: bool = False
         self._quit_game: bool = False
 
-        # Initialize hero stats, perks, items and gold for the chosen class
-        init_hero_for_class(self, hero_class_id, hero_background_id=hero_background_id)
+    def _init_managers(self, screen: pygame.Surface) -> None:
+        """Camera and UI screen managers."""
+        self.camera_manager = CameraManager(screen)
+        self.ui_screen_manager = UIScreenManager()
 
-        # Give the hero a small starting stock of basic consumables so the
-        # new system is visible from the first floor.
-        self._init_starting_consumables()
+    def _init_debug(self, screen: pygame.Surface) -> None:
+        """Debug console (optional, never fails game startup)."""
+        try:
+            from ..utils.debug_console import DebugConsole
+            self.debug_console = DebugConsole(screen)
+            from ..utils.error_handler import set_debug_console
+            set_debug_console(self.debug_console)
+        except Exception:
+            self.debug_console = None
 
-        # Exploration controller (handles map movement & interactions)
+    def _init_sprites(self) -> None:
+        """Sprite system with fallback to color-based rendering."""
+        try:
+            from ..sprites.init_sprites import init_game_sprites
+            init_game_sprites()
+        except Exception as e:
+            print(f"Warning: Sprite system initialization failed: {e}")
+            print("Falling back to color-based rendering.")
+
+    def _init_controllers(self) -> None:
+        """Exploration and overworld controllers."""
         self.exploration = ExplorationController(self)
-        
-        # Overworld controller (handles overworld movement & interactions)
         from ..controllers.overworld import OverworldController
         self.overworld = OverworldController(self)
-        
-        # Initialize overworld system (use provided config if available)
-        self._init_overworld(overworld_config)
+
+    def _init_mode_handlers(self) -> None:
+        """Mode handlers for update/draw/handle_event per mode."""
+        from .mode_handlers import OverworldModeHandler, ExplorationModeHandler, BattleModeHandler
+        self._mode_handlers = {
+            GameMode.OVERWORLD: OverworldModeHandler(self),
+            GameMode.EXPLORATION: ExplorationModeHandler(self),
+            GameMode.BATTLE: BattleModeHandler(self),
+        }
 
     def _init_starting_consumables(self) -> None:
         """
@@ -800,19 +759,19 @@ class Game:
         """
         Toggle between windowed and fullscreen display.
 
-        - Windowed: uses WINDOW_WIDTH / WINDOW_HEIGHT from settings.
-        - Fullscreen: uses the current desktop resolution.
+        - Fullscreen: uses desktop resolution.
+        - Windowed: uses user's configured resolution (from options menu).
         """
-        # Decide target mode
+        from .config import get_display_resolution
+
         if not getattr(self, "fullscreen", False):
             info = pygame.display.Info()
             width, height = info.current_w, info.current_h
             new_screen = pygame.display.set_mode((width, height), pygame.FULLSCREEN)
             self.fullscreen = True
         else:
-            new_screen = pygame.display.set_mode(
-                (WINDOW_WIDTH, WINDOW_HEIGHT)
-            )
+            width, height = get_display_resolution()
+            new_screen = pygame.display.set_mode((width, height))
             self.fullscreen = False
 
         # Update the game's screen reference
@@ -1619,53 +1578,19 @@ class Game:
     # ------------------------------------------------------------------
 
     def update(self, dt: float) -> None:
-        # Don't update game logic when paused
         if self.paused:
             return
-        
-        # Update tooltip system
+
+        # Global tooltip update (all modes)
         tooltip = getattr(self, "tooltip", None)
         if tooltip:
             mouse_pos = pygame.mouse.get_pos()
             tooltip.update(dt, mouse_pos, tooltip.hover_target)
-        
-        if self.mode == GameMode.OVERWORLD:
-            # Overworld updates
-            if hasattr(self, "overworld"):
-                self.overworld.update(dt)
-            
-            # Update tooltip (but don't set hover target - overworld HUD handles it)
-            if hasattr(self, "tooltip") and self.tooltip:
-                mouse_pos = pygame.mouse.get_pos()
-                # Only update mouse position, hover detection is done in draw
-                self.tooltip.mouse_pos = mouse_pos
-        
-        elif self.mode == GameMode.EXPLORATION:
-            if self.post_battle_grace > 0.0:
-                self.post_battle_grace = max(0.0, self.post_battle_grace - dt)
 
-            # If a major overlay (inventory / character sheet) is open,
-            # pause exploration updates so the world doesn't move behind the UI.
-            if self.is_overlay_open():
-                return
-
-            # Exploration is handled by the controller...
-            self.exploration.update(dt)
-            # Refresh FOV only when player tile changes (avoids per-frame raycasting)
-            if self.player is not None and self.current_map is not None:
-                tx, ty = self.current_map.world_to_tile(*self.player.rect.center)
-                last_tile = getattr(self, "_last_fov_tile", (None, None))
-                if (tx, ty) != last_tile:
-                    self._last_fov_tile = (tx, ty)
-                    self.update_fov()
-            # Update exploration camera to follow the player and stay in-bounds.
-            self._center_camera_on_player()
-            self._clamp_camera_to_map()
-
-        elif self.mode == GameMode.BATTLE:
-            if self.battle_scene is not None:
-                self.battle_scene.update(dt)
-                self._check_battle_finished()
+        # Delegate to mode handler
+        handler = self._mode_handlers.get(self.mode)
+        if handler is not None:
+            handler.update(dt)
 
     # ------------------------------------------------------------------
     # Main loop: event handling
@@ -1788,38 +1713,12 @@ class Game:
         # Debug console input handling (has priority when visible)
         if self.debug_console and self.debug_console.is_visible():
             if self.debug_console.handle_event(event, game=self):
-                return  # Event consumed by debug console
-        
-        # Mode-specific handling.
-        if self.mode == GameMode.OVERWORLD:
-            # Handle mouse wheel for zoom
-            if event.type == pygame.MOUSEWHEEL and hasattr(self, "overworld"):
-                self.overworld.handle_mouse_wheel(event)
                 return
-            
-            # If a modal screen is active, route input to it
-            if getattr(self, "active_screen", None) is not None:
-                self.active_screen.handle_event(self, event)
-            elif hasattr(self, "overworld"):
-                self.overworld.handle_event(event)
-        
-        elif self.mode == GameMode.EXPLORATION:
-            # If a modal screen is active (inventory, character sheet, etc.),
-            # route input to it instead of the exploration controller.
-            if getattr(self, "active_screen", None) is not None:
-                self.active_screen.handle_event(self, event)
-            else:
-                self.exploration.handle_event(event)
 
-        elif self.mode == GameMode.BATTLE:
-            # In battle mode, a modal screen (inventory, character sheet, etc.)
-            # also takes input priority.
-            if getattr(self, "active_screen", None) is not None:
-                self.active_screen.handle_event(self, event)
-            elif self.battle_scene is not None:
-                # Pass the Game so the battle scene can read logical input actions.
-                self.battle_scene.handle_event(self, event)
-                self._check_battle_finished()
+        # Mode-specific handling – delegate to handler
+        handler = self._mode_handlers.get(self.mode)
+        if handler is not None:
+            handler.handle_event(event)
 
     # ------------------------------------------------------------------
     # Drawing
@@ -1831,12 +1730,9 @@ class Game:
         full-screen overlay (perk choice, inventory, character sheet, etc.),
         and finally flip the display once.
         """
-        if self.mode == GameMode.OVERWORLD:
-            self.draw_overworld()
-        elif self.mode == GameMode.EXPLORATION:
-            self.draw_exploration()
-        elif self.mode == GameMode.BATTLE:
-            self.draw_battle()
+        handler = self._mode_handlers.get(self.mode)
+        if handler is not None:
+            handler.draw()
 
         # Draw an active overlay screen on top (inventory, character sheet, skill screen, etc.).
         if getattr(self, "active_screen", None) is not None:
@@ -1869,67 +1765,6 @@ class Game:
         # Flip the final composed frame to the screen.
         pygame.display.flip()
 
-    def draw_exploration(self) -> None:
-        assert self.current_map is not None
-        assert self.player is not None
-
-        self.screen.fill(COLOR_BG)
-
-        zoom = self.zoom
-        camera_x = getattr(self, "camera_x", 0.0)
-        camera_y = getattr(self, "camera_y", 0.0)
-
-        # Map tiles
-        self.current_map.draw(
-            self.screen,
-            camera_x=camera_x,
-            camera_y=camera_y,
-            zoom=zoom,
-        )
-
-        # Non-player entities (enemies, chests, props…) – only if visible
-        for entity in getattr(self.current_map, "entities", []):
-            cx, cy = entity.rect.center
-            tx, ty = self.current_map.world_to_tile(cx, cy)
-            if (tx, ty) not in self.current_map.visible:
-                continue
-            entity.draw(
-                self.screen,
-                camera_x=camera_x,
-                camera_y=camera_y,
-                zoom=zoom,
-            )
-
-        # Draw the player on top of everything else
-        self.player.draw(
-            self.screen,
-            camera_x=camera_x,
-            camera_y=camera_y,
-            zoom=zoom,
-        )
-
-        # HUD + overlays
-        draw_exploration_ui(self)
-
-    def draw_overworld(self) -> None:
-        """Draw the overworld map."""
-        from ui.overworld import draw_overworld
-        draw_overworld(self)
-    
-    def draw_battle(self) -> None:
-        if self.battle_scene is None:
-            return
-
-        self.screen.fill(COLOR_BG)
-        # Pass the Game instance so the battle scene can read input bindings
-        self.battle_scene.draw(self.screen, self)
-        
-        # Debug console (drawn on top of everything)
-        if self.debug_console:
-            self.debug_console.draw(game=self, clock=None)  # Clock passed from main loop
-        # Note: Don't call pygame.display.flip() here - the main draw() method handles flipping
-        # after all overlays are drawn to prevent flickering
-    
     def _draw_confirmation_dialog(self) -> None:
         """Draw the confirmation dialog overlay."""
         screen = self.screen

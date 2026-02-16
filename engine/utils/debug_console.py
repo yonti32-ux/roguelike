@@ -26,9 +26,6 @@ except ImportError:
 
 import os
 
-from settings import WINDOW_WIDTH, WINDOW_HEIGHT
-
-
 class DebugConsole:
     """
     Debug console overlay that displays backend information.

@@ -1,9 +1,8 @@
 import sys
 import pygame
 
-from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TITLE, FPS
+from settings import TITLE, FPS
 from engine.core.game import Game
-from engine.scenes.character_creation import CharacterCreationScene
 from engine.scenes.main_menu import MainMenuScene
 from engine.scenes.save_menu import SaveMenuScene
 from engine.utils.save_system import load_game
@@ -39,6 +38,70 @@ def _game_snapshot(game: Game) -> dict:
     if player is not None and hasattr(player, "hp"):
         snap["player_hp"] = getattr(player, "hp", None)
     return snap
+
+
+def _run_new_game_flow(screen) -> Game | None:
+    """
+    Run the new game flow: overworld config -> character creation -> game init.
+    Returns a Game instance on success, None if the user cancels.
+    """
+    from engine.scenes.overworld_config_scene import OverworldConfigScene
+    from engine.scenes.character_creation import CharacterCreationScene
+    from systems.character_creation import get_trait, apply_percentage_stat_modifiers, trait_synergy_bonus
+
+    config_scene = OverworldConfigScene(screen)
+    overworld_config = config_scene.run()
+    if overworld_config is None:
+        telemetry.log("quit_during_overworld_config")
+        return None
+
+    telemetry.log(
+        "overworld_configured",
+        world_size=f"{overworld_config.world_width}x{overworld_config.world_height}",
+        poi_density=overworld_config.poi_density,
+        seed=overworld_config.seed,
+    )
+
+    creation_scene = CharacterCreationScene(screen)
+    result = creation_scene.run()
+    if result is None:
+        telemetry.log("quit_during_character_creation")
+        return None
+
+    selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
+    telemetry.log(
+        "character_created",
+        hero_class_id=selected_class_id,
+        background_id=selected_background_id,
+        hero_name=hero_name,
+    )
+
+    game = Game(
+        screen,
+        hero_class_id=selected_class_id,
+        hero_background_id=selected_background_id,
+        overworld_config=overworld_config,
+    )
+
+    if stat_distribution:
+        game.hero_stats.stat_distribution = stat_distribution
+        stat_distribution.apply_to_stat_block(game.hero_stats.base)
+
+    if traits:
+        game.hero_stats.traits = traits
+        for trait_id in traits:
+            trait = get_trait(trait_id)
+            apply_percentage_stat_modifiers(game.hero_stats.base, trait.stat_modifiers)
+        synergy_bonus = trait_synergy_bonus(traits)
+        apply_percentage_stat_modifiers(game.hero_stats.base, synergy_bonus)
+
+    game.hero_stats.hero_name = hero_name
+
+    if game.player is not None:
+        game.apply_hero_stats_to_player(full_heal=True)
+
+    telemetry.log("game_start", **_game_snapshot(game))
+    return game
 
 
 def main() -> None:
@@ -108,85 +171,24 @@ def main() -> None:
             # Continue with the new menu choice (fall through)
     
     if menu_choice == "load_game":
-        # Show save selection menu
         save_menu = SaveMenuScene(screen, mode="load")
         selected_slot = save_menu.run()
-        
         if selected_slot is None:
-            # User cancelled, go back to main menu
             pygame.quit()
             sys.exit()
-        
-        # Load the selected save
         game = load_game(screen, slot=selected_slot)
-        
         if game is None:
-            # Failed to load, show error and exit
             print(f"Failed to load save slot {selected_slot}")
             pygame.quit()
             sys.exit()
-        
         telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
-    
-    if menu_choice == "new_game":
-        # --- Overworld Configuration: customize world settings (FIRST) ---
-        from engine.scenes.overworld_config_scene import OverworldConfigScene
-        config_scene = OverworldConfigScene(screen)
-        overworld_config = config_scene.run()
-        
-        if overworld_config is None:
-            # User cancelled config, exit
-            telemetry.log("quit_during_overworld_config")
+    elif menu_choice == "new_game":
+        game = _run_new_game_flow(screen)
+        if game is None:
             pygame.quit()
             sys.exit()
-        
-        telemetry.log("overworld_configured", 
-                     world_size=f"{overworld_config.world_width}x{overworld_config.world_height}",
-                     poi_density=overworld_config.poi_density,
-                     seed=overworld_config.seed)
-
-        # --- Character creation: choose class + background + name (AFTER world config) ---
-        creation_scene = CharacterCreationScene(screen)
-        result = creation_scene.run()
-
-        if result is None:
-            telemetry.log("quit_during_character_creation")
-            pygame.quit()
-            sys.exit()
-
-        selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
-        telemetry.log("character_created", hero_class_id=selected_class_id, background_id=selected_background_id, hero_name=hero_name)
-
-        # Start game with the chosen class, background, and overworld config
-        game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id, overworld_config=overworld_config)
-
-        # Apply stat distribution
-        if stat_distribution:
-            game.hero_stats.stat_distribution = stat_distribution
-            stat_distribution.apply_to_stat_block(game.hero_stats.base)
-        
-        # Apply traits
-        if traits:
-            from systems.character_creation import get_trait, apply_percentage_stat_modifiers, trait_synergy_bonus
-            game.hero_stats.traits = traits
-            # Apply trait stat modifiers
-            for trait_id in traits:
-                trait = get_trait(trait_id)
-                apply_percentage_stat_modifiers(game.hero_stats.base, trait.stat_modifiers)
-            # Apply synergy bonuses
-            synergy_bonus = trait_synergy_bonus(traits)
-            apply_percentage_stat_modifiers(game.hero_stats.base, synergy_bonus)
-        
-        # Store the chosen name on hero_stats
-        game.hero_stats.hero_name = hero_name
-
-        # Sync stats + name into the Player entity
-        if game.player is not None:
-            game.apply_hero_stats_to_player(full_heal=True)
-
-        telemetry.log("game_start", **_game_snapshot(game))
     else:
-        # Should not reach here, but handle gracefully
+        # Should not reach here (quit/options handled above)
         pygame.quit()
         sys.exit()
 
@@ -255,40 +257,10 @@ def main() -> None:
                         continue
                     telemetry.log("game_loaded", slot=selected_slot, **_game_snapshot(game))
                 elif menu_choice == "new_game":
-                    # Overworld config (same as initial new game flow)
-                    from engine.scenes.overworld_config_scene import OverworldConfigScene
-                    config_scene = OverworldConfigScene(screen)
-                    overworld_config = config_scene.run()
-                    if overworld_config is None:
+                    game = _run_new_game_flow(screen)
+                    if game is None:
                         running = False
                         continue
-                    # Character creation
-                    creation_scene = CharacterCreationScene(screen)
-                    result = creation_scene.run()
-                    if result is None:
-                        running = False
-                        continue
-                    selected_class_id, selected_background_id, stat_distribution, traits, hero_name = result
-                    game = Game(screen, hero_class_id=selected_class_id, hero_background_id=selected_background_id, overworld_config=overworld_config)
-                    # Apply stat distribution
-                    if stat_distribution:
-                        game.hero_stats.stat_distribution = stat_distribution
-                        stat_distribution.apply_to_stat_block(game.hero_stats.base)
-                    # Apply traits
-                    if traits:
-                        from systems.character_creation import get_trait, apply_percentage_stat_modifiers, trait_synergy_bonus
-                        game.hero_stats.traits = traits
-                        # Apply trait stat modifiers
-                        for trait_id in traits:
-                            trait = get_trait(trait_id)
-                            apply_percentage_stat_modifiers(game.hero_stats.base, trait.stat_modifiers)
-                        # Apply synergy bonuses
-                        synergy_bonus = trait_synergy_bonus(traits)
-                        apply_percentage_stat_modifiers(game.hero_stats.base, synergy_bonus)
-                    game.hero_stats.hero_name = hero_name
-                    if game.player is not None:
-                        game.apply_hero_stats_to_player(full_heal=True)
-                    telemetry.log("game_start", **_game_snapshot(game))
                 
                 game._return_to_main_menu = False
                 continue

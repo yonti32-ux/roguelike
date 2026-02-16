@@ -5,17 +5,20 @@ Performance profiling script for the game.
 This script provides various profiling options to identify performance bottlenecks.
 
 Usage:
-    # Profile with cProfile (built-in, no extra dependencies)
-    python tools/profile_game.py --method cprofile --duration 60
-    
+    # Profile overworld (default - map, parties, POIs, etc.)
+    python tools/profile_game.py --method cprofile --duration 60 --mode overworld
+
+    # Profile exploration/dungeon (battle-ready, FOV, etc.)
+    python tools/profile_game.py --method cprofile --duration 60 --mode exploration
+
+    # Profile by loading an existing save (realistic state)
+    python tools/profile_game.py --method cprofile --duration 60 --mode load --slot 1
+
     # Profile with py-spy (sampling profiler, no code changes)
     python tools/profile_game.py --method pyspy --duration 60
-    
+
     # Profile memory usage
     python tools/profile_game.py --method memory --duration 60
-    
-    # Profile specific function
-    python tools/profile_game.py --method cprofile --function game.update
 """
 
 import argparse
@@ -30,80 +33,119 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
-def profile_with_cprofile(duration: int = 30, output_file: str = "profile_results.prof"):
+def _create_game_overworld(screen, hero_class_id: str = "warrior"):
+    """Create a game starting in overworld mode (no dungeon loaded)."""
+    from engine.core.game import Game
+    from world.overworld.config import OverworldConfig
+
+    config = OverworldConfig.load()
+    game = Game(screen, hero_class_id=hero_class_id, overworld_config=config)
+    return game
+
+
+def _create_game_exploration(screen, hero_class_id: str = "warrior"):
+    """Create a game and load into exploration/dungeon mode."""
+    from engine.core.game import Game
+
+    game = Game(screen, hero_class_id=hero_class_id)
+    game.load_floor(1, from_direction=None)
+    return game
+
+
+def _create_game_from_save(screen, slot: int):
+    """Load a game from save file."""
+    from engine.utils.save_system import load_game
+
+    game = load_game(screen, slot=slot)
+    if game is None:
+        raise RuntimeError(f"Failed to load save slot {slot}. Ensure a save exists.")
+    return game
+
+
+def profile_with_cprofile(
+    duration: int = 30,
+    output_file: str = "profile_results.prof",
+    mode: str = "overworld",
+    slot: int = 1,
+):
     """
     Profile the game using cProfile (built-in Python profiler).
-    
+
     Args:
         duration: How long to profile in seconds
         output_file: Where to save the profile results
+        mode: Profile target - "overworld", "exploration", or "load"
+        slot: Save slot for mode="load" (1-9)
     """
     print(f"Starting cProfile profiling for {duration} seconds...")
+    print(f"Mode: {mode}")
     print("(Play the game normally during this time)")
-    
+    if mode == "load":
+        print(f"Loading from save slot {slot}...")
+
     profiler = cProfile.Profile()
-    
-    # Import and run the game
+
     import pygame
-    from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TITLE, FPS
-    from engine.core.game import Game
-    from engine.scenes.character_creation import CharacterCreationScene
-    from engine.scenes.main_menu import MainMenuScene
-    from engine.scenes.save_menu import SaveMenuScene
-    from engine.utils.save_system import load_game
-    
+    from settings import TITLE, FPS
+    from engine.core.config import load_config
+
     pygame.init()
     pygame.display.set_caption(f"{TITLE} (Profiling)")
-    
-    from engine.core.config import load_config
+
     config = load_config()
     width, height = config.get_resolution()
     screen = pygame.display.set_mode((width, height))
     clock = pygame.time.Clock()
-    
-    # Quick start - create a test game
-    main_menu = MainMenuScene(screen)
-    # For profiling, we'll skip menu and create a test game directly
-    # You might want to load a save file instead
-    
-    print("\nProfiling started. Play the game...")
-    print(f"Profiling will stop after {duration} seconds or when you close the game.")
-    
-    start_time = time.time()
-    
+
     try:
-        # Start profiling
+        if mode == "overworld":
+            game = _create_game_overworld(screen)
+            print("Game started in OVERWORLD mode. Move around, zoom, interact with parties.")
+        elif mode == "exploration":
+            game = _create_game_exploration(screen)
+            print("Game started in EXPLORATION mode. Move in dungeon, enter battles.")
+        elif mode == "load":
+            game = _create_game_from_save(screen, slot)
+            mode_str = getattr(game, "mode", "unknown")
+            print(f"Game loaded. Current mode: {mode_str}")
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+    except Exception as e:
+        print(f"Failed to create game: {e}")
+        pygame.quit()
+        sys.exit(1)
+
+    print(f"\nProfiling started. Play the game...")
+    print(f"Profiling will stop after {duration} seconds or when you close the game.")
+
+    start_time = time.time()
+
+    try:
         profiler.enable()
-        
-        # Quick test game creation (modify as needed)
-        # For full profiling, you'd load a save or create a game normally
-        game = Game(screen, hero_class_id="warrior")
-        game.load_floor(1, from_direction=None)
-        
+
         running = True
         while running and (time.time() - start_time) < duration:
             dt = clock.tick(FPS) / 1000.0
-            
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                     break
                 game.handle_event(event)
-            
+
             if not running:
                 break
-                
+
             game.update(dt)
             game.draw()
             pygame.display.flip()
-            
+
     except KeyboardInterrupt:
         print("\nProfiling interrupted by user")
     finally:
         profiler.disable()
         pygame.quit()
-    
-    # Save results
+
     profiler.dump_stats(output_file)
     print(f"\nProfile data saved to {output_file}")
     print(f"\nTo view results:")
@@ -201,12 +243,26 @@ def main():
         default=50,
         help="Number of lines to show (for analyze method)"
     )
+    parser.add_argument(
+        "--mode",
+        choices=["overworld", "exploration", "load"],
+        default="overworld",
+        help="What to profile: overworld (map/parties/POIs), exploration (dungeon), or load from save (default: overworld)"
+    )
+    parser.add_argument(
+        "--slot",
+        type=int,
+        default=1,
+        choices=range(1, 10),
+        metavar="1-9",
+        help="Save slot for --mode load (default: 1)"
+    )
     
     args = parser.parse_args()
     
     if args.method == "cprofile":
         output = args.output or "profile_results.prof"
-        profile_with_cprofile(args.duration, output)
+        profile_with_cprofile(args.duration, output, mode=args.mode, slot=args.slot)
     elif args.method == "pyspy":
         output = args.output or "profile_pyspy.svg"
         profile_with_pyspy(args.duration, output)

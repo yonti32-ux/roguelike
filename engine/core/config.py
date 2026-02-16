@@ -96,6 +96,15 @@ def load_config() -> GameConfig:
     return _config
 
 
+def get_display_resolution() -> Tuple[int, int]:
+    """
+    Get the current display resolution (user's config, or desktop if match_desktop).
+    Use this for: window size, procedural generation dimensions.
+    For scaling/UI design reference, use settings.DESIGN_WIDTH / DESIGN_HEIGHT.
+    """
+    return load_config().get_resolution()
+
+
 def save_config() -> bool:
     """Save the global config."""
     return _config.save()

@@ -50,8 +50,8 @@ class CameraManager:
         # Calculate default zoom based on screen size if not provided
         if default_zoom_levels is None:
             screen_w, screen_h = screen.get_size()
-            from settings import WINDOW_WIDTH, WINDOW_HEIGHT
-            resolution_scale = min(screen_w / WINDOW_WIDTH, screen_h / WINDOW_HEIGHT)
+            from settings import DESIGN_WIDTH, DESIGN_HEIGHT
+            resolution_scale = min(screen_w / DESIGN_WIDTH, screen_h / DESIGN_HEIGHT)
             if resolution_scale > 1.0:
                 default_zoom = min(1.0 + (resolution_scale - 1.0) * 0.7, 3.0)
             else:

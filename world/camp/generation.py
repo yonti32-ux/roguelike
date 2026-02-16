@@ -12,7 +12,7 @@ Generates a small outdoor camp map with:
 import random
 from typing import Optional, List, TYPE_CHECKING
 
-from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TILE_SIZE
+from settings import TILE_SIZE
 from .tiles import CAMP_GROUND_TILE, CAMP_FIRE_TILE, CAMP_TENT_TILE
 from ..game_map import GameMap
 from ..tiles import WALL_TILE
@@ -53,9 +53,11 @@ def generate_camp(
     if seed is not None:
         random.seed(seed)
 
-    # Base on screen size but clamp to a small area
-    base_tiles_x = WINDOW_WIDTH // TILE_SIZE
-    base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
+    # Base on display resolution but clamp to a small area
+    from engine.core.config import get_display_resolution
+    res_w, res_h = get_display_resolution()
+    base_tiles_x = res_w // TILE_SIZE
+    base_tiles_y = res_h // TILE_SIZE
 
     # Camps are smaller than full floors
     scale = 0.6

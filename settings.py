@@ -1,8 +1,14 @@
 # settings.py
 
 # Window / display
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
+# Design/baseline resolution: the resolution UI and scaling are designed for.
+# Use get_display_resolution() from engine.core.config for the user's actual resolution.
+DESIGN_WIDTH = 1280
+DESIGN_HEIGHT = 720
+
+# Backward compatibility (same as design resolution)
+WINDOW_WIDTH = DESIGN_WIDTH
+WINDOW_HEIGHT = DESIGN_HEIGHT
 FPS = 60
 TITLE = "Roguelike v2"
 

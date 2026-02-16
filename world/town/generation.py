@@ -9,7 +9,7 @@ import random
 import math
 from typing import List, Tuple, Optional
 
-from settings import WINDOW_WIDTH, WINDOW_HEIGHT, TILE_SIZE
+from settings import TILE_SIZE
 from ..game_map import GameMap
 from ..tiles import WALL_TILE
 from .tiles import (
@@ -51,10 +51,11 @@ def generate_town(
     if seed is not None:
         random.seed(seed)
     
-    # Calculate town size based on level
-    # Towns are significantly larger than villages
-    base_tiles_x = WINDOW_WIDTH // TILE_SIZE
-    base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
+    # Calculate town size based on level (use display resolution for viewport-relative sizing)
+    from engine.core.config import get_display_resolution
+    res_w, res_h = get_display_resolution()
+    base_tiles_x = res_w // TILE_SIZE
+    base_tiles_y = res_h // TILE_SIZE
     
     # Town size scaling - much larger than villages
     if level <= 3:
