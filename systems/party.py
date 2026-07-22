@@ -623,6 +623,9 @@ def create_companion_entity(
     setattr(companion_entity, "max_mana", comp_max_mana)
     setattr(companion_entity, "max_stamina", comp_max_stamina)
     setattr(companion_entity, "level", comp_level)  # For regeneration scaling
+    # Battle/exploration art: sprites/entity/companion_{template_id}.png
+    setattr(companion_entity, "companion_template_id", template.id)
+    setattr(companion_entity, "sprite_id", f"companion_{template.id}")
     
     # Set regeneration bonuses and initiative/movement from companion state (if available)
     if state is not None:

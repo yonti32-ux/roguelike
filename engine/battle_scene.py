@@ -214,6 +214,9 @@ class BattleScene:
                 )
                 setattr(companion_entity, "defense", comp_defense)
                 setattr(companion_entity, "skill_power", comp_sp)
+                # Use companion art when present (e.g. companion_mercenary.png)
+                setattr(companion_entity, "companion_template_id", comp_def.id)
+                setattr(companion_entity, "sprite_id", f"companion_{comp_def.id}")
 
                 # Prefer state name_override if present, then template name,
                 # then player's generic companion_name, then plain "Companion".
@@ -261,6 +264,8 @@ class BattleScene:
                 hp=int(companion_max_hp * 0.8),
                 attack_power=max(2, int(getattr(self.player, "attack_power", 5) * 0.7)),
             )
+            setattr(companion, "companion_template_id", "mercenary")
+            setattr(companion, "sprite_id", "companion_mercenary")
             companion_unit = BattleUnit(
                 entity=companion,
                 side="player",

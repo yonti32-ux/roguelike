@@ -497,7 +497,7 @@ class BattleRenderer:
 
             registry = get_registry()
             if unit.side == "player":
-                # Hero (and any player entity without sprite_id) -> generic player
+                # Hero -> class sprite (player_warrior / player_rogue / player_mage)
                 if entity is self.scene.player:
                     class_id = None
                     hero_stats = getattr(entity, "hero_stats", None)
@@ -510,6 +510,12 @@ class BattleRenderer:
                             class_id = getattr(game.hero_stats, "hero_class_id", None)
                     if class_id:
                         return f"player_{class_id}"
+                    return registry.get_entity_sprite_id(EntitySpriteType.PLAYER)
+
+                # Companion / other allies -> companion_{template_id}.png
+                template_id = getattr(entity, "companion_template_id", None)
+                if template_id:
+                    return f"companion_{template_id}"
                 return registry.get_entity_sprite_id(EntitySpriteType.PLAYER)
 
             enemy_type = getattr(entity, "archetype_id", None) or "default"

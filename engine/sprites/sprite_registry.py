@@ -92,10 +92,16 @@ class SpriteRegistry:
     def get_enemy_sprite_id(self, enemy_type: str) -> str:
         """
         Get sprite ID for an enemy type.
-        
-        If no specific mapping exists, falls back to generic enemy sprite.
+
+        Lookup order:
+        1. Explicit registry override
+        2. Convention: enemy_{archetype_id}.png (e.g. goblin_skirmisher → enemy_goblin_skirmisher)
         """
-        return self.enemy_sprites.get(enemy_type, "enemy_default")
+        if enemy_type in self.enemy_sprites:
+            return self.enemy_sprites[enemy_type]
+        if enemy_type:
+            return f"enemy_{enemy_type}"
+        return "enemy_default"
     
     def get_event_sprite_id(self, event_id: str) -> str:
         """
