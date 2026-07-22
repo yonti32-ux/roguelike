@@ -805,42 +805,10 @@ class ExplorationController:
         # Deduct gold directly; HeroStats.add_gold is for positive amounts only.
         game.hero_stats.gold = hero_gold - price
 
-        # Set floor context for item randomization
-        if not hasattr(game.inventory, "_current_floor"):
-            game.inventory._current_floor = floor_index
-        else:
-            game.inventory._current_floor = floor_index
-
-        # Grant the item
-            game.inventory.add_item(item_id, randomized=True)
-            item_name = getattr(item_def, "name", item_id)
-            
-            # Add item pickup effect
-            if hasattr(game, "_exploration_particles") and chest is not None:
-                cx, cy = chest.rect.center
-                rarity = getattr(item_def, "rarity", None)
-                # Color based on rarity
-                pickup_colors = {
-                    "common": (200, 200, 200),
-                    "uncommon": (100, 255, 100),
-                    "rare": (100, 150, 255),
-                    "epic": (200, 100, 255),
-                    "legendary": (255, 200, 100),
-                }
-                color = pickup_colors.get(rarity, (255, 255, 200)) if rarity else (255, 255, 200)
-                
-                # Create pickup particles
-                for _ in range(random.randint(8, 12)):
-                    game._exploration_particles.append({
-                        "x": cx + random.uniform(-10, 10),
-                        "y": cy + random.uniform(-10, 10),
-                        "vx": random.uniform(-30, 30),
-                        "vy": random.uniform(-40, -10),  # Upward
-                        "timer": random.uniform(0.5, 1.0),
-                        "max_time": random.uniform(0.5, 1.0),
-                        "color": color,
-                        "size": random.randint(2, 4),
-                    })
+        # Set floor context for item randomization, then grant the item.
+        game.inventory._current_floor = floor_index
+        game.inventory.add_item(item_id, randomized=True)
+        item_name = getattr(item_def, "name", item_id)
         game.last_message = f"You buy {item_name} for {price} gold."
 
         # Remove the item from the merchant's stock so it's not infinite
