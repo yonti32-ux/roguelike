@@ -1,0 +1,12 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fullscreen": false,
+  "match_desktop": true,
+  "battle_speed": 1.0,
+  "battle_camera_speed": 50.0,
+  "master_volume": 1.0,
+  "music_volume": 0.7,
+  "sfx_volume": 0.8,
+  "audio_muted": false
+}

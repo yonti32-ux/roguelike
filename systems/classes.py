@@ -52,10 +52,15 @@ def all_classes() -> List[ClassDef]:
 
 # --- Concrete class definitions -----------------------------------------------
 
-# Numbers are tuned around the default StatBlock:
-#   max_hp=30, attack=6, defense=0, speed=1.0, skill_power=1.0
-# We give each a distinct silhouette but keep them in a similar power band
-# because perks / items will matter a lot later.
+# Baseline StatBlock:
+#   max_hp=30, attack=6, defense=0, speed=1.0, skill_power=1.0,
+#   crit_chance=0.05, dodge_chance=0.05, status_resist=0.0
+#
+# Stamina / mana design (balanced for ~8-10 turn battles):
+# - Warrior: high stamina pool (30), can use 2-3 skills per turn with regen
+# - Rogue: moderate stamina (24), can use 2-3 skills per turn with regen
+# - Mage: low stamina (15), high mana (35), can use 1-2 spells per turn
+
 
 WARRIOR = register_class(
     ClassDef(
@@ -71,6 +76,8 @@ WARRIOR = register_class(
             crit_chance=0.05,
             dodge_chance=0.02,
             status_resist=0.05,
+            max_mana=5,  # Reduced: warriors rarely use mana
+            max_stamina=30,  # Reduced: still high but more balanced
         ),
         # Perk ids from systems.perks
         starting_perks=[
@@ -106,13 +113,15 @@ ROGUE = register_class(
             crit_chance=0.12,
             dodge_chance=0.10,
             status_resist=0.0,
+            max_mana=8,  # Reduced: rogues have some mana for hybrid skills
+            max_stamina=24,  # Reduced: moderate stamina pool
         ),
         starting_perks=[
             "fleet_footwork_1",
         ],
         starting_skills=[
             "guard",
-            "nimble_step",
+            "poison_blade",
         ],
         starting_items=[
             "rusty_sword",
@@ -137,13 +146,15 @@ MAGE = register_class(
             crit_chance=0.05,
             dodge_chance=0.05,
             status_resist=0.05,
+            max_mana=35,  # Reduced: still high but more balanced
+            max_stamina=15,  # Reduced: mages rarely use stamina
         ),
         starting_perks=[
             "battle_focus_1",
         ],
         starting_skills=[
             "guard",
-            "focus_blast",
+            "fireball",
         ],
         starting_items=[
             "tattered_cloak",

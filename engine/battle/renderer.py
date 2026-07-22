@@ -1,0 +1,1397 @@
+"""
+Battle renderer module.
+
+Handles all rendering/drawing logic for the battle scene.
+Extracted from battle_scene.py for better code organization.
+"""
+
+from typing import List, Dict, Optional, Tuple
+import math
+import pygame
+
+from settings import (
+    COLOR_PLAYER,
+    COLOR_ENEMY,
+    BASE_CRIT_CHANCE,
+)
+from engine.battle.types import BattleUnit
+from ui.hud_utils import _draw_status_indicators, _calculate_hp_color
+from ui.status_display import draw_enhanced_status_indicators, create_status_tooltip_data
+from systems.statuses import StatusEffect
+
+
+class BattleRenderer:
+    """
+    Handles all rendering for the battle scene.
+    
+    Takes a reference to the BattleScene to access its state.
+    """
+    
+    def __init__(self, scene):
+        """
+        Initialize the renderer with a reference to the battle scene.
+        
+        Args:
+            scene: The BattleScene instance to render
+        """
+        self.scene = scene
+        self.font = scene.font
+        # Create a larger font for damage numbers
+        try:
+            # Try to get font size from the scene font
+            font_size = scene.font.get_height()
+            # Make damage numbers 1.5x bigger
+            self.damage_font = pygame.font.Font(None, int(font_size * 1.5))
+        except:
+            # Fallback to a fixed larger size
+            self.damage_font = pygame.font.Font(None, 30)
+        
+        # Track status icon positions for tooltip hover detection
+        # Format: {(unit_id, status_name): pygame.Rect}
+        self.status_icon_rects: Dict[Tuple[str, str], pygame.Rect] = {}
+        # Track status objects for tooltip data
+        # Format: {(unit_id, status_name): StatusEffect}
+        self.status_objects: Dict[Tuple[str, str], StatusEffect] = {}
+    
+    def draw_active_unit_panel(
+        self,
+        surface: pygame.Surface,
+        unit: Optional[BattleUnit],
+        screen_w: int,
+        ui_scale: float = 1.0,
+    ) -> None:
+        """
+        Draw a small HUD panel for the currently active unit (hero, companion,
+        or enemy), showing name, HP, and basic stats.
+        """
+        if unit is None:
+            return
+
+        # Slightly larger, scaled panel with room for future portrait/stats.
+        panel_width = int(360 * ui_scale)
+        panel_height = int(86 * ui_scale)
+        x = (screen_w - panel_width) // 2
+        y = int(28 * ui_scale)
+
+        bg_rect = pygame.Rect(x, y, panel_width, panel_height)
+        # Background
+        pygame.draw.rect(surface, (12, 14, 24), bg_rect)
+
+        # Border colour by side
+        border_color = COLOR_PLAYER if unit.side == "player" else COLOR_ENEMY
+        pygame.draw.rect(surface, border_color, bg_rect, width=2)
+
+        # Layout: left side label column, right side status icons.
+        padding_x = int(12 * ui_scale)
+        padding_y = int(8 * ui_scale)
+
+        # Name + role
+        role = "Party" if unit.side == "player" else "Enemy"
+        name_line = f"{unit.name} ({role})"
+        name_surf = self.font.render(name_line, True, (235, 235, 235))
+        surface.blit(name_surf, (x + padding_x, y + padding_y))
+
+        # HP + stats line
+        hp_line = f"HP {unit.hp}/{unit.max_hp}"
+        atk = getattr(unit.entity, "attack_power", 0)
+        defense = getattr(unit.entity, "defense", 0)
+        stats_line = f"ATK {atk}   DEF {defense}"
+
+        # Resource line (stamina, and later mana)
+        res_line = ""
+        max_sta = getattr(unit, "max_stamina", 0)
+        cur_sta = getattr(unit, "current_stamina", 0)
+        max_mana = getattr(unit, "max_mana", 0)
+        cur_mana = getattr(unit, "current_mana", 0)
+
+        if max_sta > 0:
+            res_line = f"STA {cur_sta}/{max_sta}"
+        if max_mana > 0:
+            if res_line:
+                res_line = f"MP {cur_mana}/{max_mana}   {res_line}"
+            else:
+                res_line = f"MP {cur_mana}/{max_mana}"
+
+        line_y = y + padding_y + self.font.get_height() + int(2 * ui_scale)
+        hp_surf = self.font.render(hp_line, True, (210, 210, 210))
+        surface.blit(hp_surf, (x + padding_x, line_y))
+
+        line_y += self.font.get_height()
+        stats_surf = self.font.render(stats_line, True, (200, 200, 200))
+        surface.blit(stats_surf, (x + padding_x, line_y))
+
+        if res_line:
+            line_y += self.font.get_height()
+            res_surf = self.font.render(res_line, True, (185, 195, 235))
+            surface.blit(res_surf, (x + padding_x, line_y))
+
+        # Simple status indicators on the right side of the panel
+        icon_x = x + panel_width - int(18 * ui_scale)
+        icon_y = y + padding_y
+        
+        _draw_status_indicators(
+            surface,
+            self.font,
+            icon_x,
+            icon_y,
+            has_guard=self.scene._has_status(unit, "guard"),
+            has_weakened=self.scene._has_status(unit, "weakened"),
+            has_stunned=self.scene._is_stunned(unit),
+            has_dot=self.scene._has_dot(unit),
+            icon_spacing=int(18 * ui_scale),
+        )
+
+    def draw_grid(self, surface: pygame.Surface) -> None:
+        """Draw the battle grid with terrain and movement highlights."""
+        atmosphere = getattr(self.scene, "battle_atmosphere", None)
+        
+        # Living arena backdrop + dust (behind grid)
+        if self.scene.status == "ongoing" and atmosphere is not None:
+            atmosphere.draw_background(
+                surface,
+                self.scene.grid_origin_x,
+                self.scene.grid_origin_y,
+                self.scene.grid_width,
+                self.scene.grid_height,
+                self.scene.cell_size,
+            )
+        
+        # Draw reachable cells if in movement mode
+        reachable_cells: Dict[tuple[int, int], int] = {}
+        if self.scene.movement_mode:
+            unit = self.scene._active_unit()
+            if unit.side == "player":
+                reachable_cells = self.scene.pathfinding.get_reachable_cells(unit)
+        
+        # Draw skill range if in targeting mode with a skill
+        skill_range_cells: set[tuple[int, int]] = set()
+        if self.scene.targeting_mode is not None:
+            action_type = self.scene.targeting_mode.get("action_type")
+            skill = self.scene.targeting_mode.get("skill")
+            if action_type == "skill" and skill is not None:
+                unit = self.scene._active_unit()
+                if unit and unit.side == "player":
+                    # Get skill range (range_tiles doesn't change with rank currently)
+                    max_range = getattr(skill, "range_tiles", 1)
+                    use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+                    
+                    # Calculate valid target cells
+                    unit_gx, unit_gy = unit.gx, unit.gy
+                    for target_gy in range(self.scene.grid_height):
+                        for target_gx in range(self.scene.grid_width):
+                            if use_chebyshev:
+                                # Chebyshev distance (8-directional)
+                                dx = abs(target_gx - unit_gx)
+                                dy = abs(target_gy - unit_gy)
+                                distance = max(dx, dy)
+                            else:
+                                # Manhattan distance (4-directional)
+                                dx = abs(target_gx - unit_gx)
+                                dy = abs(target_gy - unit_gy)
+                                distance = dx + dy
+                            
+                            if distance <= max_range:
+                                skill_range_cells.add((target_gx, target_gy))
+        
+        for gy in range(self.scene.grid_height):
+            for gx in range(self.scene.grid_width):
+                x = self.scene.grid_origin_x + gx * self.scene.cell_size
+                y = self.scene.grid_origin_y + gy * self.scene.cell_size
+                rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
+
+                terrain = self.scene.terrain_manager.get_terrain(gx, gy)
+                if atmosphere is not None and self.scene.status == "ongoing":
+                    atmosphere.draw_cell_life(
+                        surface,
+                        gx,
+                        gy,
+                        int(x),
+                        int(y),
+                        self.scene.cell_size,
+                        terrain.terrain_type,
+                    )
+
+                # Draw cell border on top of ambient fill
+                pygame.draw.rect(surface, (40, 40, 60), rect, width=1)
+                
+                # Draw skill range highlight (targeting mode with skill)
+                if (gx, gy) in skill_range_cells:
+                    range_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    # Check if there's a valid target here
+                    if self.scene.targeting_mode:
+                        targets = self.scene.targeting_mode.get("targets", [])
+                        has_target = any(t.gx == gx and t.gy == gy for t in targets)
+                        if has_target:
+                            # Valid target - brighter green
+                            pygame.draw.rect(range_surf, (100, 255, 100, 120), range_surf.get_rect())
+                        else:
+                            # In range but no target - dimmer yellow
+                            pygame.draw.rect(range_surf, (200, 200, 100, 60), range_surf.get_rect())
+                    else:
+                        # Fallback: just show range
+                        pygame.draw.rect(range_surf, (200, 200, 100, 60), range_surf.get_rect())
+                    surface.blit(range_surf, (x, y))
+                
+                # Draw reachable cells highlight (movement mode)
+                if (gx, gy) in reachable_cells:
+                    reachable_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    pygame.draw.rect(reachable_surf, (60, 80, 120, 80), reachable_surf.get_rect())
+                    surface.blit(reachable_surf, (x, y))
+                
+                # Draw movement path (movement mode)
+                if self.scene.movement_mode and (gx, gy) in self.scene.movement_path:
+                    path_index = self.scene.movement_path.index((gx, gy))
+                    if path_index > 0:  # Not the starting position
+                        path_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                        # Different intensity based on position in path
+                        alpha = 120 + (path_index * 10)
+                        alpha = min(255, alpha)
+                        pygame.draw.rect(path_surf, (100, 150, 200, alpha), path_surf.get_rect())
+                        surface.blit(path_surf, (x, y))
+                        # Draw arrow pointing to next cell
+                        if path_index < len(self.scene.movement_path) - 1:
+                            next_pos = self.scene.movement_path[path_index + 1]
+                            dx = next_pos[0] - gx
+                            dy = next_pos[1] - gy
+                            center_x = x + self.scene.cell_size // 2
+                            center_y = y + self.scene.cell_size // 2
+                            # Draw arrow
+                            if dx > 0:  # Right
+                                pygame.draw.polygon(surface, (150, 200, 255), [
+                                    (center_x + 10, center_y),
+                                    (center_x, center_y - 5),
+                                    (center_x, center_y + 5)
+                                ])
+                            elif dx < 0:  # Left
+                                pygame.draw.polygon(surface, (150, 200, 255), [
+                                    (center_x - 10, center_y),
+                                    (center_x, center_y - 5),
+                                    (center_x, center_y + 5)
+                                ])
+                            elif dy > 0:  # Down
+                                pygame.draw.polygon(surface, (150, 200, 255), [
+                                    (center_x, center_y + 10),
+                                    (center_x - 5, center_y),
+                                    (center_x + 5, center_y)
+                                ])
+                            elif dy < 0:  # Up
+                                pygame.draw.polygon(surface, (150, 200, 255), [
+                                    (center_x, center_y - 10),
+                                    (center_x - 5, center_y),
+                                    (center_x + 5, center_y)
+                                ])
+                
+                # Draw terrain
+                is_on_path = self.scene.movement_mode and (gx, gy) in self.scene.movement_path
+                
+                if terrain.terrain_type == "cover":
+                    # Cover: small shield icon on the side (top-right corner)
+                    # Draw small shield icon in top-right corner
+                    shield_x = x + self.scene.cell_size - 12  # Right side with small margin
+                    shield_y = y + 4  # Top with small margin
+                    shield_size = 8  # Small shield icon
+                    
+                    # Draw shield shape (rounded top, pointed bottom) - smaller version
+                    shield_points = [
+                        (shield_x + shield_size // 2, shield_y),  # Top
+                        (shield_x, shield_y + shield_size // 4),  # Top left
+                        (shield_x, shield_y + shield_size * 3 // 4),  # Bottom left
+                        (shield_x + shield_size // 2, shield_y + shield_size),  # Bottom point
+                        (shield_x + shield_size, shield_y + shield_size * 3 // 4),  # Bottom right
+                        (shield_x + shield_size, shield_y + shield_size // 4),  # Top right
+                    ]
+                    pygame.draw.polygon(surface, (100, 180, 120), shield_points)
+                    pygame.draw.polygon(surface, (80, 160, 100), shield_points, width=1)
+                    
+                    # Highlight cover on path more prominently
+                    if is_on_path:
+                        highlight_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                        pygame.draw.rect(highlight_surf, (100, 200, 140, 180), highlight_surf.get_rect())
+                        surface.blit(highlight_surf, (x, y))
+                elif terrain.terrain_type == "obstacle":
+                    # Solid dark stone block — reads as impassable at a glance
+                    cs = self.scene.cell_size
+                    # Deep fill
+                    pygame.draw.rect(surface, (18, 16, 18), rect)
+                    # Raised bevel (lighter top/left, darker bottom/right)
+                    pygame.draw.line(surface, (55, 50, 48), (x + 1, y + 1), (x + cs - 2, y + 1), 2)
+                    pygame.draw.line(surface, (55, 50, 48), (x + 1, y + 1), (x + 1, y + cs - 2), 2)
+                    pygame.draw.line(surface, (8, 7, 8), (x + 1, y + cs - 2), (x + cs - 2, y + cs - 2), 2)
+                    pygame.draw.line(surface, (8, 7, 8), (x + cs - 2, y + 1), (x + cs - 2, y + cs - 2), 2)
+                    # Outer rim
+                    pygame.draw.rect(surface, (70, 62, 58), rect, width=2)
+                    # Inner cracked-stone marks
+                    mid = cs // 2
+                    pygame.draw.line(surface, (40, 36, 34), (x + 6, y + mid), (x + cs - 6, y + mid), 1)
+                    pygame.draw.line(surface, (40, 36, 34), (x + mid - 4, y + 6), (x + mid + 2, y + cs - 6), 1)
+                elif terrain.terrain_type == "hazard":
+                    # Hazard: red/orange tint (extra pulse comes from draw_cell_life)
+                    hazard_surf = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    pygame.draw.rect(hazard_surf, (150, 50, 50, 100), hazard_surf.get_rect())
+                    surface.blit(hazard_surf, (x, y))
+                    # Draw warning symbol (exclamation)
+                    center_x = x + self.scene.cell_size // 2
+                    center_y = y + self.scene.cell_size // 2
+                    pygame.draw.circle(surface, (200, 100, 100), (center_x, center_y - 5), 3)
+                    pygame.draw.line(surface, (200, 100, 100), (center_x, center_y + 2), (center_x, center_y + 8), 2)
+
+        # Embers drifting over the arena (still under units)
+        if self.scene.status == "ongoing" and atmosphere is not None:
+            atmosphere.draw_foreground(
+                surface,
+                self.scene.grid_origin_x,
+                self.scene.grid_origin_y,
+                self.scene.grid_width,
+                self.scene.grid_height,
+                self.scene.cell_size,
+            )
+
+    def draw_log_history(self, surface: pygame.Surface) -> None:
+        """
+        Draw the combat log history viewer overlay.
+        Shows all log messages from the current battle.
+        """
+        screen_w, screen_h = surface.get_size()
+        
+        # Semi-transparent dark background
+        overlay = pygame.Surface((screen_w, screen_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
+        surface.blit(overlay, (0, 0))
+        
+        # Main panel
+        panel_width = min(800, screen_w - 40)
+        panel_height = min(600, screen_h - 40)
+        panel_x = (screen_w - panel_width) // 2
+        panel_y = (screen_h - panel_height) // 2
+        
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+        pygame.draw.rect(surface, (25, 25, 35), panel_rect)
+        pygame.draw.rect(surface, (150, 200, 150), panel_rect, width=3)
+        
+        # Title
+        title_font = pygame.font.Font(None, 36)
+        title_text = title_font.render("Combat Log History", True, (255, 255, 255))
+        title_x = panel_x + (panel_width - title_text.get_width()) // 2
+        surface.blit(title_text, (title_x, panel_y + 20))
+        
+        # Content area with scrollable log
+        content_x = panel_x + 20
+        content_y = panel_y + 70
+        content_width = panel_width - 40
+        content_height = panel_height - 120
+        line_height = 20
+        
+        # Draw log messages (all of them, not just recent)
+        log_lines = self.scene.log  # Show full log history
+        y = content_y
+        
+        # If log is too long, show most recent messages
+        max_visible_lines = content_height // line_height
+        if len(log_lines) > max_visible_lines:
+            log_lines = log_lines[-max_visible_lines:]
+            # Show indicator that there are more messages
+            more_text = self.font.render(f"... ({len(self.scene.log) - max_visible_lines} older messages)", True, (150, 150, 150))
+            surface.blit(more_text, (content_x, y))
+            y += line_height + 5
+        
+        # Draw log messages
+        for msg in log_lines:
+            if y + line_height > panel_y + panel_height - 50:
+                break  # Don't draw beyond panel
+            
+            # Wrap long messages
+            words = msg.split()
+            current_line = ""
+            for word in words:
+                test_line = current_line + (" " if current_line else "") + word
+                test_surf = self.font.render(test_line, True, (220, 220, 220))
+                if test_surf.get_width() > content_width - 20:
+                    if current_line:
+                        text = self.font.render(current_line, True, (220, 220, 220))
+                        surface.blit(text, (content_x, y))
+                        y += line_height
+                        if y + line_height > panel_y + panel_height - 50:
+                            break
+                    current_line = word
+                else:
+                    current_line = test_line
+            
+            if current_line and y + line_height <= panel_y + panel_height - 50:
+                text = self.font.render(current_line, True, (220, 220, 220))
+                surface.blit(text, (content_x, y))
+                y += line_height
+        
+        # If no log messages yet
+        if not self.scene.log:
+            no_log_text = self.font.render("No combat log messages yet.", True, (150, 150, 150))
+            surface.blit(no_log_text, (content_x, content_y))
+        
+        # Close hint
+        hint_text = self.font.render("Press L or ESC to close", True, (150, 150, 150))
+        hint_x = panel_x + (panel_width - hint_text.get_width()) // 2
+        surface.blit(hint_text, (hint_x, panel_y + panel_height - 35))
+
+    def draw_hp_bar(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        unit: BattleUnit,
+        *,
+        is_player: bool,
+    ) -> None:
+        """
+        Draw a small HP bar just above the unit's rectangle.
+        """
+        max_hp = unit.max_hp
+        if max_hp <= 0:
+            return
+
+        hp = max(0, min(unit.hp, max_hp))
+        ratio = hp / float(max_hp)
+
+        bar_height = 6
+        bar_width = rect.width
+        bar_x = rect.x
+        bar_y = rect.y - bar_height - 2
+
+        # Background
+        bg_rect = pygame.Rect(bar_x, bar_y, bar_width, bar_height)
+        pygame.draw.rect(surface, (25, 25, 32), bg_rect)
+
+        if ratio <= 0.0:
+            return
+
+        # Smooth animated HP drain - track previous HP
+        if not hasattr(self, "_hp_cache"):
+            self._hp_cache = {}
+        
+        unit_id = id(unit)
+        if unit_id not in self._hp_cache:
+            self._hp_cache[unit_id] = ratio
+        
+        # Smoothly interpolate towards current ratio
+        prev_ratio = self._hp_cache[unit_id]
+        if abs(prev_ratio - ratio) > 0.01:
+            # Animate towards target (smooth interpolation)
+            self._hp_cache[unit_id] = prev_ratio + (ratio - prev_ratio) * 0.15
+        else:
+            self._hp_cache[unit_id] = ratio
+        
+        display_ratio = self._hp_cache[unit_id]
+
+        fg_width = max(1, int(bar_width * display_ratio))
+        # Use dynamic HP color (green→yellow→red) instead of fixed colors
+        color = _calculate_hp_color(ratio)
+        fg_rect = pygame.Rect(bar_x, bar_y, fg_width, bar_height)
+        pygame.draw.rect(surface, color, fg_rect)
+
+    def _resolve_unit_sprite_id(self, unit: BattleUnit) -> Optional[str]:
+        """Pick a sprite id for a battle unit, preferring class/enemy art."""
+        entity = getattr(unit, "entity", None)
+        sprite_id = getattr(entity, "sprite_id", None)
+        if sprite_id:
+            return str(sprite_id)
+
+        try:
+            from ..sprites.sprite_registry import get_registry, EntitySpriteType
+
+            registry = get_registry()
+            if unit.side == "player":
+                # Hero (and any player entity without sprite_id) -> generic player
+                if entity is self.scene.player:
+                    class_id = None
+                    hero_stats = getattr(entity, "hero_stats", None)
+                    if hero_stats is not None:
+                        class_id = getattr(hero_stats, "hero_class_id", None)
+                    if not class_id:
+                        # BattleScene may also keep a game reference
+                        game = getattr(self.scene, "game", None)
+                        if game is not None and getattr(game, "hero_stats", None) is not None:
+                            class_id = getattr(game.hero_stats, "hero_class_id", None)
+                    if class_id:
+                        return f"player_{class_id}"
+                return registry.get_entity_sprite_id(EntitySpriteType.PLAYER)
+
+            enemy_type = getattr(entity, "archetype_id", None) or "default"
+            return registry.get_enemy_sprite_id(enemy_type)
+        except Exception:
+            return None
+
+    def _draw_unit_body(
+        self,
+        surface: pygame.Surface,
+        unit: BattleUnit,
+        rect: pygame.Rect,
+        fallback_color: Tuple[int, int, int],
+    ) -> None:
+        """Draw unit body as a class/enemy sprite when available, else a colored rect."""
+        sprite_id = self._resolve_unit_sprite_id(unit)
+        if sprite_id:
+            try:
+                from ..sprites.sprites import get_sprite_manager, SpriteCategory
+
+                sprite_manager = get_sprite_manager()
+                sprite = sprite_manager.get_sprite(
+                    SpriteCategory.ENTITY,
+                    sprite_id,
+                    fallback_color=None,
+                    size=(rect.width, rect.height),
+                )
+                if sprite is not None and not sprite_manager.is_sprite_fallback(sprite):
+                    if sprite.get_size() != (rect.width, rect.height):
+                        sprite = pygame.transform.smoothscale(sprite, (rect.width, rect.height))
+                    surface.blit(sprite, rect)
+                    return
+            except Exception:
+                pass
+
+        pygame.draw.rect(surface, fallback_color, rect)
+
+    def _draw_active_outline(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        color: Tuple[int, int, int] = (255, 255, 150),
+    ) -> None:
+        """Pulse an outline around the active unit without filling over the sprite."""
+        pulse = (math.sin(self.scene.animation_time * 4.0) + 1.0) / 2.0
+        ring_count = 2 + int(pulse * 2)  # 2..4 soft outline rings
+        base_alpha = int(120 + pulse * 100)
+
+        for i in range(ring_count, 0, -1):
+            alpha = int(base_alpha * (1.0 - (i - 1) / max(1, ring_count)))
+            glow_rect = pygame.Rect(
+                rect.x - i,
+                rect.y - i,
+                rect.width + i * 2,
+                rect.height + i * 2,
+            )
+            glow_surf = pygame.Surface((glow_rect.width, glow_rect.height), pygame.SRCALPHA)
+            # Outline only — leave the interior fully transparent
+            pygame.draw.rect(glow_surf, (*color, alpha), glow_surf.get_rect(), width=2)
+            surface.blit(glow_surf, glow_rect.topleft)
+
+        # Crisp inner border on the unit itself
+        border_color = (
+            min(255, color[0] + 20),
+            min(255, color[1] + 20),
+            min(255, color[2] + 20),
+        )
+        pygame.draw.rect(surface, border_color, rect, width=2)
+
+    def draw_units(self, surface: pygame.Surface, screen_w: int) -> None:
+        """Draw all units on the battle grid."""
+        active = self.scene._active_unit() if self.scene.status == "ongoing" else None
+        
+        # Get current target if in targeting mode
+        current_target = self.scene._get_current_target() if self.scene.targeting_mode is not None else None
+        valid_targets: List[BattleUnit] = []
+        if self.scene.targeting_mode is not None:
+            valid_targets = self.scene.targeting_mode.get("targets", [])
+
+        # ---------------- Player units ----------------
+        for unit in self.scene.player_units:
+            if not unit.is_alive:
+                continue
+
+            x = self.scene.grid_origin_x + unit.gx * self.scene.cell_size
+            y = self.scene.grid_origin_y + unit.gy * self.scene.cell_size
+            rect = pygame.Rect(
+                x + 10,
+                y + 10,
+                self.scene.cell_size - 20,
+                self.scene.cell_size - 20,
+            )
+
+            # Subtle idle breathing animation (very subtle scale pulse)
+            if active is not unit:
+                breath = 1.0 + 0.02 * abs(math.sin(self.scene.animation_time * 1.5))
+                rect_center = rect.center
+                rect.width = int((self.scene.cell_size - 20) * breath)
+                rect.height = int((self.scene.cell_size - 20) * breath)
+                rect.center = rect_center
+            
+            # Body (class sprite when available)
+            self._draw_unit_body(surface, unit, rect, COLOR_PLAYER)
+            # Outline glow for the active unit (no filled yellow wash)
+            if active is unit:
+                self._draw_active_outline(surface, rect, (255, 255, 150))
+
+            # HP bar
+            self.draw_hp_bar(surface, rect, unit, is_player=True)
+
+            # Status icons above the HP bar (horizontal layout, going upward)
+            icon_y = rect.y - 18
+            if unit.statuses:
+                # Clear old status rects for this unit
+                # Use consistent ID format - prefer unit.id if available, otherwise use memory id
+                unit_id = getattr(unit, "id", None)
+                if unit_id is None:
+                    unit_id = f"battlefield_{id(unit)}"
+                else:
+                    unit_id = str(unit_id)
+                keys_to_remove = [k for k in self.status_icon_rects.keys() if k[0] == unit_id]
+                for key in keys_to_remove:
+                    del self.status_icon_rects[key]
+                
+                # Draw and track status icon positions
+                _, _, icon_rects = draw_enhanced_status_indicators(
+                    surface,
+                    self.font,
+                    rect.x + 4,  # Start x position
+                    icon_y,
+                    unit.statuses,
+                    icon_spacing=-18,  # Negative for upward stacking
+                    vertical=True,
+                    show_timers=True,
+                    show_stacks=True,
+                    max_statuses=None,  # Show all statuses
+                    return_icon_rects=True,
+                )
+                
+                # Store status icon rects and objects for hover detection
+                if icon_rects:
+                    for status, icon_rect in icon_rects:
+                        status_name = getattr(status, "name", getattr(status, "status_id", "unknown"))
+                        key = (str(unit_id), status_name)
+                        self.status_icon_rects[key] = icon_rect
+                        self.status_objects[key] = status
+
+            # Cooldown indicator for hero's Power Strike
+            hero = self.scene._hero_unit()
+            if hero is unit:
+                cd = unit.cooldowns.get("power_strike", 0)
+                if cd > 0:
+                    cd_text = self.font.render(str(cd), True, (255, 200, 0))
+                    surface.blit(cd_text, (rect.x + rect.width - 16, rect.y + 2))
+
+            # Name label under unit
+            name_surf = self.font.render(unit.name, True, (230, 230, 230))
+            name_x = rect.centerx - name_surf.get_width() // 2
+            name_y = rect.bottom + 10
+            surface.blit(name_surf, (name_x, name_y))
+            
+            # Debug overlay for sprites
+            try:
+                from ..utils.cheats import is_debug_sprites_enabled
+                from ..sprites.sprites import get_sprite_manager
+                from ..sprites.sprite_helpers import draw_sprite_debug_overlay
+                
+                if is_debug_sprites_enabled():
+                    sprite_manager = get_sprite_manager()
+                    sprite_id = self._resolve_unit_sprite_id(unit) or "player"
+                    
+                    # Draw debug overlay at the rect position
+                    draw_sprite_debug_overlay(
+                        surface, None, sprite_id, rect.x, rect.y,
+                        rect.width, rect.height,
+                        original_size=None,
+                        requested_size=(rect.width, rect.height),
+                        sprite_manager=sprite_manager,
+                    )
+            except Exception:
+                pass  # Ignore errors in debug overlay
+
+        # ---------------- Enemy units ----------------
+        for unit in self.scene.enemy_units:
+            if not unit.is_alive:
+                continue
+
+            x = self.scene.grid_origin_x + unit.gx * self.scene.cell_size
+            y = self.scene.grid_origin_y + unit.gy * self.scene.cell_size
+            
+            # Store original rect size for breathing animation
+            base_size = self.scene.cell_size - 20
+            rect = pygame.Rect(
+                x + 10,
+                y + 10,
+                base_size,
+                base_size,
+            )
+            
+            # Subtle idle breathing animation (very subtle scale pulse)
+            if active is not unit:
+                breath = 1.0 + 0.02 * abs(math.sin(self.scene.animation_time * 1.5))
+                rect_center = rect.center
+                rect.width = int(base_size * breath)
+                rect.height = int(base_size * breath)
+                rect.center = rect_center
+
+            # Check if this enemy is elite
+            is_elite = False
+            if hasattr(unit, "entity") and hasattr(unit.entity, "is_elite"):
+                is_elite = getattr(unit.entity, "is_elite", False)
+            
+            # Body (enemy sprite when available)
+            enemy_color = COLOR_ENEMY
+            if is_elite and hasattr(unit.entity, "color"):
+                enemy_color = getattr(unit.entity, "color", COLOR_ENEMY)
+            self._draw_unit_body(surface, unit, rect, enemy_color)
+
+            # Elite gold outline (after body so it stays visible)
+            if is_elite:
+                self._draw_active_outline(surface, rect, (255, 220, 100))
+            
+            # Outline glow for the active unit (no filled wash)
+            if active is unit:
+                self._draw_active_outline(surface, rect, (255, 200, 120))
+            
+            # Highlight valid targets in targeting mode
+            if unit in valid_targets:
+                if current_target is unit:
+                    # Selected target: bright yellow outline only
+                    pygame.draw.rect(surface, (255, 255, 100), rect, width=3)
+                    outer_rect = pygame.Rect(
+                        rect.x - 3,
+                        rect.y - 3,
+                        rect.width + 6,
+                        rect.height + 6,
+                    )
+                    pygame.draw.rect(surface, (255, 255, 150), outer_rect, width=2)
+                else:
+                    # Valid but not selected: lighter outline
+                    pygame.draw.rect(surface, (200, 200, 100), rect, width=2)
+
+            # HP bar
+            self.draw_hp_bar(surface, rect, unit, is_player=False)
+
+            # Status icons (enhanced display with timers and stacks)
+            # Draw from bottom up (negative spacing)
+            icon_y = rect.y + rect.height - 2
+            if unit.statuses:
+                # Clear old status rects for this unit
+                # Use consistent ID format - prefer unit.id if available, otherwise use memory id
+                unit_id = getattr(unit, "id", None)
+                if unit_id is None:
+                    unit_id = f"battlefield_{id(unit)}"
+                else:
+                    unit_id = str(unit_id)
+                keys_to_remove = [k for k in self.status_icon_rects.keys() if k[0] == unit_id]
+                for key in keys_to_remove:
+                    del self.status_icon_rects[key]
+                
+                # Draw and track status icon positions
+                _, _, icon_rects = draw_enhanced_status_indicators(
+                    surface,
+                    self.font,
+                    rect.x + 4,
+                    icon_y,
+                    unit.statuses,
+                    icon_spacing=-18,  # Negative for upward stacking
+                    vertical=True,
+                    show_timers=True,
+                    show_stacks=True,
+                    max_statuses=None,  # Show all statuses
+                    return_icon_rects=True,
+                )
+                
+                # Store status icon rects and objects for hover detection
+                if icon_rects:
+                    for status, icon_rect in icon_rects:
+                        status_name = getattr(status, "name", getattr(status, "status_id", "unknown"))
+                        key = (str(unit_id), status_name)
+                        self.status_icon_rects[key] = icon_rect
+                        self.status_objects[key] = status
+
+            # Name label
+            name_surf = self.font.render(unit.name, True, (230, 210, 210))
+            name_x = rect.centerx - name_surf.get_width() // 2
+            name_y = rect.bottom + 10
+            surface.blit(name_surf, (name_x, name_y))
+            
+            # Debug overlay for sprites
+            try:
+                from ..utils.cheats import is_debug_sprites_enabled
+                from ..sprites.sprites import get_sprite_manager, SpriteCategory
+                from ..sprites.sprite_registry import get_registry, EntitySpriteType
+                from ..sprites.sprite_helpers import draw_sprite_debug_overlay
+                
+                if is_debug_sprites_enabled():
+                    sprite_manager = get_sprite_manager()
+                    registry = get_registry()
+                    
+                    # Enemy unit - get archetype_id from entity
+                    enemy_type = getattr(unit.entity, "archetype_id", None) or "default"
+                    sprite_id = registry.get_enemy_sprite_id(enemy_type)
+                    
+                    # Draw debug overlay at the rect position
+                    draw_sprite_debug_overlay(
+                        surface, None, sprite_id, rect.x, rect.y,
+                        rect.width, rect.height,
+                        original_size=None,
+                        requested_size=(rect.width, rect.height),
+                        sprite_manager=sprite_manager,
+                    )
+            except Exception:
+                pass  # Ignore errors in debug overlay
+        
+        # ---------------- Floating damage numbers ----------------
+        self.draw_floating_damage(surface)
+        
+        # ---------------- Hit sparks (drawn after units) ----------------
+        self.draw_hit_sparks(surface)
+        
+        # ---------------- Skill casting effects (drawn after units) ----------------
+        self.draw_skill_effects(surface)
+        
+        # ---------------- Particles (drawn after sparks) ----------------
+        self.draw_particles(surface)
+        
+        # ---------------- Floating status texts (drawn after particles) ----------------
+        self.draw_floating_status_texts(surface)
+
+    def draw_floating_damage(self, surface: pygame.Surface) -> None:
+        """Draw floating damage numbers that rise and fade, stacking vertically for same target."""
+        # Group damage numbers by target for stacking
+        # Use (gx, gy) tuple as key since BattleUnit objects aren't hashable
+        damage_by_target: Dict[Tuple[int, int], List[Dict]] = {}
+        for damage_info in self.scene._floating_damage:
+            target = damage_info["target"]
+            target_key = (target.gx, target.gy)
+            if target_key not in damage_by_target:
+                damage_by_target[target_key] = []
+            damage_by_target[target_key].append(damage_info)
+        
+        # Draw each group, stacking numbers vertically when multiple exist
+        for target_key, damage_list in damage_by_target.items():
+            # Get target from first damage_info (all should have same target at same position)
+            target = damage_list[0]["target"]
+            gx, gy = target_key
+            
+            # Sort by timer (lower timer = older = should be higher up)
+            damage_list_sorted = sorted(damage_list, key=lambda d: d.get("timer", 0))
+            
+            # Stack spacing: 25 pixels between stacked numbers
+            stack_spacing = 25
+            
+            for idx, damage_info in enumerate(damage_list_sorted):
+                damage = damage_info["damage"]
+                base_y_offset = damage_info["y_offset"]
+                timer = damage_info["timer"]
+                is_crit = damage_info.get("is_crit", False)
+                is_kill = damage_info.get("is_kill", False)
+                
+                if not target.is_alive and not is_kill:
+                    continue
+                
+                # Stack multiple numbers vertically: older ones (higher index) go higher
+                # Subtract stack offset so older numbers appear above newer ones
+                stack_offset = idx * stack_spacing if len(damage_list) > 1 else 0
+                y_offset = base_y_offset + stack_offset
+                
+                # Calculate position above the target unit
+                is_healing = damage_info.get("is_healing", False)
+                x = self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2
+                # Healing floats upward (positive offset), damage floats downward (negative offset)
+                if is_healing:
+                    # Healing: start below unit and float upward
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size + y_offset + 20
+                else:
+                    # Damage: start above unit and float upward
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size - y_offset
+                
+                # Calculate alpha based on remaining time (fade out)
+                # Use longer max time for more visibility
+                max_time = 2.0 if is_crit else 1.8
+                alpha = min(255, int(255 * (timer / max_time)))
+                
+                # Check if this is healing
+                is_healing = damage_info.get("is_healing", False)
+                
+                # Color and text based on type (healing vs damage)
+                if is_healing:
+                    # Healing numbers - green colors, float upward
+                    if damage >= 20:
+                        color = (100, 255, 100)  # Bright green for big heals
+                    elif damage >= 10:
+                        color = (150, 255, 150)  # Medium green
+                    else:
+                        color = (200, 255, 200)  # Light green for small heals
+                    damage_text = f"+{damage}"
+                elif is_crit:
+                    color = (255, 255, 100)  # Bright yellow for crits
+                    damage_text = f"CRIT! -{damage}"
+                elif is_kill:
+                    color = (255, 200, 0)  # Orange for kills
+                    damage_text = f"-{damage}!"
+                elif damage >= 20:
+                    color = (255, 100, 100)  # Bright red for big hits
+                    damage_text = f"-{damage}"
+                elif damage >= 10:
+                    color = (255, 150, 150)  # Medium red
+                    damage_text = f"-{damage}"
+                else:
+                    color = (255, 200, 200)  # Light red for small hits
+                    damage_text = f"-{damage}"
+                
+                # Use larger font for damage numbers
+                damage_font = getattr(self, "damage_font", self.font)
+                
+                # Render damage text with shadow for visibility (larger shadow for bigger text)
+                # Shadow
+                shadow_surf = damage_font.render(damage_text, True, (0, 0, 0))
+                surface.blit(shadow_surf, (x - shadow_surf.get_width() // 2 + 2, y + 2))
+                # Main text
+                text_surf = damage_font.render(damage_text, True, color)
+                text_x = x - text_surf.get_width() // 2
+                text_y = y
+                surface.blit(text_surf, (text_x, text_y))
+                
+                # Draw additional crit indicator (star or sparkle) - bigger for larger font
+                if is_crit:
+                    crit_size = 12  # Increased from 8
+                    pygame.draw.circle(surface, (255, 255, 200), (x, y - 20), crit_size, 2)
+                    pygame.draw.line(surface, (255, 255, 200), (x - crit_size, y - 20), (x + crit_size, y - 20), 2)
+                    pygame.draw.line(surface, (255, 255, 200), (x, y - 20 - crit_size), (x, y - 20 + crit_size), 2)
+
+    def draw_hit_sparks(self, surface: pygame.Surface) -> None:
+        """Draw hit spark effects at impact locations."""
+        for spark in self.scene._hit_sparks:
+            x = spark["x"]
+            y = spark["y"]
+            timer = spark["timer"]
+            is_crit = spark.get("is_crit", False)
+            is_dodge = spark.get("is_dodge", False)
+            
+            # Spark size based on remaining time (fade out)
+            max_time = 0.3
+            size = int(6 * (timer / max_time))
+            
+            if size <= 0:
+                continue
+            
+            # Color based on crit or dodge
+            if is_dodge:
+                # Blue/green spark for dodges (indicates a miss)
+                color = (100, 255, 200)  # Cyan/teal spark for dodges
+                # Draw a "whoosh" effect (multiple sparks in a line)
+                for i in range(3):
+                    offset = size * (i - 1) * 0.5
+                    spark_x = int(x + offset)
+                    spark_y = int(y)
+                    pygame.draw.circle(surface, color, (spark_x, spark_y), size // 2)
+            elif is_crit:
+                color = (255, 255, 150)  # Yellow spark for crits
+                # Draw multiple sparks for crit (4 sparks in a cross pattern)
+                for i in range(4):
+                    angle = (i * 90) * math.pi / 180
+                    offset = size
+                    spark_x = int(x + offset * math.cos(angle))
+                    spark_y = int(y + offset * math.sin(angle))
+                    pygame.draw.circle(surface, color, (spark_x, spark_y), size // 2)
+                # Center spark
+                pygame.draw.circle(surface, (255, 255, 200), (x, y), size)
+            else:
+                color = (255, 200, 100)  # Orange spark
+                pygame.draw.circle(surface, color, (x, y), size)
+    
+    def draw_skill_effects(self, surface: pygame.Surface) -> None:
+        """Draw skill casting visual effects."""
+        import math
+        for effect in self.scene._skill_effects:
+            # Recalculate position based on current grid position (for camera tracking)
+            if "gx" in effect and "gy" in effect:
+                gx = effect["gx"]
+                gy = effect["gy"]
+                x = int(self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2)
+                y = int(self.scene.grid_origin_y + gy * self.scene.cell_size + self.scene.cell_size // 2)
+            else:
+                # Fallback to stored screen position
+                x = int(effect.get("x", 0))
+                y = int(effect.get("y", 0))
+            
+            radius = int(effect["radius"])
+            timer = effect["timer"]
+            max_time = effect["max_time"]
+            color = effect["color"]
+            effect_type = effect.get("type", "caster_glow")
+            
+            if radius <= 0 or timer <= 0:
+                continue
+            
+            # Calculate alpha (fade out)
+            alpha = int(255 * (timer / max_time))
+            alpha = max(0, min(255, alpha))
+            
+            if effect_type == "caster_glow":
+                # Pulsing glow around caster
+                for i in range(3):
+                    glow_radius = radius - (i * 5)
+                    if glow_radius > 0:
+                        glow_alpha = int(alpha * (1.0 - i * 0.3))
+                        glow_surf = pygame.Surface((glow_radius * 2, glow_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(glow_surf, (*color, glow_alpha), (glow_radius, glow_radius), glow_radius)
+                        surface.blit(glow_surf, (x - glow_radius, y - glow_radius))
+            
+            elif effect_type == "aoe_expand":
+                # Expanding AoE circle
+                for i in range(2):
+                    circle_radius = int(radius - (i * 10))
+                    if circle_radius > 0:
+                        circle_alpha = int(alpha * (1.0 - i * 0.4))
+                        circle_surf = pygame.Surface((circle_radius * 2, circle_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(circle_surf, (*color, circle_alpha), (circle_radius, circle_radius), circle_radius, width=3)
+                        surface.blit(circle_surf, (x - circle_radius, y - circle_radius))
+            
+            elif effect_type == "target_impact":
+                # Impact effect on target
+                for i in range(4):
+                    impact_radius = int(radius * (1.0 - i * 0.25))
+                    if impact_radius > 0:
+                        impact_alpha = int(alpha * (1.0 - i * 0.2))
+                        impact_surf = pygame.Surface((impact_radius * 2, impact_radius * 2), pygame.SRCALPHA)
+                        pygame.draw.circle(impact_surf, (*color, impact_alpha), (impact_radius, impact_radius), impact_radius)
+                        surface.blit(impact_surf, (x - impact_radius, y - impact_radius))
+    
+    def draw_particles(self, surface: pygame.Surface) -> None:
+        """Draw particle effects (for kills, explosions, etc.)."""
+        for particle in self.scene._particles:
+            x = int(particle["x"])
+            y = int(particle["y"])
+            timer = particle["timer"]
+            color = particle["color"]
+            size = particle.get("size", 3)
+            
+            # Fade out as timer decreases
+            max_time = particle.get("max_time", 1.0)
+            alpha = int(255 * (timer / max_time))
+            alpha = max(0, min(255, alpha))
+            
+            # Create colored surface with alpha
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            surface.blit(particle_surf, (x - size, y - size))
+    
+    def draw_ambient_particles(self, surface: pygame.Surface, screen_w: int, screen_h: int) -> None:
+        """Draw subtle ambient background particles."""
+        for particle in self.scene._ambient_particles:
+            # Convert to screen coordinates (particles are in world space)
+            x = int(particle["x"] % screen_w)
+            y = int(particle["y"] % screen_h)
+            size = int(particle["size"])
+            alpha = int(particle["alpha"])
+            color = particle["color"]
+            
+            # Draw subtle particle
+            particle_surf = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            particle_color = (*color, alpha)
+            pygame.draw.circle(particle_surf, particle_color, (size, size), size)
+            surface.blit(particle_surf, (x - size, y - size))
+    
+    def draw_floating_status_texts(self, surface: pygame.Surface) -> None:
+        """Draw floating status text effects."""
+        if not self.scene._floating_status_texts:
+            return
+        
+        for text_info in self.scene._floating_status_texts:
+            # Recalculate position based on current grid position (in case camera moved)
+            if "gx" in text_info and "gy" in text_info:
+                gx = text_info["gx"]
+                gy = text_info["gy"]
+                x = int(self.scene.grid_origin_x + gx * self.scene.cell_size + self.scene.cell_size // 2)
+                y = int(self.scene.grid_origin_y + gy * self.scene.cell_size + self.scene.cell_size // 2 - text_info["y_offset"])
+            else:
+                # Fallback to stored screen position
+                x = int(text_info.get("x", 0))
+                y = int(text_info.get("y", 0) - text_info.get("y_offset", 0))
+            
+            text = text_info["text"]
+            color = text_info["color"]
+            timer = text_info["timer"]
+            
+            if timer <= 0:
+                continue
+            
+            # Fade out - start fully visible, fade over time
+            alpha = int(255 * (timer / 1.5))
+            alpha = max(0, min(255, alpha))
+            
+            if alpha <= 0:
+                continue
+            
+            # Use larger, bolder font for better visibility
+            try:
+                # Try to get a slightly larger font
+                large_font = pygame.font.Font(None, int(self.font.get_height() * 1.2))
+            except:
+                large_font = self.font
+            
+            # Render text with shadow for visibility
+            text_surf = large_font.render(text, True, color)
+            
+            # Draw shadow first (black outline for contrast)
+            shadow_surf = large_font.render(text, True, (0, 0, 0))
+            # Draw shadow multiple times for thicker outline
+            for offset_x, offset_y in [(2, 2), (-2, 2), (2, -2), (-2, -2), (0, 2), (0, -2), (2, 0), (-2, 0)]:
+                surface.blit(shadow_surf, (x - text_surf.get_width() // 2 + offset_x, y + offset_y))
+            
+            # Draw main text with alpha
+            text_alpha_surf = pygame.Surface(text_surf.get_size(), pygame.SRCALPHA)
+            text_alpha_surf.blit(text_surf, (0, 0))
+            text_alpha_surf.set_alpha(alpha)
+            surface.blit(text_alpha_surf, (x - text_surf.get_width() // 2, y))
+    
+    def draw_damage_preview(self, surface: pygame.Surface, target: BattleUnit, normal_damage: int, crit_damage: Optional[int]) -> None:
+        """Draw damage preview above the selected target."""
+        x = self.scene.grid_origin_x + target.gx * self.scene.cell_size + self.scene.cell_size // 2
+        y = self.scene.grid_origin_y + target.gy * self.scene.cell_size - 35  # Above the unit
+        
+        # Build preview text
+        if crit_damage is not None and crit_damage > normal_damage:
+            preview_text = f"{normal_damage}-{crit_damage} dmg ({int(BASE_CRIT_CHANCE * 100)}% crit)"
+        else:
+            preview_text = f"{normal_damage} dmg"
+        
+        # Create background panel
+        text_surf = self.font.render(preview_text, True, (255, 255, 255))
+        panel_w = text_surf.get_width() + 12
+        panel_h = text_surf.get_height() + 6
+        panel_x = x - panel_w // 2
+        panel_y = y - panel_h // 2
+        
+        # Semi-transparent dark background
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 200))
+        surface.blit(panel, (panel_x, panel_y))
+        
+        # Border
+        pygame.draw.rect(surface, (150, 200, 255), (panel_x, panel_y, panel_w, panel_h), 2)
+        
+        # Text
+        text_x = x - text_surf.get_width() // 2
+        text_y = y - text_surf.get_height() // 2
+        surface.blit(text_surf, (text_x, text_y))
+    
+    def draw_enemy_info_panel(self, surface: pygame.Surface, target: BattleUnit, screen_w: int) -> None:
+        """Draw enemy stat information panel when targeting."""
+        if target.side == "player":
+            return  # Only show for enemies
+        
+        # Calculate position based on enemy cards
+        # Enemy cards are drawn starting at enemy_y = 20, with 70 height + 10 spacing each
+        card_width = 180
+        enemy_x = screen_w - card_width - 20
+        enemy_y = 20
+        card_h = 70
+        card_spacing = 10
+        
+        # Count how many enemy cards are drawn (alive enemies)
+        num_enemy_cards = sum(1 for u in self.scene.enemy_units if u.is_alive)
+        
+        # Position panel below all enemy cards
+        panel_w = 200
+        panel_h = 100
+        panel_x = screen_w - panel_w - 20
+        panel_y = enemy_y + (num_enemy_cards * (card_h + card_spacing)) + 10  # Below all enemy cards with spacing
+        
+        # Background
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((20, 20, 30, 220))
+        surface.blit(panel, (panel_x, panel_y))
+        
+        # Border
+        pygame.draw.rect(surface, (150, 100, 100), (panel_x, panel_y, panel_w, panel_h), 2)
+        
+        # Title
+        title_surf = self.font.render("Target Info", True, (255, 200, 200))
+        surface.blit(title_surf, (panel_x + 6, panel_y + 4))
+        
+        # Stats
+        text_y = panel_y + 24
+        atk = getattr(target.entity, "attack_power", 0)
+        defense = getattr(target.entity, "defense", 0)
+        hp_ratio = target.hp / target.max_hp if target.max_hp > 0 else 0
+        
+        stats = [
+            f"HP: {target.hp}/{target.max_hp} ({int(hp_ratio * 100)}%)",
+            f"ATK: {atk}",
+            f"DEF: {defense}",
+        ]
+        
+        for stat_text in stats:
+            stat_surf = self.font.render(stat_text, True, (220, 220, 220))
+            surface.blit(stat_surf, (panel_x + 6, text_y))
+            text_y += 18
+        
+        # Status effects
+        if target.statuses:
+            status_names = [s.name.title() for s in target.statuses[:3]]  # Show first 3
+            status_text = "Status: " + ", ".join(status_names)
+            if len(target.statuses) > 3:
+                status_text += "..."
+            status_surf = self.font.render(status_text, True, (200, 200, 255))
+            surface.blit(status_surf, (panel_x + 6, text_y))
+    
+    def draw_range_visualization(self, surface: pygame.Surface, unit: BattleUnit) -> None:
+        """Draw range visualization on the grid when targeting."""
+        if self.scene.targeting_mode is None:
+            return
+        
+        action_type = self.scene.targeting_mode.get("action_type")
+        skill = self.scene.targeting_mode.get("skill")
+        current_target = self.scene._get_current_target()
+        
+        # Determine range
+        max_range = 1
+        if action_type == "attack":
+            max_range = self.scene.combat._get_weapon_range(unit)
+        elif action_type == "skill" and skill is not None:
+            max_range = getattr(skill, "range_tiles", 1)
+        
+        # Draw range tiles (where you can target)
+        range_color = (100, 150, 255, 80)  # Semi-transparent blue
+        unit_gx, unit_gy = unit.gx, unit.gy
+        
+        # Determine if we should use Chebyshev distance (for melee) or Manhattan (for ranged)
+        use_chebyshev = False
+        if action_type == "attack":
+            weapon_range = self.scene.combat._get_weapon_range(unit)
+            use_chebyshev = (weapon_range == 1)  # Melee uses Chebyshev
+        elif action_type == "skill" and skill is not None:
+            # Skills can opt into Manhattan targeting (future ranged-by-tiles),
+            # but default to Chebyshev so "adjacent" includes diagonals.
+            use_chebyshev = getattr(skill, "range_metric", "chebyshev") == "chebyshev"
+        
+        for gx in range(self.scene.grid_width):
+            for gy in range(self.scene.grid_height):
+                # Calculate distance using appropriate metric
+                if use_chebyshev:
+                    dx = abs(gx - unit_gx)
+                    dy = abs(gy - unit_gy)
+                    distance = max(dx, dy)
+                else:
+                    distance = abs(gx - unit_gx) + abs(gy - unit_gy)
+                
+                if distance <= max_range and distance > 0:  # Don't highlight unit's own tile
+                    x = self.scene.grid_origin_x + gx * self.scene.cell_size
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size
+                    rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
+                    
+                    # Semi-transparent overlay
+                    overlay = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    overlay.fill(range_color)
+                    surface.blit(overlay, (x, y))
+        
+        # Draw AoE area if skill has AoE and a target is selected
+        if action_type == "skill" and skill is not None and current_target is not None:
+            aoe_radius = getattr(skill, "aoe_radius", 0)
+            if aoe_radius > 0:
+                from engine.battle.aoe import get_tiles_in_aoe
+                
+                # Get AoE tiles centered on the selected target
+                aoe_tiles = get_tiles_in_aoe(
+                    current_target.gx,
+                    current_target.gy,
+                    aoe_radius,
+                    getattr(skill, "aoe_shape", "circle"),
+                    self.scene.grid_width,
+                    self.scene.grid_height,
+                )
+                
+                # Draw AoE area overlay (red/orange tint to indicate damage area)
+                aoe_color = (255, 150, 100, 120)  # Semi-transparent orange-red
+                for gx, gy in aoe_tiles:
+                    x = self.scene.grid_origin_x + gx * self.scene.cell_size
+                    y = self.scene.grid_origin_y + gy * self.scene.cell_size
+                    
+                    # Draw AoE overlay
+                    overlay = pygame.Surface((self.scene.cell_size, self.scene.cell_size), pygame.SRCALPHA)
+                    overlay.fill(aoe_color)
+                    surface.blit(overlay, (x, y))
+                    
+                    # Draw border to make it more visible
+                    rect = pygame.Rect(x, y, self.scene.cell_size, self.scene.cell_size)
+                    pygame.draw.rect(surface, (255, 200, 150), rect, width=2)
+
+    def get_hovered_status(self, mouse_pos: Tuple[int, int]) -> Optional[StatusEffect]:
+        """
+        Check if mouse is hovering over a status icon and return the status.
+        
+        Args:
+            mouse_pos: (x, y) mouse position on screen
+            
+        Returns:
+            StatusEffect if hovering over a status icon, None otherwise
+        """
+        mx, my = mouse_pos
+        
+        # Check all status icon rects for collision
+        for key, rect in self.status_icon_rects.items():
+            if rect.collidepoint(mx, my):
+                status = self.status_objects.get(key)
+                if status:
+                    return status
+        return None
+    
+    def draw_turn_order_indicator(self, surface: pygame.Surface, screen_w: int, ui_scale: float = 1.0) -> None:
+        """Draw a small indicator showing the next few units in turn order."""
+        if not self.scene.turn_order:
+            return
+        
+        # Get next 4 units in turn order (current + next 3)
+        next_units: List[BattleUnit] = []
+        current_idx = self.scene.turn_index
+        
+        for i in range(4):
+            idx = (current_idx + i) % len(self.scene.turn_order)
+            unit = self.scene.turn_order[idx]
+            if unit.is_alive:
+                next_units.append(unit)
+            if len(next_units) >= 4:
+                break
+        
+        if len(next_units) <= 1:
+            return  # Don't show if only current unit
+        
+        # Draw small icons/names for upcoming turns
+        indicator_y = int(120 * ui_scale)  # Just below the active unit panel
+        indicator_w = len(next_units) * int(96 * ui_scale)
+        if indicator_w < int(220 * ui_scale):
+            indicator_w = int(220 * ui_scale)  # Minimum width
+        indicator_x = (screen_w - indicator_w) // 2
+        
+        # Background panel
+        panel_h = int(32 * ui_scale)
+        panel = pygame.Surface((indicator_w, panel_h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 150))
+        surface.blit(panel, (indicator_x, indicator_y))
+        
+        # Draw each upcoming unit
+        x_offset = 0
+        for i, unit in enumerate(next_units):
+            if i == 0:
+                label = "NOW"
+                color = (255, 255, 150)  # Current turn
+            else:
+                label = unit.name[:6]  # Truncate long names
+                if unit.side == "player":
+                    color = COLOR_PLAYER
+                else:
+                    color = COLOR_ENEMY
+            
+            # Small icon/indicator
+            icon_size = int(22 * ui_scale)
+            icon_x = indicator_x + x_offset + 5
+            icon_y = indicator_y + 5
+            
+            # Draw colored square for the unit
+            pygame.draw.rect(surface, color, (icon_x, icon_y, icon_size, icon_size))
+            pygame.draw.rect(surface, (100, 100, 100), (icon_x, icon_y, icon_size, icon_size), 1)
+            
+            # Unit name/label
+            label_surf = self.font.render(label, True, (220, 220, 220))
+            label_x = icon_x + icon_size + int(4 * ui_scale)
+            label_y = icon_y + (icon_size - label_surf.get_height()) // 2
+            surface.blit(label_surf, (label_x, label_y))
+            
+            # Initiative value (small text below name)
+            init_value = unit.initiative
+            init_text = f"INI:{init_value}"
+            init_surf = self.font.render(init_text, True, (180, 200, 255))
+            init_x = label_x
+            init_y = label_y + label_surf.get_height() + int(2 * ui_scale)
+            surface.blit(init_surf, (init_x, init_y))
+            
+            x_offset += int(96 * ui_scale)
+

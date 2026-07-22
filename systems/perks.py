@@ -110,14 +110,122 @@ def _apply_battle_focus_2(hero_stats: object) -> None:
 
 
 def _apply_fleet_footwork_1(hero_stats: object) -> None:
-    # First mobility perk: slight defense bump
+    # First mobility perk: slight defense bump + a touch of initiative
     hero_stats.base.defense += 1
+    hero_stats.base.initiative += 2
 
 
 def _apply_fleet_footwork_2(hero_stats: object) -> None:
-    # Second mobility perk: more defense + a bit of HP
+    # Second mobility perk: more defense + a bit of HP + more initiative
     hero_stats.base.defense += 1
     hero_stats.base.max_hp += 5
+    hero_stats.base.initiative += 3
+
+
+# --- Regeneration perk effects --------------------------------------------
+
+def _apply_stamina_regen_1(hero_stats: object) -> None:
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+def _apply_stamina_regen_2(hero_stats: object) -> None:
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+def _apply_mana_regen_1(hero_stats: object) -> None:
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_mana_regen_2(hero_stats: object) -> None:
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_vitality_flow(hero_stats: object) -> None:
+    # Both stamina and mana regen
+    hero_stats.base.stamina_regen_bonus += 1
+    hero_stats.base.mana_regen_bonus += 1
+
+
+# --- Other new perk effects -----------------------------------------------
+
+def _apply_quick_reflexes(hero_stats: object) -> None:
+    hero_stats.base.dodge_chance += 0.05
+
+
+def _apply_precision_strike(hero_stats: object) -> None:
+    hero_stats.base.crit_chance += 0.05
+
+
+def _apply_iron_will(hero_stats: object) -> None:
+    hero_stats.base.status_resist += 0.10
+
+
+def _apply_swift_strike(hero_stats: object) -> None:
+    # Faster attacks slightly improve both speed and initiative
+    hero_stats.base.speed += 0.1
+    hero_stats.base.initiative += 1
+
+
+def _apply_quickstep_1(hero_stats: object) -> None:
+    # New mobility perk: extra movement points and initiative
+    # Reduced from +1 to +0.5 to make high movement rare
+    hero_stats.base.movement_points_bonus += 0.5
+    hero_stats.base.initiative += 2
+
+
+def _apply_quickstep_2(hero_stats: object) -> None:
+    # Stronger version: more movement and a bit more initiative
+    # Reduced from +1 to +0.5 to make high movement rare
+    hero_stats.base.movement_points_bonus += 0.5
+    hero_stats.base.initiative += 3
+
+
+def _apply_arcane_attunement(hero_stats: object) -> None:
+    hero_stats.base.max_mana += 5
+    hero_stats.base.mana_regen_bonus += 1
+
+
+def _apply_endurance_training(hero_stats: object) -> None:
+    hero_stats.base.max_stamina += 5
+    hero_stats.base.stamina_regen_bonus += 1
+
+
+# --- Skill slot expansion perks ---------------------------------------------
+
+def _apply_combat_mastery(hero_stats: object) -> None:
+    """Unlock 5th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
+
+
+def _apply_weapon_expertise(hero_stats: object) -> None:
+    """Unlock 6th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
+
+
+def _apply_legendary_warrior(hero_stats: object) -> None:
+    """Unlock 7th skill slot."""
+    hero_stats.max_skill_slots += 1
+    # Expand existing loadouts
+    for loadout_name, slots in hero_stats.skill_loadouts.items():
+        while len(slots) < hero_stats.max_skill_slots:
+            slots.append(None)
+    # Expand skill_slots for backward compatibility
+    while len(hero_stats.skill_slots) < hero_stats.max_skill_slots:
+        hero_stats.skill_slots.append(None)
 
 
 # --- Perk trees -------------------------------------------------------------
@@ -240,6 +348,17 @@ register(Perk(
     tags=["defense", "control", "skills"],
 ))
 
+# Sentinel: Attacks of Opportunity
+register(Perk(
+    id="sentinel",
+    name="Sentinel",
+    description="You can make attacks of opportunity when enemies leave your melee range. Deals 75% damage.",
+    unlock_level=4,
+    branch="ward",
+    requires=["iron_guard_1"],
+    tags=["defense", "reactions"],
+))
+
 # ----------------- Focus tree -----------------
 
 register(Perk(
@@ -281,7 +400,7 @@ register(Perk(
 register(Perk(
     id="fleet_footwork_1",
     name="Fleet Footwork I",
-    description="Unlocks Nimble Step (T) and +1 Defense.",
+    description="Unlocks Nimble Step (T), +1 Defense, and +2 Initiative.",
     unlock_level=3,
     branch="mobility",
     requires=[],
@@ -293,7 +412,7 @@ register(Perk(
 register(Perk(
     id="fleet_footwork_2",
     name="Fleet Footwork II",
-    description="+1 Defense and +5 Max HP.",
+    description="+1 Defense, +5 Max HP, and +3 Initiative.",
     unlock_level=5,
     branch="mobility",
     requires=["fleet_footwork_1"],
@@ -301,8 +420,336 @@ register(Perk(
     apply_fn=_apply_fleet_footwork_2,
 ))
 
+# ----------------- Warrior-specific perks ---------------------------------
+
+# Cleave unlock
+register(Perk(
+    id="quickstep_1",
+    name="Quickstep I",
+    description="+0.5 Movement Point and +2 Initiative per turn.",
+    unlock_level=5,  # Increased from 4 to make it harder to get
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    tags=["mobility", "initiative"],
+    apply_fn=_apply_quickstep_1,
+))
+
+register(Perk(
+    id="quickstep_2",
+    name="Quickstep II",
+    description="+0.5 additional Movement Point and +3 Initiative per turn.",
+    unlock_level=8,  # Increased from 6 to make it harder to get
+    branch="mobility",
+    requires=["quickstep_1"],
+    tags=["mobility", "initiative"],
+    apply_fn=_apply_quickstep_2,
+))
+
+register(Perk(
+    id="warrior_cleave",
+    name="Weapon Mastery",
+    description="Unlocks the Cleave skill - strike multiple enemies at once.",
+    unlock_level=4,
+    branch="blade",
+    requires=["weapon_training_2"],
+    grant_skills=["cleave"],
+    tags=["offense", "skills", "warrior"],
+))
+
+# Taunt unlock
+register(Perk(
+    id="warrior_taunt",
+    name="Intimidating Presence",
+    description="Unlocks the Taunt skill - force enemies to focus on you.",
+    unlock_level=3,
+    branch="ward",
+    requires=["iron_guard_1"],
+    grant_skills=["taunt"],
+    tags=["defense", "control", "skills", "warrior"],
+))
+
+# Charge unlock
+register(Perk(
+    id="warrior_charge",
+    name="Battle Charge",
+    description="Unlocks the Charge skill - rush forward and strike.",
+    unlock_level=5,
+    branch="blade",
+    requires=["weapon_training_2"],
+    grant_skills=["charge"],
+    tags=["offense", "mobility", "skills", "warrior"],
+))
+
+# Shield Wall unlock
+register(Perk(
+    id="warrior_shield_wall",
+    name="Defensive Stance",
+    description="Unlocks the Shield Wall skill - boost your defense.",
+    unlock_level=4,
+    branch="ward",
+    requires=["iron_guard_1"],
+    grant_skills=["shield_wall"],
+    tags=["defense", "skills", "warrior"],
+))
+
+# Second Wind unlock (Warrior)
+register(Perk(
+    id="warrior_second_wind",
+    name="Resilience",
+    description="Unlocks the Second Wind skill - restore HP and stamina.",
+    unlock_level=6,
+    branch="vitality",
+    requires=["toughness_2"],
+    grant_skills=["second_wind"],
+    tags=["defense", "survivability", "skills", "warrior"],
+))
+
+# ----------------- Rogue-specific perks ---------------------------------
+
+# Backstab unlock
+register(Perk(
+    id="rogue_backstab",
+    name="Assassin Training",
+    description="Unlocks the Backstab skill - devastating precision strike.",
+    unlock_level=4,
+    branch="blade",
+    requires=["fleet_footwork_1"],
+    grant_skills=["backstab"],
+    tags=["offense", "skills", "rogue"],
+))
+
+# Shadow Strike unlock
+register(Perk(
+    id="rogue_shadow_strike",
+    name="Shadow Mastery",
+    description="Unlocks the Shadow Strike skill - strike from the shadows.",
+    unlock_level=5,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["shadow_strike"],
+    tags=["offense", "mobility", "skills", "rogue"],
+))
+
+# Poison Blade unlock
+register(Perk(
+    id="rogue_poison_blade",
+    name="Poison Mastery",
+    description="Unlocks the Poison Blade skill - apply deadly toxins.",
+    unlock_level=4,
+    branch="blade",
+    requires=["fleet_footwork_1"],
+    grant_skills=["poison_blade"],
+    tags=["offense", "skills", "rogue"],
+))
+
+# Evade unlock
+register(Perk(
+    id="rogue_evade",
+    name="Evasive Reflexes",
+    description="Unlocks the Evade skill - dodge the next attack.",
+    unlock_level=3,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["evade"],
+    tags=["defense", "mobility", "skills", "rogue"],
+))
+
+# Second Wind unlock (Rogue)
+register(Perk(
+    id="rogue_second_wind",
+    name="Quick Recovery",
+    description="Unlocks the Second Wind skill - restore HP and stamina.",
+    unlock_level=5,
+    branch="mobility",
+    requires=["fleet_footwork_1"],
+    grant_skills=["second_wind"],
+    tags=["defense", "survivability", "skills", "rogue"],
+))
+
+# ----------------- Mage-specific perks ---------------------------------
+
+# Fireball unlock
+register(Perk(
+    id="mage_fireball",
+    name="Pyromancy",
+    description="Unlocks the Fireball skill - hurl explosive fire magic.",
+    unlock_level=4,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["fireball"],
+    tags=["offense", "skills", "mage"],
+))
+
+# Lightning Bolt unlock
+register(Perk(
+    id="mage_lightning",
+    name="Electromancy",
+    description="Unlocks the Lightning Bolt skill - chain lightning attack.",
+    unlock_level=5,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["lightning_bolt"],
+    tags=["offense", "skills", "mage"],
+))
+
+# Slow unlock
+register(Perk(
+    id="mage_slow",
+    name="Temporal Magic",
+    description="Unlocks the Slow skill - reduce enemy speed.",
+    unlock_level=3,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["slow"],
+    tags=["control", "skills", "mage"],
+))
+
+# Magic Shield unlock
+register(Perk(
+    id="mage_shield",
+    name="Arcane Protection",
+    description="Unlocks the Magic Shield skill - absorb incoming damage.",
+    unlock_level=4,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["magic_shield"],
+    tags=["defense", "skills", "mage"],
+))
+
+# Arcane Missile unlock
+register(Perk(
+    id="mage_missile",
+    name="Arcane Mastery",
+    description="Unlocks the Arcane Missile skill - quick magical projectile.",
+    unlock_level=3,
+    branch="focus",
+    requires=["battle_focus_1"],
+    grant_skills=["arcane_missile"],
+    tags=["offense", "skills", "mage"],
+))
+
+# ----------------- Skill Slot Expansion perks -----------------
+
+register(Perk(
+    id="combat_mastery",
+    name="Combat Mastery",
+    description="Unlocks an additional skill slot (5 total).",
+    unlock_level=6,
+    branch="blade",
+    requires=["weapon_training_2"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_combat_mastery,
+))
+
+register(Perk(
+    id="weapon_expertise",
+    name="Weapon Expertise",
+    description="Unlocks an additional skill slot (6 total).",
+    unlock_level=10,
+    branch="blade",
+    requires=["combat_mastery"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_weapon_expertise,
+))
+
+register(Perk(
+    id="legendary_warrior",
+    name="Legendary Warrior",
+    description="Unlocks an additional skill slot (7 total).",
+    unlock_level=15,
+    branch="blade",
+    requires=["weapon_expertise"],
+    tags=["skills", "utility"],
+    apply_fn=_apply_legendary_warrior,
+))
+
 
 # --- Helper functions used by the game --------------------------------------
+
+def apply_perk_to_hero(hero_stats: object, perk: Perk) -> None:
+    """
+    Apply a single perk to a HeroStats-like object and record it as learned.
+
+    - Ensures hero_stats.perks exists.
+    - Skips if the perk is already learned.
+    - Uses the Perk.apply() hook to mutate base stats (max_hp, attack, etc.)
+      when the perk has an apply_fn.
+    - Automatically adds granted skills to the default loadout.
+    """
+    # Make sure the hero has a perks list
+    if not hasattr(hero_stats, "perks"):
+        hero_stats.perks = []
+
+    owned = getattr(hero_stats, "perks")
+
+    # Don't double-apply the same perk
+    if perk.id in owned:
+        return
+
+    # Apply stat modifications (if any)
+    perk.apply(hero_stats)
+
+    # Register as learned
+    owned.append(perk.id)
+    
+    # Auto-assign granted skills to default loadout
+    if hasattr(perk, "grant_skills") and perk.grant_skills:
+        # Ensure loadout system is initialized
+        if not hasattr(hero_stats, "skill_loadouts"):
+            hero_stats.skill_loadouts = {}
+        if not hasattr(hero_stats, "current_loadout"):
+            hero_stats.current_loadout = "default"
+        if not hasattr(hero_stats, "max_skill_slots"):
+            hero_stats.max_skill_slots = 4
+        
+        # Ensure default loadout exists
+        if "default" not in hero_stats.skill_loadouts:
+            hero_stats.skill_loadouts["default"] = [None] * hero_stats.max_skill_slots
+        
+        # Get current default loadout
+        default_loadout = hero_stats.skill_loadouts["default"]
+        
+        # Ensure loadout has correct length
+        while len(default_loadout) < hero_stats.max_skill_slots:
+            default_loadout.append(None)
+        
+        # Add granted skills to first available slots (skip guard, it has its own key)
+        for skill_id in perk.grant_skills:
+            if skill_id == "guard":
+                continue  # Guard has its own dedicated key
+            
+            # Check if skill is already in loadout
+            if skill_id in default_loadout:
+                continue
+            
+            # Find first empty slot
+            for i in range(hero_stats.max_skill_slots):
+                if default_loadout[i] is None:
+                    default_loadout[i] = skill_id
+                    break
+        
+        # Sync to skill_slots for backward compatibility
+        hero_stats.skill_slots = default_loadout[:hero_stats.max_skill_slots]
+
+
+def apply_perk_to_companion(companion_state: object, perk: Perk) -> None:
+    """
+    Register a perk as learned on a CompanionState-like object.
+
+    Companion stats are recalculated elsewhere (e.g. via
+    systems.party.recalc_companion_stats_for_level) based on the
+    companion_state.perks list, so this helper only updates that list.
+    """
+    if not hasattr(companion_state, "perks"):
+        companion_state.perks = []
+
+    owned = getattr(companion_state, "perks")
+
+    # Avoid duplicates
+    if perk.id in owned:
+        return
+
+    owned.append(perk.id)
 
 
 def auto_assign_perks(hero_stats: object) -> List[str]:
@@ -422,6 +869,12 @@ class _DummyBaseStats:
         self.attack: int = 0
         self.defense: int = 0
         self.skill_power: float = 0.0
+        self.max_mana: int = 0
+        self.max_stamina: int = 0
+        self.stamina_regen_bonus: int = 0
+        self.mana_regen_bonus: int = 0
+        self.initiative: int = 0
+        self.movement_points_bonus: int = 0
 
 
 class _DummyHeroLike:
@@ -461,4 +914,10 @@ def total_stat_modifiers_for_perks(perk_ids: Iterable[str]) -> Dict[str, float]:
         "attack": int(base.attack),
         "defense": int(base.defense),
         "skill_power": float(base.skill_power),
+        "max_mana": int(getattr(base, "max_mana", 0)),
+        "max_stamina": int(getattr(base, "max_stamina", 0)),
+        "stamina_regen_bonus": int(getattr(base, "stamina_regen_bonus", 0)),
+        "mana_regen_bonus": int(getattr(base, "mana_regen_bonus", 0)),
+        "initiative": int(getattr(base, "initiative", 0)),
+        "movement_points_bonus": int(getattr(base, "movement_points_bonus", 0)),
     }

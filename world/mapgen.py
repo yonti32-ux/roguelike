@@ -84,27 +84,41 @@ def generate_floor(
     base_tiles_y = WINDOW_HEIGHT // TILE_SIZE
     base_area = base_tiles_x * base_tiles_y
 
-    if floor_index <= 2:
-        # Mostly "normal" size, sometimes slightly bigger
-        scales = [1.0, 1.5]
-        weights = [0.7, 0.3]
-    elif floor_index <= 5:
-        # Mixed: normal, mid, and big floors
-        scales = [1.0, 1.5, 2.0]
-        weights = [0.4, 0.4, 0.2]
+    # Progressive scaling: start smaller, get bigger as you go deeper
+    # Increased minimum scales to make maps bigger overall
+    if floor_index == 1:
+        # First floor: slightly bigger starting maps
+        scales = [0.9, 1.0, 1.1]
+        weights = [0.3, 0.4, 0.3]
+    elif floor_index == 2:
+        # Second floor: normal to slightly bigger
+        scales = [1.0, 1.1, 1.25]
+        weights = [0.3, 0.4, 0.3]
+    elif floor_index <= 4:
+        # Floors 3-4: normal to bigger
+        scales = [1.1, 1.25, 1.5]
+        weights = [0.2, 0.5, 0.3]
+    elif floor_index <= 6:
+        # Floors 5-6: bigger maps
+        scales = [1.25, 1.5, 1.75]
+        weights = [0.3, 0.4, 0.3]
+    elif floor_index <= 8:
+        # Floors 7-8: large maps
+        scales = [1.5, 1.75, 2.0]
+        weights = [0.2, 0.5, 0.3]
     else:
-        # Deep floors: almost always larger than one screen
-        scales = [1.5, 2.0]
-        weights = [0.5, 0.5]
+        # Deep floors (9+): very large maps
+        scales = [1.75, 2.0, 2.25]
+        weights = [0.3, 0.4, 0.3]
 
     scale = random.choices(scales, weights=weights, k=1)[0]
 
     tiles_x = int(base_tiles_x * scale)
     tiles_y = int(base_tiles_y * scale)
 
-    # Safety clamp so we don't go insane in either direction
-    tiles_x = max(base_tiles_x, min(tiles_x, base_tiles_x * 2))
-    tiles_y = max(base_tiles_y, min(tiles_y, base_tiles_y * 2))
+    # Safety clamp: minimum 0.9x (not too small), maximum 2.5x (allow bigger maps)
+    tiles_x = max(int(base_tiles_x * 0.9), min(tiles_x, int(base_tiles_x * 2.5)))
+    tiles_y = max(int(base_tiles_y * 0.9), min(tiles_y, int(base_tiles_y * 2.5)))
 
     tiles = _create_empty_map(tiles_x, tiles_y)
 
@@ -197,6 +211,35 @@ def generate_floor(
             if shop_candidates and random.random() < 0.7:
                 shop_room = random.choice(shop_candidates)
                 shop_room.tag = "shop"
+
+            # 6) Graveyard room: themed undead encounter room (mid+ floors preferred)
+            graveyard_candidates = [r for r in rooms if r.tag == "generic"]
+            if graveyard_candidates and floor_index >= 2 and random.random() < 0.8:
+                graveyard_room = random.choice(graveyard_candidates)
+                graveyard_room.tag = "graveyard"
+
+            # 7) Sanctum room: safe-ish room for boons / healing (rarer)
+            sanctum_candidates = [r for r in rooms if r.tag == "generic"]
+            if sanctum_candidates and floor_index >= 3 and random.random() < 0.5:
+                sanctum_room = random.choice(sanctum_candidates)
+                sanctum_room.tag = "sanctum"
+
+            # 8) Extra future room tags: armory, library, arena
+            # These are mostly for later content hooks; for now they just mark rooms.
+            armory_candidates = [r for r in rooms if r.tag == "generic"]
+            if armory_candidates and floor_index >= 2 and random.random() < 0.5:
+                armory_room = random.choice(armory_candidates)
+                armory_room.tag = "armory"
+
+            library_candidates = [r for r in rooms if r.tag == "generic"]
+            if library_candidates and floor_index >= 2 and random.random() < 0.5:
+                library_room = random.choice(library_candidates)
+                library_room.tag = "library"
+
+            arena_candidates = [r for r in rooms if r.tag == "generic"]
+            if arena_candidates and floor_index >= 3 and random.random() < 0.4:
+                arena_room = random.choice(arena_candidates)
+                arena_room.tag = "arena"
 
     # Decide stair tiles (still using first/last room centers)
     if rooms:

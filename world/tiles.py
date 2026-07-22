@@ -12,13 +12,13 @@ class Tile:
     color: Tuple[int, int, int]
 
 
-# Base colors
-FLOOR_COLOR = (40, 40, 60)
-WALL_COLOR = (90, 90, 120)
+# Base colors — warm stone dungeon palette
+FLOOR_COLOR = (48, 44, 52)
+WALL_COLOR = (78, 72, 68)
 
 # Stair colors (just for now, we’ll swap to sprites later)
-UP_STAIRS_COLOR = (120, 200, 255)     # bluish
-DOWN_STAIRS_COLOR = (255, 200, 120)   # orangish
+UP_STAIRS_COLOR = (110, 175, 210)     # cool blue
+DOWN_STAIRS_COLOR = (210, 150, 85)    # warm amber
 
 FLOOR_TILE = Tile(
     walkable=True,

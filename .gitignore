@@ -1,17 +1,35 @@
-# Virtual env
-venv/
-.venv/
+﻿# local artifacts
+RESUME_PACK.md
+WIP.patch
+WIP_staged.patch
+repomix-output.xml
 
-# PyCharm
+# runtime logs
+telemetry/*.jsonl
+
+# PyCharm / IDE
 .idea/
 
 # Python cache
 __pycache__/
-*.py[cod]
+**/__pycache__/
+*.pyc
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
 *.pyo
 *.pyd
-*.pdb
 
-# Other junk
-*.log
+# Runtime-generated files
+logs/
+engine/logs/
+saves/
+telemetry/
+
+# IDE and OS
+.idea/
+.vscode/
 .DS_Store
+Thumbs.db

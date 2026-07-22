@@ -31,22 +31,47 @@ def _items_path() -> Path:
     return data_dir / "items.json"
 
 
+def _consumables_path() -> Path:
+    # systems/ -> project root / data / consumables.json
+    here = Path(__file__).resolve()
+    data_dir = here.parent.parent / "data"
+    return data_dir / "consumables.json"
+
+
 def _load_item_definitions() -> None:
     global _ITEM_DEFS, _ITEMS_LOADED
     if _ITEMS_LOADED:
         return
 
-    path = _items_path()
-    if not path.exists():
-        # Quiet fail: project can still run without items, but nothing to load.
-        _ITEM_DEFS = {}
-        _ITEMS_LOADED = True
-        return
+    items_path = _items_path()
+    consumables_path = _consumables_path()
 
     import json
 
-    with path.open("r", encoding="utf-8") as f:
-        raw_list = json.load(f)
+    raw_list = []
+
+    # Core equipment items
+    if items_path.exists():
+        with items_path.open("r", encoding="utf-8") as f:
+            raw_list.extend(json.load(f))
+
+    # Consumables are defined in a separate file but share the same basic
+    # item schema (id, name, slot, stats...). We merge them into the same
+    # ItemDef registry so inventory / UI can treat them uniformly.
+    if consumables_path.exists():
+        with consumables_path.open("r", encoding="utf-8") as f:
+            try:
+                extra = json.load(f)
+                if isinstance(extra, list):
+                    raw_list.extend(extra)
+            except Exception:
+                # Malformed consumables file should not break the rest of items.
+                pass
+
+    if not raw_list:
+        _ITEM_DEFS = {}
+        _ITEMS_LOADED = True
+        return
 
     defs: Dict[str, ItemDef] = {}
     for entry in raw_list:
@@ -100,10 +125,43 @@ class Inventory:
         }
     )
 
-    def add_item(self, item_id: str) -> None:
+    def add_item(self, item_id: str, randomized: bool = True) -> None:
+        """
+        Add an item to inventory.
+        
+        Args:
+            item_id: Item ID to add
+            randomized: If True, apply randomization to the item (default: True)
+        """
         if get_item_def(item_id) is None:
             # Unknown id; ignore for now.
             return
+        
+        # Apply randomization if enabled
+        if randomized:
+            try:
+                from .item_randomization import randomize_item
+                floor_index = getattr(self, "_current_floor", 1)  # Default to 1 if not set
+                randomized_item = randomize_item(item_id, floor_index)
+                if randomized_item is not None:
+                    base_item = get_item_def(item_id)
+                    # Only use randomized version if it's actually different
+                    if base_item and randomized_item.stats != base_item.stats:
+                        # Store randomized version in a special registry
+                        if not hasattr(self, "_randomized_items"):
+                            self._randomized_items: Dict[str, ItemDef] = {}
+                        # Use a special ID format to track randomized items
+                        # Format: "item_id:random_seed" where seed is based on item position
+                        seed = len(self.items)
+                        random_id = f"{item_id}:{seed}"
+                        self._randomized_items[random_id] = randomized_item
+                        self.items.append(random_id)
+                        return
+            except ImportError:
+                # Randomization system not available, fall through to normal add
+                pass
+        
+        # Normal add (no randomization or randomization disabled)
         self.items.append(item_id)
 
     def remove_item(self, item_id: str) -> None:
@@ -146,7 +204,7 @@ class Inventory:
         Equip an item by id. Returns a human-readable message.
         If the item is not equippable (e.g. consumable), does nothing.
         """
-        item = get_item_def(item_id)
+        item = self._get_item_def(item_id)
         if item is None:
             return "You don't recognise how to use that."
 
@@ -163,7 +221,7 @@ class Inventory:
         if previous is None:
             return f"You equip {item.name}."
         else:
-            prev_item = get_item_def(previous)
+            prev_item = self._get_item_def(previous)
             prev_name = prev_item.name if prev_item else "something"
             return f"You swap {prev_name} for {item.name}."
 
@@ -178,19 +236,70 @@ class Inventory:
     # --- Helpers for the game / UI ---
 
     def get_equipped_item(self, slot: str) -> Optional[ItemDef]:
+        """
+        Get the ItemDef for an equipped item, including randomized versions.
+        """
         item_id = self.equipped.get(slot)
         if not item_id:
             return None
+        
+        # Check if this is a randomized item
+        if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+            return self._randomized_items[item_id]
+        
+        # Check if item_id contains a random seed (format: "base_id:seed")
+        if ":" in item_id:
+            base_id = item_id.split(":")[0]
+            if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+                return self._randomized_items[item_id]
+            # Fall back to base item if randomized version not found
+            return get_item_def(base_id)
+        
         return get_item_def(item_id)
 
     def get_items_by_slot(self, slot: str) -> List[ItemDef]:
+        """
+        Get all items in a slot, including randomized versions.
+        """
         result: List[ItemDef] = []
         for item_id in self.items:
-            item = get_item_def(item_id)
+            # Check for randomized item
+            item = None
+            if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+                item = self._randomized_items[item_id]
+            elif ":" in item_id:
+                # Try to get randomized version
+                if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+                    item = self._randomized_items[item_id]
+                else:
+                    # Fall back to base item
+                    base_id = item_id.split(":")[0]
+                    item = get_item_def(base_id)
+            else:
+                item = get_item_def(item_id)
+            
             if item is not None and item.slot == slot:
                 result.append(item)
         return result
 
+    def _get_item_def(self, item_id: str) -> Optional[ItemDef]:
+        """
+        Get ItemDef for an item, checking for randomized versions first.
+        """
+        # Check for randomized item
+        if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+            return self._randomized_items[item_id]
+        
+        # Check if item_id contains a random seed (format: "base_id:seed")
+        if ":" in item_id:
+            base_id = item_id.split(":")[0]
+            if hasattr(self, "_randomized_items") and item_id in self._randomized_items:
+                return self._randomized_items[item_id]
+            # Fall back to base item if randomized version not found
+            return get_item_def(base_id)
+        
+        return get_item_def(item_id)
+    
     def total_stat_modifiers(self) -> Dict[str, float]:
         """
         Sum up all stat bonuses from currently equipped items.
@@ -201,7 +310,7 @@ class Inventory:
         for slot, item_id in self.equipped.items():
             if not item_id:
                 continue
-            item = get_item_def(item_id)
+            item = self._get_item_def(item_id)
             if item is None:
                 continue
             for stat_name, value in item.stats.items():

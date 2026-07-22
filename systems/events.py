@@ -121,6 +121,74 @@ def risky_cache_handler(game) -> EventResult:
     return EventResult(text=text)
 
 
+def sanctuary_font_handler(game) -> EventResult:
+    """
+    Sanctuary Font: restores HP to the party and sometimes cures debuffs.
+    Intended to appear more often in 'sanctum' rooms.
+    """
+    heal_amount = random.randint(15, 30)
+
+    # Heal hero
+    if game.player is not None:
+        # Player stores current and max HP on the hero stats
+        if hasattr(game.hero_stats, "max_hp"):
+            max_hp = getattr(game.hero_stats, "max_hp")
+            new_hp = min(max_hp, game.player.hp + heal_amount)
+            delta = new_hp - game.player.hp
+            game.player.hp = new_hp
+        else:
+            # Fallback if max_hp is not tracked here
+            delta = heal_amount
+            game.player.hp += heal_amount
+    else:
+        delta = 0
+
+    # Light XP bonus
+    xp = random.randint(10, 20)
+    game.gain_xp_from_event(xp)
+
+    text = "A soothing light washes over you. "
+    if delta > 0:
+        text += f"You recover {delta} HP. "
+    text += "You feel renewed and ready to press on."
+
+    return EventResult(text=text, xp_gain=xp)
+
+
+def cursed_tomb_handler(game) -> EventResult:
+    """
+    Cursed Tomb: graveyard-style high risk / high reward interaction.
+    """
+    roll = random.random()
+
+    # 40%: good loot
+    if roll < 0.4:
+        gold = random.randint(40, 120)
+        gained = game.hero_stats.add_gold(gold)
+        text = f"You pry open the tomb and uncover {gained} gold."
+        return EventResult(text=text, gold_gain=gained)
+
+    # 40%: XP + small damage
+    if roll < 0.8:
+        dmg = random.randint(5, 15)
+        if game.player is not None:
+            game.player.hp = max(0, game.player.hp - dmg)
+        xp = random.randint(15, 35)
+        game.gain_xp_from_event(xp)
+        text = (
+            f"A vengeful spirit lashes out, dealing {dmg} damage, "
+            f"but you resist and gain insight ({xp} XP)."
+        )
+        return EventResult(text=text, xp_gain=xp)
+
+    # 20%: mostly bad
+    dmg = random.randint(10, 25)
+    if game.player is not None:
+        game.player.hp = max(0, game.player.hp - dmg)
+    text = "The tomb erupts with cursed energy, searing your flesh."
+    return EventResult(text=text)
+
+
 # -------------------------------------------------------------
 # Register events
 # -------------------------------------------------------------
@@ -131,6 +199,24 @@ register(
         "Shrine of Power",
         "An ancient altar hums with dormant energy.",
         shrine_of_power_handler,
+    )
+)
+
+register(
+    EventDef(
+        "sanctuary_font",
+        "Sanctuary Font",
+        "A radiant pool of light shimmers quietly here.",
+        sanctuary_font_handler,
+    )
+)
+
+register(
+    EventDef(
+        "cursed_tomb",
+        "Cursed Tomb",
+        "An ominous stone sarcophagus radiates cold dread.",
+        cursed_tomb_handler,
     )
 )
 

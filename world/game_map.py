@@ -1,6 +1,7 @@
 # world/game_map.py
 
 from typing import List, Tuple, Set
+import math
 
 import pygame
 
@@ -159,11 +160,63 @@ class GameMap:
                 return False
         return True
 
+    def _cast_ray(self, x0: int, y0: int, x1: int, y1: int, radius_sq: int) -> Set[Tuple[int, int]]:
+        """
+        Cast a ray from (x0, y0) to (x1, y1) and return all visible tiles along the way.
+        Stops when hitting a wall or going out of bounds.
+        Uses a more accurate line algorithm that handles diagonals better.
+        """
+        visible = set()
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        
+        x, y = x0, y0
+        
+        while True:
+            # Check if we're still within radius
+            dist_sq = (x - x0) * (x - x0) + (y - y0) * (y - y0)
+            if dist_sq > radius_sq:
+                break
+                
+            # Check bounds
+            if not self.in_bounds(x, y):
+                break
+                
+            # Add this tile to visible
+            visible.add((x, y))
+            
+            # Stop if we hit a blocking tile (but still mark it as visible)
+            if self.blocks_sight(x, y):
+                break
+                
+            # Stop if we reached the target
+            if x == x1 and y == y1:
+                break
+                
+            # Bresenham's line algorithm
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+                
+        return visible
+
     def compute_fov(self, center_tx: int, center_ty: int, radius: int = 8) -> None:
         """
-        Recompute FOV from (center_tx, center_ty).
+        Recompute FOV from (center_tx, center_ty) using improved raycasting.
+        Casts rays to all perimeter tiles to create smooth, circular FOV without diagonal artifacts.
         Fills self.visible and updates self.explored.
+        
+        Once a tile is explored, it stays in self.explored permanently,
+        allowing it to remain visible (dimmed) even when out of FOV.
         """
+        # Clear only visible tiles (not explored - those persist)
         self.visible.clear()
 
         if not self.in_bounds(center_tx, center_ty):
@@ -175,23 +228,30 @@ class GameMap:
         self.visible.add((center_tx, center_ty))
         self.explored.add((center_tx, center_ty))
 
-        for ty in range(center_ty - radius, center_ty + radius + 1):
-            for tx in range(center_tx - radius, center_tx + radius + 1):
-                if not self.in_bounds(tx, ty):
-                    continue
-                dx = tx - center_tx
-                dy = ty - center_ty
-                if dx * dx + dy * dy > radius_sq:
-                    continue
-                if (tx, ty) == (center_tx, center_ty):
-                    continue
-                if self._line_of_sight(center_tx, center_ty, tx, ty):
-                    self.visible.add((tx, ty))
-                    self.explored.add((tx, ty))
+        # Cast rays in evenly spaced directions for smooth, circular FOV
+        # Use 8 * radius rays for good coverage (more rays = smoother, but slower)
+        num_rays = max(32, radius * 8)
+        
+        for i in range(num_rays):
+            angle = 2 * math.pi * i / num_rays
+            # Calculate target point on the circle perimeter
+            target_x = center_tx + int(radius * math.cos(angle))
+            target_y = center_ty + int(radius * math.sin(angle))
+            
+            # Cast ray and add all visible tiles
+            visible_tiles = self._cast_ray(center_tx, center_ty, target_x, target_y, radius_sq)
+            self.visible.update(visible_tiles)
+            self.explored.update(visible_tiles)
 
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tile_variation(x: int, y: int, salt: int = 0) -> int:
+        """Stable -8..+8 style variation for tile shading."""
+        h = (x * 73856093) ^ (y * 19349663) ^ (salt * 83492791)
+        return (h % 17) - 8
 
     def draw(
             self,
@@ -204,53 +264,170 @@ class GameMap:
         Draw all tiles with fog-of-war, taking camera & zoom into account.
 
         - Never seen              -> black
-        - Explored, not visible   -> darkened
+        - Explored, not visible   -> slightly dimmed but clearly visible (stays "lit")
         - Visible now             -> full color
         """
+        from world.tiles import FLOOR_TILE, WALL_TILE, UP_STAIRS_TILE, DOWN_STAIRS_TILE
+
         screen_w, screen_h = surface.get_size()
 
         if zoom <= 0:
             zoom = 1.0
 
-        tile_screen_size = int(TILE_SIZE * zoom)
-        if tile_screen_size <= 0:
-            return
+        # Approximate size for culling / detail thresholds only.
+        # Actual draw size is derived per-tile from neighbor edges so zoom
+        # never leaves 1px black seams from independent int() rounding.
+        tile_screen_size = max(1, int(TILE_SIZE * zoom))
 
         for y, row in enumerate(self.tiles):
-            world_y = y * TILE_SIZE
-            sy = int((world_y - camera_y) * zoom)
+            sy = int((y * TILE_SIZE - camera_y) * zoom)
+            next_sy = int(((y + 1) * TILE_SIZE - camera_y) * zoom)
+            tile_h = max(1, next_sy - sy)
 
             # Skip row if it's completely off-screen vertically
-            if sy >= screen_h or sy + tile_screen_size <= 0:
+            if sy >= screen_h or next_sy <= 0:
                 continue
 
             for x, tile in enumerate(row):
-                world_x = x * TILE_SIZE
-                sx = int((world_x - camera_x) * zoom)
+                sx = int((x * TILE_SIZE - camera_x) * zoom)
+                next_sx = int(((x + 1) * TILE_SIZE - camera_x) * zoom)
+                tile_w = max(1, next_sx - sx)
 
                 # Skip tile if it's completely off-screen horizontally
-                if sx >= screen_w or sx + tile_screen_size <= 0:
+                if sx >= screen_w or next_sx <= 0:
                     continue
 
                 coord = (x, y)
-                rect = pygame.Rect(sx, sy, tile_screen_size, tile_screen_size)
+                rect = pygame.Rect(sx, sy, tile_w, tile_h)
 
                 if coord not in self.explored:
-                    # Completely unseen
+                    # Completely unseen - pure black
                     pygame.draw.rect(surface, (0, 0, 0), rect)
                     continue
 
-                base_color = tile.color
-                if coord in self.visible:
-                    color = base_color
-                else:
-                    # Seen before, but not in current FOV
-                    factor = 0.6  # dim but clearly different from black
-                    color = (
-                        int(base_color[0] * factor),
-                        int(base_color[1] * factor),
-                        int(base_color[2] * factor),
+                # Try to use sprite first, fallback to color-based rendering
+                sprite_used = False
+                try:
+                    from engine.sprites.sprites import get_sprite_manager, SpriteCategory
+                    from engine.sprites.sprite_registry import get_registry, TileSpriteType
+                    
+                    sprite_manager = get_sprite_manager()
+                    registry = get_registry()
+                    
+                    # Determine tile type
+                    if tile == FLOOR_TILE:
+                        tile_type = TileSpriteType.FLOOR
+                    elif tile == WALL_TILE:
+                        tile_type = TileSpriteType.WALL
+                    elif tile == UP_STAIRS_TILE:
+                        tile_type = TileSpriteType.UP_STAIRS
+                    elif tile == DOWN_STAIRS_TILE:
+                        tile_type = TileSpriteType.DOWN_STAIRS
+                    else:
+                        tile_type = TileSpriteType.FLOOR  # Default fallback
+                    
+                    sprite_id = registry.get_tile_sprite_id(tile_type)
+                    
+                    sprite = sprite_manager.get_sprite(
+                        SpriteCategory.TILE,
+                        sprite_id,
+                        fallback_color=None,  # Don't use fallback, we'll use color-based if missing
+                        size=(tile_w, tile_h),
                     )
+                    
+                    if sprite and not sprite_manager.is_sprite_fallback(sprite):
+                        # Use sprite (it's a real sprite, not a fallback)
+                        # Adjust brightness for visibility
+                        if coord in self.visible:
+                            # Currently visible - full brightness
+                            sprite_surface = sprite
+                            if sprite.get_size() != (tile_w, tile_h):
+                                sprite_surface = pygame.transform.scale(sprite, (tile_w, tile_h))
+                        else:
+                            # Explored but not currently visible - slightly dimmed
+                            factor = 0.85
+                            sprite_surface = sprite.copy()
+                            if sprite_surface.get_size() != (tile_w, tile_h):
+                                sprite_surface = pygame.transform.scale(sprite_surface, (tile_w, tile_h))
+                            sprite_surface.set_alpha(int(255 * factor))
+                        
+                        surface.blit(sprite_surface, rect)
+                        sprite_used = True
+                except Exception:
+                    pass  # Fall through to color-based rendering
+                
+                # Fallback: Color-based rendering with subtle per-tile variation
+                if not sprite_used:
+                    base_color = tile.color
+                    var = self._tile_variation(x, y)
+                    color = (
+                        max(0, min(255, base_color[0] + var)),
+                        max(0, min(255, base_color[1] + var // 2)),
+                        max(0, min(255, base_color[2] + var // 3)),
+                    )
+                    if coord not in self.visible:
+                        # Explored but not currently visible - stays "lit" but slightly dimmed
+                        factor = 0.82
+                        color = (
+                            int(color[0] * factor),
+                            int(color[1] * factor),
+                            int(color[2] * factor),
+                        )
 
-                pygame.draw.rect(surface, color, rect)
+                    pygame.draw.rect(surface, color, rect)
+
+                    # Lightweight stone detail only for currently visible tiles
+                    if coord in self.visible and min(tile_w, tile_h) >= 18:
+                        if tile == WALL_TILE:
+                            # Horizontal mortar line
+                            line_y = sy + tile_h // 2
+                            mortar = (
+                                max(0, color[0] - 18),
+                                max(0, color[1] - 16),
+                                max(0, color[2] - 14),
+                            )
+                            pygame.draw.line(
+                                surface,
+                                mortar,
+                                (sx + 1, line_y),
+                                (sx + tile_w - 2, line_y),
+                                1,
+                            )
+                            # Vertical brick break offset by row
+                            break_x = sx + (tile_w // 3 if (y % 2) else (2 * tile_w // 3))
+                            pygame.draw.line(
+                                surface,
+                                mortar,
+                                (break_x, sy + 1),
+                                (break_x, sy + tile_h - 2),
+                                1,
+                            )
+                        elif tile == FLOOR_TILE:
+                            # Occasional speck / flagstone hint
+                            detail_h = self._tile_variation(x, y, 9)
+                            if detail_h > 4:
+                                speck = (
+                                    min(255, color[0] + 12),
+                                    min(255, color[1] + 10),
+                                    min(255, color[2] + 8),
+                                )
+                                px = sx + 3 + (abs(detail_h) % max(1, tile_w - 6))
+                                py = sy + 3 + (abs(self._tile_variation(x, y, 2)) % max(1, tile_h - 6))
+                                pygame.draw.rect(surface, speck, (px, py, 2, 2))
+                
+                # Draw stairs symbols to make them more obvious
+                if tile == UP_STAIRS_TILE and coord in self.explored:
+                    # Draw up arrow (^) on stairs up
+                    arrow_font = pygame.font.Font(None, max(12, int(min(tile_w, tile_h) * 0.6)))
+                    arrow_text = arrow_font.render("^", True, (255, 255, 255))
+                    arrow_x = sx + (tile_w - arrow_text.get_width()) // 2
+                    arrow_y = sy + (tile_h - arrow_text.get_height()) // 2
+                    surface.blit(arrow_text, (arrow_x, arrow_y))
+                elif tile == DOWN_STAIRS_TILE and coord in self.explored:
+                    # Draw down arrow (v) on stairs down
+                    arrow_font = pygame.font.Font(None, max(12, int(min(tile_w, tile_h) * 0.6)))
+                    arrow_text = arrow_font.render("v", True, (255, 255, 255))
+                    arrow_x = sx + (tile_w - arrow_text.get_width()) // 2
+                    arrow_y = sy + (tile_h - arrow_text.get_height()) // 2
+                    surface.blit(arrow_text, (arrow_x, arrow_y))
 

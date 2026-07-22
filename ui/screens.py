@@ -1,246 +1,884 @@
-import pygame
-from typing import Optional, Protocol, TYPE_CHECKING
+"""Lightweight screen / overlay system for modal UI/overlays.
 
-from ui.hud import draw_perk_choice_overlay
-from systems import perks as perk_system
-from systems.party import get_companion, recalc_companion_stats_for_level
+This module contains screen controllers for various UI overlays:
+- Inventory screen
+- Character sheet screen  
+- Shop screen
+
+Each screen owns its own input-handling + drawing, and Game forwards
+events/draw calls to the active screen when appropriate.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Protocol, TYPE_CHECKING, Dict, List, Tuple
+
+import pygame
+
+from ui.hud_screens import (
+    draw_inventory_fullscreen,
+    draw_character_sheet_fullscreen,
+    draw_shop_fullscreen,
+    draw_skill_screen_fullscreen,
+)
+from systems.input import InputAction
 
 if TYPE_CHECKING:
-    from engine.game import Game
+    from engine.core.game import Game
 
 
 class BaseScreen(Protocol):
-    """
-    Simple protocol for UI screens that can receive events and draw themselves.
-    """
-    def handle_event(self, game: "Game", event: pygame.event.Event) -> None: ...
-    def draw(self, game: "Game") -> None: ...
-
-
-class PerkChoiceScreen:
-    """
-    Thin helper around the perk-choice overlay.
-
-    All persistent state (pending choices, queues, hero/companion stats)
-    still lives on the Game instance. This class wires input + drawing and
-    provides helpers for queueing and starting perk-choice flows.
-    """
-
-    # -------- Queue management helpers --------
-
-    def enqueue_perk_choice(
-        self,
-        game: "Game",
-        owner: str,
-        companion_index: Optional[int] = None,
-    ) -> None:
-        """Push a perk choice for the given owner into the queue.
-
-        Parameters
-        ----------
-        owner:
-            Either "hero" or "companion".
-        companion_index:
-            Index into ``game.party`` when ``owner == "companion"``.
-        """
-        if owner not in ("hero", "companion"):
-            return
-
-        # The queue itself still lives on the Game.
-        if not hasattr(game, "perk_choice_queue") or game.perk_choice_queue is None:
-            game.perk_choice_queue = []  # type: ignore[attr-defined]
-
-        game.perk_choice_queue.append((owner, companion_index))
-
-    def start_next_perk_choice(self, game: "Game") -> None:
-        """Pop the next queued perk owner and open the overlay if possible.
-
-        Mirrors the old ``_start_next_perk_choice`` logic, but keeps it
-        co-located with the perk-choice screen.
-        """
-        # Reset current owner + choices.
-        game.pending_perk_choices = []
-        game.perk_choice_owner = None
-        game.perk_choice_companion_index = None
-
-        # Defensive default if the queue is missing.
-        queue = getattr(game, "perk_choice_queue", None)
-        if queue is None:
-            return
-
-        from engine.game import GameMode  # local import to avoid cycles
-
-        while queue:
-            owner, companion_index = queue.pop(0)
-
-            if owner == "hero":
-                choices = perk_system.pick_perk_choices(game.hero_stats, max_choices=3)
-                target_label = "Hero"
-
-            elif (
-                owner == "companion"
-                and companion_index is not None
-                and 0 <= companion_index < len(game.party)
-            ):
-                comp_state = game.party[companion_index]
-
-                # Use the same perk system but operating on the companion state.
-                choices = perk_system.pick_perk_choices(comp_state, max_choices=3)
-
-                # Try to build a friendly label for the overlay.
-                display_name = getattr(comp_state, "name_override", None)
-                if not display_name:
-                    display_name = getattr(comp_state, "name", None)
-                if not display_name:
-                    try:
-                        template_for_name = get_companion(comp_state.template_id)
-                    except Exception:
-                        template_for_name = None
-                    if template_for_name is not None:
-                        display_name = getattr(template_for_name, "name", None)
-                if not display_name:
-                    display_name = f"Companion {companion_index + 1}"
-
-                target_label = display_name
-            else:
-                # Invalid entry, move on.
-                continue
-
-            if not choices:
-                # No valid perks for this owner; skip to the next entry in queue.
-                continue
-
-            # Activate this owner + choices.
-            game.pending_perk_choices = choices
-            game.perk_choice_owner = owner
-            game.perk_choice_companion_index = companion_index
-
-            # Switch to perk-choice overlay via the Game helper if it exists.
-            if hasattr(game, "enter_perk_choice_mode"):
-                game.enter_perk_choice_mode()
-            else:
-                game.mode = GameMode.PERK_CHOICE  # type: ignore[assignment]
-
-            # Optional: a message so the log shows whose perk this is.
-            if game.perk_choice_owner == "hero":
-                game.add_message("Level up! Choose a new perk for your hero.")
-            else:
-                game.add_message(f"{target_label} reached a new level! Choose a new perk.")
-
-            return
-
-        # If we ran out of entries, make sure we are back in exploration mode
-        # (unless some other mode has taken over).
-        if getattr(game, "mode", None) == GameMode.PERK_CHOICE:
-            if hasattr(game, "enter_exploration_mode"):
-                game.enter_exploration_mode()
-            else:
-                game.mode = GameMode.EXPLORATION  # type: ignore[assignment]
-
-    # -------- Input & drawing --------
+    """Protocol for simple modal/overlay screens."""
 
     def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
-        """Handle input while the perk-choice overlay is open."""
+        ...
+
+    def draw(self, game: "Game") -> None:
+        ...
+
+
+class InventoryScreen:
+    """
+    Screen wrapper for the inventory/equipment overlay.
+
+    This delegates all rendering to hud.draw_inventory_overlay and centralises
+    the input logic for:
+      - closing the overlay (I / ESC)
+      - cycling focused character (Q / E)
+      - equipping items via number keys 1–9
+    """
+
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        # Handle mouse events for tooltips
+        if event.type == pygame.MOUSEMOTION:
+            mx, my = event.pos
+            # Check if mouse is over an item (this will be handled in draw_inventory_fullscreen)
+            game.tooltip.mouse_pos = (mx, my)
+            return
+        
         if event.type != pygame.KEYDOWN:
             return
 
-        # Cancel perk selection with ESC: clear everything and go back to exploration.
-        if event.key == pygame.K_ESCAPE:
-            game.pending_perk_choices = []
-            game.perk_choice_queue = []
-            game.perk_choice_owner = None
-            game.perk_choice_companion_index = None
-            game.enter_exploration_mode()
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
             return
-
-        if not game.pending_perk_choices:
+        
+        # Quick jump to screens
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
             return
-
-        index: Optional[int] = None
-        if event.key in (pygame.K_1, pygame.K_KP1):
-            index = 0
-        elif event.key in (pygame.K_2, pygame.K_KP2):
-            index = 1
-        elif event.key in (pygame.K_3, pygame.K_KP3):
-            index = 2
-
-        if index is None:
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
             return
-        if not (0 <= index < len(game.pending_perk_choices)):
-            return
-
-        chosen = game.pending_perk_choices[index]
-
-        # ----- Apply perk to the correct owner -----
-
-        if game.perk_choice_owner == "hero":
-            # Make sure we track owned perk ids on the hero.
-            if not hasattr(game.hero_stats, "perks"):
-                game.hero_stats.perks = []
-            if chosen.id not in game.hero_stats.perks:
-                game.hero_stats.perks.append(chosen.id)
-
-            # Apply stat changes / granted skills to hero_stats.
-            chosen.apply(game.hero_stats)
-
-            # Mirror updated stats onto the player entity (no extra heal here).
-            if game.player is not None:
-                game.apply_hero_stats_to_player(full_heal=False)
-
-            game.add_message(f"You learn a new perk: {chosen.name}")
-
-        elif (
-                game.perk_choice_owner == "companion"
-                and game.perk_choice_companion_index is not None
-        ):
-            if 0 <= game.perk_choice_companion_index < len(game.party):
-                comp_state = game.party[game.perk_choice_companion_index]
-
-                # Record perk on the companion (data only).
-                if chosen.id not in comp_state.perks:
-                    comp_state.perks.append(chosen.id)
-
-                # Recompute stats from template + level + perks.
-                template = None
-                try:
-                    template = get_companion(comp_state.template_id)
-                except Exception:
-                    template = None
-
-                if template is not None:
-                    recalc_companion_stats_for_level(comp_state, template)
-
-                # Build a safe display name
-                display_name = getattr(comp_state, "name_override", None)
-                if not display_name:
-                    display_name = getattr(comp_state, "name", None)
-                if not display_name and template is not None:
-                    display_name = getattr(template, "name", None)
-                if not display_name:
-                    display_name = "Companion"
-
-                game.add_message(
-                    f"{display_name} learns a new perk: {chosen.name}"
-                )
-
-        # ----- Clear current choice and continue with queue -----
-
-        game.pending_perk_choices = []
-        game.perk_choice_owner = None
-        game.perk_choice_companion_index = None
-
-        if game.perk_choice_queue:
-            # Start the next queued perk-choice.
-            self.start_next_perk_choice(game)
+        
+        # Close inventory overlay (I or ESC)
+        should_close = False
+        if input_manager is not None:
+            if (
+                    input_manager.event_matches_action(InputAction.TOGGLE_INVENTORY, event)
+                    or input_manager.event_matches_action(InputAction.CANCEL, event)
+            ):
+                should_close = True
         else:
-            # No more queued level-ups; return to exploration.
-            game.enter_exploration_mode()
+            if key in (pygame.K_ESCAPE, pygame.K_i):
+                should_close = True
+
+        if should_close:
+            # Use the game helper so open/close semantics stay centralised.
+            game.toggle_inventory_overlay()
+            # If the inventory screen no longer owns focus, release it.
+            if not game.show_inventory and getattr(game, "active_screen", None) is self:
+                game.active_screen = None
+            return
+
+        # Cycle focus between hero and companions (Q / E)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.FOCUS_PREV, event):
+                game.cycle_inventory_focus(-1)
+                return
+            if input_manager.event_matches_action(InputAction.FOCUS_NEXT, event):
+                game.cycle_inventory_focus(+1)
+                return
+        else:
+            if key == pygame.K_q:
+                game.cycle_inventory_focus(-1)
+                return
+            if key == pygame.K_e:
+                game.cycle_inventory_focus(+1)
+                return
+
+        # Get inventory
+        inventory = getattr(game, "inventory", None)
+        if inventory is None:
+            return
+
+        # Apply the same filtering, sorting, and search as the display code
+        from ui.inventory_enhancements import FilterMode, SortMode, filter_items, sort_items, search_items
+        from ui.hud_screens import _get_all_equipped_items
+        
+        filter_mode = getattr(game, "inventory_filter", FilterMode.ALL)
+        sort_mode = getattr(game, "inventory_sort", SortMode.DEFAULT)
+        search_query = getattr(game, "inventory_search", "") or ""
+        
+        all_items = list(inventory.items)
+        all_equipped = _get_all_equipped_items(game)
+        
+        # Apply search first
+        filtered_items = search_items(all_items, search_query, inventory)
+        
+        # Apply filter
+        filtered_items = filter_items(filtered_items, filter_mode, inventory, all_equipped)
+        
+        # Apply sorting
+        sorted_items = sort_items(filtered_items, sort_mode, inventory)
+        
+        # Group items by slot/category (for display with category headers)
+        items_by_slot: Dict[str, List[str]] = {}
+        for item_id in sorted_items:
+            # Use inventory's method to resolve randomized items
+            if hasattr(inventory, "_get_item_def"):
+                item_def = inventory._get_item_def(item_id)
+            else:
+                from systems.inventory import get_item_def
+                item_def = get_item_def(item_id)
+            if item_def is None:
+                slot = "misc"
+            else:
+                slot = item_def.slot or "misc"
+            if slot not in items_by_slot:
+                items_by_slot[slot] = []
+            items_by_slot[slot].append(item_id)
+        
+        # Build flat list with category markers: (item_id or None for category header, slot_name)
+        flat_list: List[tuple[Optional[str], str]] = []
+        slot_order = ["weapon", "armor", "trinket", "consumable", "misc"]
+        
+        # If sorting is not default, don't show category headers
+        show_categories = sort_mode == SortMode.DEFAULT
+        
+        if show_categories:
+            for slot in slot_order:
+                if slot in items_by_slot and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+            
+            # Add any remaining slots not in the preferred order
+            for slot in sorted(items_by_slot.keys()):
+                if slot not in slot_order and items_by_slot[slot]:
+                    flat_list.append((None, slot))  # Category header
+                    for item_id in items_by_slot[slot]:
+                        flat_list.append((item_id, slot))
+        else:
+            # No category headers when sorting
+            for item_id in sorted_items:
+                if hasattr(inventory, "_get_item_def"):
+                    item_def = inventory._get_item_def(item_id)
+                else:
+                    from systems.inventory import get_item_def
+                    item_def = get_item_def(item_id)
+                slot = item_def.slot if item_def else "misc"
+                flat_list.append((item_id, slot))
+        
+        cursor = getattr(game, "inventory_cursor", 0)
+        page_size = getattr(game, "inventory_page_size", 20)
+        
+        # Find the actual item index (skip category headers)
+        item_indices = [i for i, (item_id, _) in enumerate(flat_list) if item_id is not None]
+        if not item_indices:
+            return
+        
+        # Clamp cursor to valid range
+        cursor = max(0, min(cursor, len(item_indices) - 1))
+        game.inventory_cursor = cursor
+        
+        # Cursor navigation (up / down)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.SCROLL_UP, event):
+                if cursor > 0:
+                    game.inventory_cursor = cursor - 1
+                return
+            if input_manager.event_matches_action(InputAction.SCROLL_DOWN, event):
+                if cursor < len(item_indices) - 1:
+                    game.inventory_cursor = cursor + 1
+                return
+        else:
+            if key in (pygame.K_UP, pygame.K_w):
+                if cursor > 0:
+                    game.inventory_cursor = cursor - 1
+                return
+            if key in (pygame.K_DOWN, pygame.K_s):
+                if cursor < len(item_indices) - 1:
+                    game.inventory_cursor = cursor + 1
+                return
+
+        # Page scroll (move cursor by page_size)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.PAGE_UP, event):
+                game.inventory_cursor = max(0, cursor - page_size)
+                return
+            if input_manager.event_matches_action(InputAction.PAGE_DOWN, event):
+                game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
+                return
+        else:
+            if key == pygame.K_PAGEUP:
+                game.inventory_cursor = max(0, cursor - page_size)
+                return
+            if key == pygame.K_PAGEDOWN:
+                game.inventory_cursor = min(len(item_indices) - 1, cursor + page_size)
+                return
+
+        # Filter shortcuts (F1-F7)
+        from ui.inventory_enhancements import FilterMode
+        if key == pygame.K_F1:
+            game.inventory_filter = FilterMode.ALL
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F2:
+            game.inventory_filter = FilterMode.WEAPON
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F3:
+            game.inventory_filter = FilterMode.ARMOR
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F4:
+            game.inventory_filter = FilterMode.TRINKET
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F5:
+            game.inventory_filter = FilterMode.CONSUMABLE
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F6:
+            game.inventory_filter = FilterMode.EQUIPPED
+            game.inventory_cursor = 0
+            return
+        elif key == pygame.K_F7:
+            game.inventory_filter = FilterMode.UNEQUIPPED
+            game.inventory_cursor = 0
+            return
+        
+        # Sort shortcuts (Ctrl+S cycles through sort modes)
+        from ui.inventory_enhancements import SortMode
+        mods = pygame.key.get_mods()
+        if key == pygame.K_s and (mods & pygame.KMOD_CTRL):
+            # Cycle through sort modes
+            sort_modes = [
+                SortMode.DEFAULT,
+                SortMode.NAME,
+                SortMode.RARITY,
+                SortMode.ATTACK,
+                SortMode.DEFENSE,
+                SortMode.HP,
+            ]
+            current_index = sort_modes.index(game.inventory_sort) if game.inventory_sort in sort_modes else 0
+            next_index = (current_index + 1) % len(sort_modes)
+            game.inventory_sort = sort_modes[next_index]
+            game.inventory_cursor = 0
+            return
+        
+        # Search mode toggle (Ctrl+F to start typing search query)
+        if key == pygame.K_f and (mods & pygame.KMOD_CTRL):
+            # Toggle search mode - for now just clear search
+            # In a full implementation, you'd enter a text input mode
+            game.inventory_search = ""
+            game.inventory_cursor = 0
+            return
+        
+        # Clear filter/sort/search (Ctrl+R)
+        if key == pygame.K_r and (mods & pygame.KMOD_CTRL):
+            game.inventory_filter = FilterMode.ALL
+            game.inventory_sort = SortMode.DEFAULT
+            game.inventory_search = ""
+            game.inventory_cursor = 0
+            return
+        
+        # Handle text input for search (when not a special key)
+        if game.inventory_search is not None:
+            # Simple search: type to search, backspace to clear
+            if key == pygame.K_BACKSPACE:
+                game.inventory_search = game.inventory_search[:-1] if game.inventory_search else ""
+                game.inventory_cursor = 0
+                return
+            elif 32 <= key <= 126:  # Printable ASCII
+                char = chr(key)
+                if not (mods & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_META)):
+                    game.inventory_search = (game.inventory_search or "") + char
+                    game.inventory_cursor = 0
+                    return
+        
+        # Equip or use selected item with Enter/Space
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                if 0 <= cursor < len(item_indices):
+                    item_id = flat_list[item_indices[cursor]][0]
+                    if item_id:
+                        inv = getattr(game, "inventory", None)
+                        # Use inventory's method to resolve randomized items
+                        if inv and hasattr(inv, "_get_item_def"):
+                            item_def = inv._get_item_def(item_id)
+                        else:
+                            from systems.inventory import get_item_def
+                            item_def = get_item_def(item_id)
+                        if item_def is not None and item_def.slot == "consumable":
+                            # Use consumable instead of equipping it.
+                            if hasattr(game, "use_consumable_from_inventory"):
+                                game.use_consumable_from_inventory(item_id)
+                        else:
+                            game.equip_item_for_inventory_focus(item_id)
+                return
+        else:
+            if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                if 0 <= cursor < len(item_indices):
+                    item_id = flat_list[item_indices[cursor]][0]
+                    if item_id:
+                        inv = getattr(game, "inventory", None)
+                        # Use inventory's method to resolve randomized items
+                        if inv and hasattr(inv, "_get_item_def"):
+                            item_def = inv._get_item_def(item_id)
+                        else:
+                            from systems.inventory import get_item_def
+                            item_def = get_item_def(item_id)
+                        if item_def is not None and item_def.slot == "consumable":
+                            if hasattr(game, "use_consumable_from_inventory"):
+                                game.use_consumable_from_inventory(item_id)
+                        else:
+                            game.equip_item_for_inventory_focus(item_id)
+                return
 
     def draw(self, game: "Game") -> None:
-        """
-        Draw only the perk-choice overlay.
+        """Render the full-screen inventory view."""
+        draw_inventory_fullscreen(game)
 
-        Game.draw() is responsible for drawing the underlying world view
-        (exploration / battle). This method just adds the perk UI on top.
-        """
-        draw_perk_choice_overlay(game)
+
+class CharacterSheetScreen:
+    """
+    Screen wrapper for the character sheet overlay.
+
+    Delegates drawing to hud._draw_character_sheet, and owns the basic input:
+      - closing (C / ESC)
+      - cycling focused character (Q / E)
+    """
+
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        if event.type != pygame.KEYDOWN:
+            return
+
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+        
+        # Close character sheet (C or ESC)
+        should_close = False
+        if input_manager is not None:
+            if (
+                    input_manager.event_matches_action(InputAction.TOGGLE_CHARACTER_SHEET, event)
+                    or input_manager.event_matches_action(InputAction.CANCEL, event)
+            ):
+                should_close = True
+        else:
+            if key in (pygame.K_ESCAPE, pygame.K_c):
+                should_close = True
+
+        if should_close:
+            game.toggle_character_sheet_overlay()
+            if not game.show_character_sheet and getattr(game, "active_screen", None) is self:
+                game.active_screen = None
+            return
+
+        # Cycle focus between hero and companions (Q / E)
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.FOCUS_PREV, event):
+                game.cycle_character_sheet_focus(-1)
+                return
+            if input_manager.event_matches_action(InputAction.FOCUS_NEXT, event):
+                game.cycle_character_sheet_focus(+1)
+                return
+        else:
+            if key == pygame.K_q:
+                game.cycle_character_sheet_focus(-1)
+            elif key == pygame.K_e:
+                game.cycle_character_sheet_focus(+1)
+
+    def draw(self, game: "Game") -> None:
+        """Render the full-screen character sheet view."""
+        draw_character_sheet_fullscreen(game)
+
+class ShopScreen(BaseScreen):
+    """Blocking screen wrapper for the merchant/shop overlay.
+
+    Rendering is handled by hud.draw_shop_overlay; this class owns the input:
+      - navigation (arrows / W/S / J/K)
+      - switching between buy/sell (TAB)
+      - buying/selling via number keys or Enter/Space
+      - closing (ESC, E, I, C)
+    """
+
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        if event.type != pygame.KEYDOWN:
+            return
+
+        # If the flag is off for some reason, ignore input.
+        if not getattr(game, "show_shop", False):
+            return
+
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+        mode = getattr(game, "shop_mode", "buy")  # "buy" or "sell"
+
+        # --- Close shop ---
+        should_close = False
+        if input_manager is not None:
+            if (
+                    input_manager.event_matches_action(InputAction.CANCEL, event)
+                    or input_manager.event_matches_action(InputAction.INTERACT, event)
+                    or input_manager.event_matches_action(InputAction.TOGGLE_INVENTORY, event)
+                    or input_manager.event_matches_action(InputAction.TOGGLE_CHARACTER_SHEET, event)
+            ):
+                should_close = True
+        else:
+            if key in (
+                    pygame.K_ESCAPE,
+                    pygame.K_e,
+                    pygame.K_i,
+                    pygame.K_c,
+            ):
+                should_close = True
+
+        if should_close:
+            game.show_shop = False
+            # If this screen owns focus, release it.
+            if getattr(game, "active_screen", None) is getattr(game, "shop_screen", None):
+                game.active_screen = None
+            return
+
+        # --- Screen switching with TAB (only if not holding modifier) ---
+        # Check modifiers - if no modifier, switch screens; if shift, switch buy/sell
+        mods = pygame.key.get_mods()
+        if key == pygame.K_TAB:
+            if mods & pygame.KMOD_SHIFT:
+                # Shift+TAB: Toggle between buy / sell
+                game.shop_mode = "sell" if mode == "buy" else "buy"
+                game.shop_cursor = 0
+            else:
+                # TAB: Switch to next screen
+                game.cycle_to_next_screen(1)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
+            return
+
+        # --- Build active list (copied from ExplorationController._handle_shop_key) ---
+        stock_buy = list(getattr(game, "shop_stock", []))
+        inv = getattr(game, "inventory", None)
+
+        if mode == "buy":
+            active_list = stock_buy
+        else:
+            if inv is None:
+                active_list = []
+            else:
+                active_list = inv.get_sellable_item_ids()
+
+        # Nothing to show: keep overlay, just show message on Enter/Space.
+        if not active_list:
+            if input_manager is not None:
+                if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                    if mode == "buy":
+                        game.last_message = "The merchant has nothing left to sell."
+                    else:
+                        game.last_message = "You have nothing you're willing to sell."
+            else:
+                if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                    if mode == "buy":
+                        game.last_message = "The merchant has nothing left to sell."
+                    else:
+                        game.last_message = "You have nothing you're willing to sell."
+            return
+
+        # --- Ensure cursor is valid ---
+        cursor = int(getattr(game, "shop_cursor", 0))
+        max_index = len(active_list) - 1
+
+        if max_index < 0:
+            game.shop_cursor = 0
+        else:
+            cursor = max(0, min(cursor, max_index))
+            game.shop_cursor = cursor
+
+        # --- Navigation (UP/W/K and DOWN/S/J) ---
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.SCROLL_UP, event):
+                if max_index >= 0:
+                    cursor = (cursor - 1) % (max_index + 1)
+                    game.shop_cursor = cursor
+                return
+            if input_manager.event_matches_action(InputAction.SCROLL_DOWN, event):
+                if max_index >= 0:
+                    cursor = (cursor + 1) % (max_index + 1)
+                    game.shop_cursor = cursor
+                return
+        else:
+            if key in (pygame.K_UP, pygame.K_w, pygame.K_k):
+                if max_index >= 0:
+                    cursor = (cursor - 1) % (max_index + 1)
+                    game.shop_cursor = cursor
+                return
+
+            if key in (pygame.K_DOWN, pygame.K_s, pygame.K_j):
+                if max_index >= 0:
+                    cursor = (cursor + 1) % (max_index + 1)
+                    game.shop_cursor = cursor
+                return
+
+        # --- Quick buy/sell with number keys 1–9 ---
+        index_from_number: Optional[int] = None
+        if key in (pygame.K_1, pygame.K_KP1):
+            index_from_number = 0
+        elif key in (pygame.K_2, pygame.K_KP2):
+            index_from_number = 1
+        elif key in (pygame.K_3, pygame.K_KP3):
+            index_from_number = 2
+        elif key in (pygame.K_4, pygame.K_KP4):
+            index_from_number = 3
+        elif key in (pygame.K_5, pygame.K_KP5):
+            index_from_number = 4
+        elif key in (pygame.K_6, pygame.K_KP6):
+            index_from_number = 5
+        elif key in (pygame.K_7, pygame.K_KP7):
+            index_from_number = 6
+        elif key in (pygame.K_8, pygame.K_KP8):
+            index_from_number = 7
+        elif key in (pygame.K_9, pygame.K_KP9):
+            index_from_number = 8
+
+        if index_from_number is not None:
+            if 0 <= index_from_number < len(active_list):
+                exploration = getattr(game, "exploration", None)
+                if exploration is not None:
+                    if mode == "buy":
+                        exploration._attempt_shop_purchase(index_from_number)
+                    else:
+                        exploration._attempt_shop_sell(index_from_number)
+            return
+
+        # --- Enter/Space to buy/sell currently highlighted item ---
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                if 0 <= cursor < len(active_list):
+                    exploration = getattr(game, "exploration", None)
+                    if exploration is not None:
+                        if mode == "buy":
+                            exploration._attempt_shop_purchase(cursor)
+                        else:
+                            exploration._attempt_shop_sell(cursor)
+                return
+        else:
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                if 0 <= cursor < len(active_list):
+                    exploration = getattr(game, "exploration", None)
+                    if exploration is not None:
+                        if mode == "buy":
+                            exploration._attempt_shop_purchase(cursor)
+                        else:
+                            exploration._attempt_shop_sell(cursor)
+                return
+
+    def draw(self, game: "Game") -> None:
+        """Render the full-screen shop view."""
+        draw_shop_fullscreen(game)
+
+
+class SkillScreen(BaseScreen):
+    """
+    Screen wrapper for the skill allocation overlay.
+    
+    Delegates drawing to hud.draw_skill_screen_fullscreen, and owns the input:
+      - closing (T / ESC)
+      - cycling focused character (Q / E)
+      - skill tree navigation and upgrades
+    """
+
+    def handle_event(self, game: "Game", event: pygame.event.Event) -> None:
+        if event.type != pygame.KEYDOWN:
+            # Handle mouse events for skill tree interaction and loadout management
+            skill_screen_core = getattr(game, "skill_screen", None)
+            if skill_screen_core is not None:
+                # Only access pos for mouse events
+                if hasattr(event, "pos"):
+                    mx, my = event.pos
+                else:
+                    return
+                
+                # Mouse click support
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Left click
+                        # Only allow dragging if hovering over a valid element
+                        unlocked_skills = skill_screen_core.get_unlocked_skills()
+                        
+                        # Check if clicking on a loadout slot
+                        slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
+                        if slot_index is not None:
+                            is_hero, comp, _ = skill_screen_core.get_focused_entity()
+                            entity_stats = game.hero_stats if is_hero else comp
+                            
+                            if entity_stats:
+                                panel_x = 40
+                                panel_w = 320
+                                panel_y = 160
+                                slot_start_y = panel_y + 60
+                                slot_height = 50
+                                slot_spacing = 8
+                                y = slot_start_y + slot_index * (slot_height + slot_spacing)
+                                
+                                # Check if clicking remove button (X)
+                                remove_rect = pygame.Rect(panel_x + panel_w - 35, y + 5, 25, 25)
+                                if remove_rect.collidepoint(mx, my):
+                                    # Remove skill from slot
+                                    loadout_slots = entity_stats.get_current_loadout_slots()
+                                    if slot_index < len(loadout_slots) and loadout_slots[slot_index]:
+                                        entity_stats.set_loadout_slot(entity_stats.current_loadout, slot_index, None)
+                                        # Sync to skill_slots
+                                        entity_stats.skill_slots = entity_stats.get_current_loadout_slots()
+                                        game.add_message("Skill removed from loadout")
+                                else:
+                                    # Start dragging from slot
+                                    loadout_slots = entity_stats.get_current_loadout_slots()
+                                    if slot_index < len(loadout_slots) and loadout_slots[slot_index]:
+                                        skill_screen_core.dragged_skill_id = loadout_slots[slot_index]
+                                        skill_screen_core.dragged_slot_index = slot_index
+                            return
+                        
+                        # Check if clicking on available skill (only if hovering)
+                        skill_id = skill_screen_core.get_available_skill_at_pos(mx, my, unlocked_skills)
+                        if skill_id:
+                            # Only start drag if actually hovering over the skill
+                            skill_screen_core.dragged_skill_id = skill_id
+                            skill_screen_core.dragged_slot_index = None
+                            return
+                        
+                        # Check if clicking on skill tree node
+                        clicked_skill_id = skill_screen_core.get_node_at_screen_pos(
+                            mx, my, game.screen.get_width(), game.screen.get_height()
+                        )
+                        if clicked_skill_id:
+                            skill_screen_core.selected_skill_id = clicked_skill_id
+                    
+                    elif event.button == 4:  # Mouse wheel up
+                        skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
+                    elif event.button == 5:  # Mouse wheel down
+                        skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+                
+                # Mouse button release (drop skill)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1 and skill_screen_core.dragged_skill_id:
+                        is_hero, comp, _ = skill_screen_core.get_focused_entity()
+                        entity_stats = game.hero_stats if is_hero else comp
+                        
+                        if entity_stats:
+                            # Check if dropping on a valid slot
+                            slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
+                            if slot_index is not None:
+                                # If dragging from a slot, clear the old slot first
+                                if skill_screen_core.dragged_slot_index is not None:
+                                    if skill_screen_core.dragged_slot_index != slot_index:
+                                        entity_stats.set_loadout_slot(
+                                            entity_stats.current_loadout,
+                                            skill_screen_core.dragged_slot_index,
+                                            None
+                                        )
+                                
+                                # Set skill in new slot
+                                entity_stats.set_loadout_slot(
+                                    entity_stats.current_loadout,
+                                    slot_index,
+                                    skill_screen_core.dragged_skill_id
+                                )
+                                # Sync to skill_slots
+                                entity_stats.skill_slots = entity_stats.get_current_loadout_slots()
+                                game.add_message("Skill assigned to loadout")
+                            
+                            skill_screen_core.dragged_skill_id = None
+                            skill_screen_core.dragged_slot_index = None
+                
+                # Mouse motion (hover tracking)
+                elif event.type == pygame.MOUSEMOTION:
+                    # Update hover state using actual mouse position
+                    skill_screen_core.hovered_slot_index = skill_screen_core.get_loadout_slot_at_pos(mx, my)
+            return
+
+        input_manager = getattr(game, "input_manager", None)
+        key = event.key
+        skill_screen_core = getattr(game, "skill_screen", None)
+
+        # Screen switching with TAB (before close check)
+        if key == pygame.K_TAB:
+            # Check if shift is held for reverse direction
+            mods = pygame.key.get_mods()
+            direction = -1 if (mods & pygame.KMOD_SHIFT) else 1
+            game.cycle_to_next_screen(direction)
+            return
+        
+        # Quick jump to screens
+        if key == pygame.K_i:
+            game.switch_to_screen("inventory")
+            return
+        if key == pygame.K_c:
+            game.switch_to_screen("character")
+            return
+        if key == pygame.K_s and getattr(game, "show_shop", False):
+            game.switch_to_screen("shop")
+            return
+
+        # Close skill screen (T or ESC)
+        should_close = False
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CANCEL, event):
+                should_close = True
+        else:
+            if key in (pygame.K_ESCAPE, pygame.K_t):
+                should_close = True
+
+        if should_close:
+            game.toggle_skill_screen()
+            if not getattr(game, "show_skill_screen", False) and getattr(game, "active_screen", None) is self:
+                game.active_screen = None
+            return
+
+        if skill_screen_core is None:
+            return
+
+        # Switch character with Q/E
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.FOCUS_PREV, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index - 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+            if input_manager.event_matches_action(InputAction.FOCUS_NEXT, event):
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index + 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+        else:
+            if key == pygame.K_q:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index - 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+            elif key == pygame.K_e:
+                party_list = getattr(game, "party", None) or []
+                total_slots = 1 + len(party_list)
+                if total_slots > 1:
+                    skill_screen_core.focus_index = (skill_screen_core.focus_index + 1) % total_slots
+                    skill_screen_core.selected_skill_id = None
+                    skill_screen_core._cached_unlocked_skills = None  # Invalidate cache
+                return
+
+        # Panning with arrow keys
+        pan_speed = 20.0
+        if key == pygame.K_LEFT or key == pygame.K_a:
+            skill_screen_core.camera_x -= pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_RIGHT or key == pygame.K_d:
+            skill_screen_core.camera_x += pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_UP or key == pygame.K_w:
+            skill_screen_core.camera_y -= pan_speed / skill_screen_core.zoom
+        elif key == pygame.K_DOWN or key == pygame.K_s:
+            skill_screen_core.camera_y += pan_speed / skill_screen_core.zoom
+
+        # Zoom with +/- or mouse wheel
+        if key == pygame.K_PLUS or key == pygame.K_EQUALS:
+            skill_screen_core.zoom = min(2.0, skill_screen_core.zoom * 1.1)
+        elif key == pygame.K_MINUS:
+            skill_screen_core.zoom = max(0.5, skill_screen_core.zoom / 1.1)
+
+        # Loadout management shortcuts
+        is_hero, comp, _ = skill_screen_core.get_focused_entity()
+        entity_stats = game.hero_stats if is_hero else comp
+        
+        if entity_stats:
+            # Create new loadout (N key)
+            if key == pygame.K_n:
+                loadout_names = list(getattr(entity_stats, "skill_loadouts", {}).keys())
+                new_name = f"loadout_{len(loadout_names)}"
+                if entity_stats.create_loadout(new_name, copy_from=entity_stats.current_loadout):
+                    entity_stats.switch_loadout(new_name)
+                    game.add_message(f"Created new loadout: {new_name}")
+            
+            # Switch loadout with number keys (1-9)
+            if pygame.K_1 <= key <= pygame.K_9:
+                loadout_index = key - pygame.K_1
+                loadout_names = sorted(list(getattr(entity_stats, "skill_loadouts", {}).keys()))
+                if loadout_index < len(loadout_names):
+                    entity_stats.switch_loadout(loadout_names[loadout_index])
+                    game.add_message(f"Switched to loadout: {loadout_names[loadout_index]}")
+            
+            # Delete current loadout (Delete key, but not default)
+            if key == pygame.K_DELETE:
+                current = getattr(entity_stats, "current_loadout", "default")
+                if current != "default":
+                    if entity_stats.delete_loadout(current):
+                        game.add_message(f"Deleted loadout: {current}")
+        
+        # Upgrade selected skill with Enter/Space
+        if input_manager is not None:
+            if input_manager.event_matches_action(InputAction.CONFIRM, event):
+                if skill_screen_core.selected_skill_id:
+                    if skill_screen_core.can_upgrade_skill(skill_screen_core.selected_skill_id):
+                        if skill_screen_core.upgrade_skill(skill_screen_core.selected_skill_id):
+                            # Refresh cache and update rank
+                            skill_screen_core._cached_unlocked_skills = None
+                            if skill_screen_core.tree_layout and skill_screen_core.selected_skill_id in skill_screen_core.tree_layout.nodes:
+                                skill_screen_core.tree_layout.nodes[skill_screen_core.selected_skill_id].rank = skill_screen_core.get_skill_rank(skill_screen_core.selected_skill_id)
+                            game.add_message(f"Upgraded skill!")
+        else:
+            if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                if skill_screen_core.selected_skill_id:
+                    if skill_screen_core.can_upgrade_skill(skill_screen_core.selected_skill_id):
+                        if skill_screen_core.upgrade_skill(skill_screen_core.selected_skill_id):
+                            # Refresh cache and update rank
+                            skill_screen_core._cached_unlocked_skills = None
+                            if skill_screen_core.tree_layout and skill_screen_core.selected_skill_id in skill_screen_core.tree_layout.nodes:
+                                skill_screen_core.tree_layout.nodes[skill_screen_core.selected_skill_id].rank = skill_screen_core.get_skill_rank(skill_screen_core.selected_skill_id)
+                            game.add_message(f"Upgraded skill!")
+
+    def draw(self, game: "Game") -> None:
+        """Render the full-screen skill allocation view."""
+        draw_skill_screen_fullscreen(game)
